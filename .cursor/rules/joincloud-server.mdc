@@ -1,0 +1,18 @@
+---
+description: JoinCloud WebDAV server standards (Node.js CJS, security-first)
+globs: joincloud-server/**/*.js
+alwaysApply: false
+---
+
+# JoinCloud WebDAV Server Standards
+
+- Use Node.js CommonJS only (`require`, `module.exports`).
+- Use `webdav-server@2.6.2` APIs only; no deprecated calls.
+- Keep modules separated: server bootstrap, auth, filesystem, sharing, security, utils.
+- Token-based auth only; never use Basic Auth or bypass auth for convenience.
+- Never expose raw filesystem paths in API responses or logs.
+- Enforce path isolation per user; no shared global FS access.
+- Harden security: rate limiting, secure headers, directory traversal prevention.
+- Sharing must be time-bound, with explicit expiry enforcement.
+- Fail closed: on uncertainty or errors, deny access.
+- Never suggest exposing WebDAV directly to the internet.

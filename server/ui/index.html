@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>JoinCloud</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img class="brand-logo" src="/logo.png" alt="JoinCloud" />
+        <span>JoinCloud</span>
+      </div>
+      <div class="status" id="node-status">Status: --</div>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar">
+        <button class="nav-button active" data-section="home">Home</button>
+        <button class="nav-button" data-section="files">Files</button>
+        <button class="nav-button" data-section="shares">Shares</button>
+        <button class="nav-button" data-section="logs">Logs</button>
+      </aside>
+
+      <div class="content">
+      <section class="card section" data-section="home">
+        <h2>Home</h2>
+        <div class="row">
+          <div>
+            <div class="label">Storage</div>
+            <div class="value" id="storage-label">Local storage</div>
+          </div>
+          <div>
+            <div class="label">WebDAV Mount</div>
+            <div class="value mono" id="owner-mount">--</div>
+          </div>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <button class="button secondary" id="open-storage">Open Storage Folder</button>
+        </div>
+        <div class="row space-between" style="margin-top:16px">
+          <div>
+            <div class="label">Public Access</div>
+            <div class="value" id="public-status">Unavailable</div>
+            <div class="value mono" id="public-url">--</div>
+            <div class="value" id="public-reason"></div>
+          </div>
+          <div class="row">
+            <button class="button" id="toggle-public">Enable Public Sharing</button>
+            <button class="button secondary" id="retry-public">Retry</button>
+            <button class="button secondary" id="switch-lan">Switch to LAN-only</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="card section" data-section="files">
+        <div class="row space-between">
+          <h2>File Browser</h2>
+          <div class="row">
+            <label class="button secondary" for="upload-input">Upload</label>
+            <input id="upload-input" type="file" multiple hidden />
+            <button class="button secondary" id="back-button">Back</button>
+            <button class="button secondary" id="refresh-files">Refresh</button>
+          </div>
+        </div>
+        <div class="drop-zone" id="drop-zone">Drag & drop files here</div>
+        <div class="breadcrumbs" id="breadcrumbs"></div>
+        <div class="file-list" id="file-list"></div>
+      </section>
+
+      <section class="card section" data-section="shares">
+        <div class="row space-between">
+          <h2>Active Shares</h2>
+          <button class="button secondary" id="refresh-shares">Refresh</button>
+        </div>
+        <div class="share-list" id="share-list"></div>
+      </section>
+      
+      <section class="card section" data-section="logs">
+        <div class="row space-between">
+          <h2>Logs</h2>
+          <button class="button secondary" id="refresh-logs">Refresh</button>
+        </div>
+        <div class="log-list" id="log-list"></div>
+      </section>
+      </div>
+    </main>
+
+    <div class="modal" id="share-modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Create Share</h3>
+          <button class="button ghost" id="close-modal">✕</button>
+        </div>
+        <div class="modal-body">
+          <label class="label">Path</label>
+          <input class="input mono" id="share-path" readonly />
+
+          <label class="label">Share Scope</label>
+          <div class="radio-group">
+            <label><input type="radio" name="share-scope" value="local" checked /> Local</label>
+            <label><input type="radio" name="share-scope" value="public" /> Public</label>
+          </div>
+
+          <label class="label">Permission</label>
+          <select class="input" id="share-permission">
+            <option value="read-only">Read-only</option>
+            <option value="read-write">Read-write</option>
+          </select>
+
+          <label class="label">Expiry</label>
+          <select class="input" id="share-ttl">
+            <option value="3600000">1 hour</option>
+            <option value="21600000">6 hours</option>
+            <option value="86400000" selected>24 hours</option>
+            <option value="604800000">7 days</option>
+            <option value="custom">Custom (minutes)</option>
+          </select>
+          <input class="input" id="share-ttl-custom" type="number" min="1" placeholder="Enter minutes" />
+        </div>
+        <div class="modal-actions">
+          <button class="button secondary" id="cancel-share">Cancel</button>
+          <button class="button" id="create-share">Create Share</button>
+        </div>
+        <div class="modal-result" id="share-result"></div>
+        <button class="button secondary" id="copy-share" style="display:none">Copy Link</button>
+      </div>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

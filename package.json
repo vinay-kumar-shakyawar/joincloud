@@ -1,0 +1,17 @@
+{
+  "name": "joincloud",
+  "version": "0.1.0",
+  "private": true,
+  "main": "electron/main.js",
+  "scripts": {
+    "electron:dev": "ELECTRON_RUN_AS_NODE= electron .",
+    "test:electron": "ELECTRON_RUN_AS_NODE= node electron/tests/smoke.test.js",
+    "build:mac": "electron-builder --mac"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "electron": "^31.2.0",
+    "electron-builder": "^24.13.3",
+    "wait-on": "^7.2.0"
+  }
+}

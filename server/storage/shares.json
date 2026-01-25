@@ -1,0 +1,58 @@
+[
+  {
+    "shareId": "b0c8a0acbb7e3194bf2d165fc0a09818fa46a3c876fb2d71",
+    "targetPath": "/Users/vinayshakyawar/Documents/Agentcode/joincloud-mvp/server/storage/owner/1708001921067.jpeg",
+    "permission": "read-only",
+    "expiryTime": "2026-01-25T20:34:36.216Z",
+    "createdAt": "2026-01-24T20:34:36.216Z",
+    "revoked": true
+  },
+  {
+    "shareId": "f1b92b29c68c5b063afcc4b95140a15aff95dcac1efef1c5",
+    "targetPath": "/Users/vinayshakyawar/Documents/Agentcode/joincloud-mvp/server/storage/owner/._Male Fashion Aesthetic Casual.jpeg",
+    "permission": "read-only",
+    "expiryTime": "2026-01-25T20:37:25.948Z",
+    "createdAt": "2026-01-24T20:37:25.948Z",
+    "revoked": true
+  },
+  {
+    "shareId": "5b198cb9f7e799f69151b50c5c217321911724568488be1d",
+    "targetPath": "/Users/vinayshakyawar/Documents/Agentcode/joincloud-mvp/server/storage/owner/Male Fashion Aesthetic Casual.jpeg",
+    "permission": "read-only",
+    "expiryTime": "2026-01-25T20:40:57.618Z",
+    "createdAt": "2026-01-24T20:40:57.618Z",
+    "revoked": true
+  },
+  {
+    "shareId": "10cfdb45d6ec117533532f3ac8f090e28c75bbeb0a60ba4f",
+    "targetPath": "/Users/vinayshakyawar/Documents/Agentcode/joincloud-mvp/server/storage/owner/._Male Fashion Aesthetic Casual.jpeg",
+    "permission": "read-only",
+    "expiryTime": "2026-01-25T20:42:44.801Z",
+    "createdAt": "2026-01-24T20:42:44.801Z",
+    "revoked": true
+  },
+  {
+    "shareId": "a811a8e39648486294a52930a833f10afc96e812e0281e82",
+    "targetPath": "/Users/vinayshakyawar/Documents/Agentcode/joincloud-mvp/server/storage/owner/ARMD035.pdf",
+    "permission": "read-only",
+    "expiryTime": "2026-01-25T21:10:21.535Z",
+    "createdAt": "2026-01-24T21:10:21.535Z",
+    "revoked": true
+  },
+  {
+    "shareId": "b2be90303193138716cd3587bacd9ee720b257928087e817",
+    "targetPath": "/Users/vinayshakyawar/Documents/Agentcode/joincloud-mvp/server/storage/owner/ARMD035.pdf",
+    "permission": "read-only",
+    "expiryTime": "2026-01-25T22:31:52.334Z",
+    "createdAt": "2026-01-24T22:31:52.334Z",
+    "revoked": true
+  },
+  {
+    "shareId": "70e13749ecb3b8720c33a30d24323cbb81bc5cd29a4268d2",
+    "targetPath": "/Users/vinayshakyawar/Documents/Agentcode/joincloud-mvp/server/storage/owner/Male Fashion Aesthetic Casual.jpeg",
+    "permission": "read-only",
+    "expiryTime": "2026-01-25T22:47:08.140Z",
+    "createdAt": "2026-01-24T22:47:08.140Z",
+    "revoked": false
+  }
+]

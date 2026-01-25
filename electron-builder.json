@@ -1,0 +1,21 @@
+{
+  "appId": "com.joincloud.app",
+  "productName": "JoinCloud",
+  "mac": {
+    "target": [
+      "dmg"
+    ],
+    "icon": "assets/icon/icon.icns"
+  },
+  "asar": false,
+  "extraResources": [
+    {
+      "from": "server",
+      "to": "server"
+    },
+    {
+      "from": "server/bin",
+      "to": "bin"
+    }
+  ]
+}
