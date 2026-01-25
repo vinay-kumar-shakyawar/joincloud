@@ -1,8 +1,10 @@
 .DS_Store
 node_modules
+server/node_modules/
 dist
 out
 .electron-builder
 logs
 *.log
+*.db
 npm-debug.log*

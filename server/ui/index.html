@@ -21,6 +21,8 @@
         <button class="nav-button" data-section="files">Files</button>
         <button class="nav-button" data-section="shares">Shares</button>
         <button class="nav-button" data-section="logs">Logs</button>
+        <button class="nav-button" data-section="settings">Settings</button>
+        <button class="nav-button" data-section="network">Network</button>
       </aside>
 
       <div class="content">
@@ -83,6 +85,53 @@
           <button class="button secondary" id="refresh-logs">Refresh</button>
         </div>
         <div class="log-list" id="log-list"></div>
+      </section>
+
+      <section class="card section" data-section="settings">
+        <h2>Settings</h2>
+        <div class="row space-between">
+          <div>
+            <div class="label">Operational Telemetry</div>
+            <div class="value">Anonymous, aggregated usage metrics</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="telemetry-toggle" />
+            <span>Enabled</span>
+          </label>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <a class="link" href="/privacy" target="_blank" rel="noreferrer">View Privacy Policy</a>
+        </div>
+        <div class="row" style="margin-top:24px">
+          <div style="flex:1">
+            <div class="label">Display Name</div>
+            <input class="input" id="network-name" maxlength="32" />
+          </div>
+          <button class="button secondary" id="save-network-name">Save</button>
+        </div>
+        <div class="row space-between" style="margin-top:16px">
+          <div>
+            <div class="label">Network Visibility</div>
+            <div class="value">Allow other JoinCloud users on this network to see you</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="network-visibility" />
+            <span>Enabled</span>
+          </label>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <div class="value">
+            What is shared on the network? Only your chosen display name and online status are visible to other JoinCloud users on the same network. No files, device details, or identifiers are ever shared automatically.
+          </div>
+        </div>
+      </section>
+
+      <section class="card section" data-section="network">
+        <div class="row space-between">
+          <h2>Network</h2>
+          <button class="button secondary" id="refresh-network">Refresh</button>
+        </div>
+        <div class="network-list" id="network-list"></div>
       </section>
       </div>
     </main>

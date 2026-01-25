@@ -1,9 +1,10 @@
 const { v2 } = require("webdav-server");
 const path = require("path");
+const fs = require("fs/promises");
 const mime = require("mime-types");
 const { resolveRights } = require("../sharing/permissionResolver");
 
-function createShareServer({ share, realm }) {
+function createShareServer({ share, realm, telemetry }) {
   const userManager = new v2.SimpleUserManager();
   const privilegeManager = new v2.SimplePathPrivilegeManager();
 
@@ -20,7 +21,7 @@ function createShareServer({ share, realm }) {
     rootFileSystem: new v2.PhysicalFileSystem(share.targetPath),
   });
 
-  webdavServer.beforeRequest((ctx, callback) => {
+  webdavServer.beforeRequest(async (ctx, callback) => {
     const method = ctx.request.method || "";
     if (method === "GET" || method === "HEAD") {
       const resourcePath = ctx.requested.path.toString();
@@ -33,6 +34,20 @@ function createShareServer({ share, realm }) {
           "Content-Disposition",
           `inline; filename="${filename}"`
         );
+      }
+      if (telemetry) {
+        let bytes = 0;
+        try {
+          const fullPath = path.join(share.targetPath, resourcePath);
+          const stats = await fs.stat(fullPath);
+          bytes = stats.size || 0;
+        } catch (error) {
+          bytes = 0;
+        }
+        telemetry.trackEvent("file_downloaded", {
+          share_id: share.shareId,
+          bytes,
+        });
       }
     }
     callback();

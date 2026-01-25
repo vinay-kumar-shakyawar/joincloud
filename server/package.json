@@ -9,8 +9,10 @@
     "start": "node index.js"
   },
   "dependencies": {
+    "bonjour": "^3.5.0",
     "express": "^4.19.2",
     "multer": "^1.4.5-lts.1",
+    "sqlite3": "^5.1.7",
     "webdav-server": "2.6.2"
   }
 }

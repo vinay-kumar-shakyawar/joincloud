@@ -5,12 +5,13 @@ const { normalizePermission } = require("./permissionResolver");
 const { validateShareTarget } = require("../security/pathGuard");
 
 class ShareService {
-  constructor({ ownerRoot, defaultPermission, defaultTtlMs, storagePath, logger }) {
+  constructor({ ownerRoot, defaultPermission, defaultTtlMs, storagePath, logger, telemetry }) {
     this.ownerRoot = ownerRoot;
     this.defaultPermission = defaultPermission;
     this.defaultTtlMs = defaultTtlMs;
     this.storagePath = storagePath;
     this.logger = logger;
+    this.telemetry = telemetry;
     this.shares = new Map();
   }
 
@@ -83,6 +84,13 @@ class ShareService {
         permission: share.permission,
       });
     }
+    if (this.telemetry) {
+      this.telemetry.trackEvent("share_created", {
+        share_id: shareId,
+        scope: share.scope,
+        permission: share.permission,
+      });
+    }
     return share;
   }
 
@@ -96,6 +104,9 @@ class ShareService {
     await this.saveToDisk();
     if (this.logger) {
       this.logger.info("share revoked", { shareId });
+    }
+    if (this.telemetry) {
+      this.telemetry.trackEvent("share_revoked", { share_id: shareId });
     }
     return true;
   }

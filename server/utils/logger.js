@@ -6,6 +6,8 @@ function createLogger(logDir) {
     fs.mkdirSync(logDir, { recursive: true });
   }
   const logPath = path.join(logDir, "server.log");
+  const buffer = [];
+  const maxEntries = 200;
 
   function write(level, message, meta) {
     const payload = {
@@ -14,6 +16,10 @@ function createLogger(logDir) {
       message,
       meta: meta || null,
     };
+    buffer.push(payload);
+    if (buffer.length > maxEntries) {
+      buffer.shift();
+    }
     const line = `${JSON.stringify(payload)}\n`;
     fs.appendFileSync(logPath, line);
   }
@@ -21,6 +27,7 @@ function createLogger(logDir) {
   return {
     info: (message, meta) => write("info", message, meta),
     error: (message, meta) => write("error", message, meta),
+    getBuffer: () => buffer.slice(),
   };
 }
 

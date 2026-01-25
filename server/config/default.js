@@ -29,6 +29,12 @@ module.exports = {
     logDir:
       process.env.JOINCLOUD_LOG_DIR ||
       path.join(APP_SUPPORT_DIR, "logs"),
+    userConfigPath:
+      process.env.JOINCLOUD_USER_CONFIG ||
+      path.join(APP_SUPPORT_DIR, "config", "user.json"),
+    telemetryPath:
+      process.env.JOINCLOUD_TELEMETRY_DB ||
+      path.join(APP_SUPPORT_DIR, "telemetry", "telemetry.db"),
   },
   share: {
     defaultPermission: "read-only",
@@ -38,4 +44,7 @@ module.exports = {
     sweepIntervalMs: 60 * 1000,
   },
   tunnel: {},
+  telemetry: {
+    adminHost: process.env.JOINCLOUD_ADMIN_HOST || null,
+  },
 };

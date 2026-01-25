@@ -22,6 +22,12 @@ const els = {
   refreshShares: document.getElementById("refresh-shares"),
   refreshLogs: document.getElementById("refresh-logs"),
   logList: document.getElementById("log-list"),
+  refreshNetwork: document.getElementById("refresh-network"),
+  networkList: document.getElementById("network-list"),
+  telemetryToggle: document.getElementById("telemetry-toggle"),
+  networkName: document.getElementById("network-name"),
+  saveNetworkName: document.getElementById("save-network-name"),
+  networkVisibility: document.getElementById("network-visibility"),
   navButtons: document.querySelectorAll(".nav-button"),
   sections: document.querySelectorAll(".section"),
   backButton: document.getElementById("back-button"),
@@ -341,6 +347,7 @@ async function togglePublicAccess() {
 
 els.refreshFiles.onclick = () => loadFiles(state.path);
 els.refreshShares.onclick = () => loadShares();
+els.refreshNetwork.onclick = () => loadNetwork();
 els.closeModal.onclick = closeShareModal;
 els.cancelShare.onclick = closeShareModal;
 els.createShare.onclick = createShare;
@@ -424,14 +431,87 @@ function renderLogs(entries) {
 async function loadLogs() {
   els.refreshLogs.textContent = "Loading...";
   els.refreshLogs.disabled = true;
-  const res = await fetch("/api/logs");
+  const res = await fetch("/api/v1/logs");
   const data = await res.json();
   renderLogs(data);
   els.refreshLogs.textContent = "Refresh";
   els.refreshLogs.disabled = false;
 }
 
+function renderNetwork(entries) {
+  els.networkList.innerHTML = "";
+  if (!entries.length) {
+    els.networkList.textContent =
+      "No other JoinCloud users detected on this network.";
+    return;
+  }
+  entries.forEach((entry) => {
+    const row = document.createElement("div");
+    row.className = "item";
+    const info = document.createElement("div");
+    info.innerHTML = `<div class="item-title">${entry.display_name}</div>
+      <div class="item-sub">${entry.status}</div>`;
+    row.appendChild(info);
+    els.networkList.appendChild(row);
+  });
+}
+
+async function loadNetwork() {
+  els.refreshNetwork.textContent = "Loading...";
+  els.refreshNetwork.disabled = true;
+  const res = await fetch("/api/v1/network");
+  const data = await res.json();
+  renderNetwork(data);
+  els.refreshNetwork.textContent = "Refresh";
+  els.refreshNetwork.disabled = false;
+}
+
+async function loadTelemetrySettings() {
+  const res = await fetch("/api/v1/telemetry/settings");
+  const data = await res.json();
+  els.telemetryToggle.checked = !!data.enabled;
+}
+
+async function updateTelemetrySettings(enabled) {
+  await fetch("/api/v1/telemetry/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+async function loadNetworkSettings() {
+  const res = await fetch("/api/v1/network/settings");
+  const data = await res.json();
+  els.networkName.value = data.display_name || "";
+  els.networkVisibility.checked = !!data.network_visibility;
+}
+
+async function saveNetworkName() {
+  const value = els.networkName.value.trim();
+  const res = await fetch("/api/v1/network/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ display_name: value }),
+  });
+  const data = await res.json();
+  els.networkName.value = data.display_name || "";
+  await loadNetwork();
+}
+
+async function updateNetworkVisibility(enabled) {
+  await fetch("/api/v1/network/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ network_visibility: enabled }),
+  });
+  await loadNetwork();
+}
+
 function setActiveSection(sectionId) {
+  if (window.location.hash !== `#${sectionId}`) {
+    window.location.hash = sectionId;
+  }
   els.sections.forEach((section) => {
     section.classList.toggle("active", section.dataset.section === sectionId);
   });
@@ -446,9 +526,32 @@ els.navButtons.forEach((button) => {
   });
 });
 
+window.addEventListener("hashchange", () => {
+  const target = window.location.hash.replace("#", "");
+  if (target) {
+    setActiveSection(target);
+  }
+});
+
 fetchStatus();
 loadFiles("/");
 loadShares();
 refreshPublicAccess();
 loadLogs();
-setActiveSection("home");
+loadNetwork();
+loadTelemetrySettings();
+loadNetworkSettings();
+const initial = window.location.hash.replace("#", "") || "home";
+setActiveSection(initial);
+
+els.telemetryToggle.addEventListener("change", async (event) => {
+  await updateTelemetrySettings(event.target.checked);
+});
+
+els.saveNetworkName.addEventListener("click", async () => {
+  await saveNetworkName();
+});
+
+els.networkVisibility.addEventListener("change", async (event) => {
+  await updateNetworkVisibility(event.target.checked);
+});

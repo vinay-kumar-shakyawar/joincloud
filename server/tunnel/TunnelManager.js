@@ -9,7 +9,7 @@ class TunnelManager {
     this.logger = logger;
     this.process = null;
     this.publicUrl = null;
-    this.status = "idle";
+    this.status = "stopped";
     this.lastError = null;
     this.lastReason = null;
     this.startTimeout = null;
@@ -151,7 +151,7 @@ class TunnelManager {
       this.clearTimeoutWatch();
 
       if (!this.desiredActive) {
-        this.status = "idle";
+        this.status = "stopped";
         if (this.logger) this.logger.info("public access stopped");
         this.emitStatus();
         return;
@@ -186,7 +186,7 @@ class TunnelManager {
     this.publicUrl = null;
     this.clearTimeoutWatch();
     this.stopProcess();
-    this.status = "idle";
+    this.status = "stopped";
     if (this.logger) this.logger.info("public access stopped");
     this.emitStatus();
     return this.getStatus();

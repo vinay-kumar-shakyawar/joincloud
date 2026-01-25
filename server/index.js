@@ -4,6 +4,7 @@ const path = require("path");
 const os = require("os");
 const express = require("express");
 const multer = require("multer");
+const bonjour = require("bonjour")();
 
 const config = require("./config/default");
 const { createOwnerServer } = require("./webdav/ownerServer");
@@ -14,6 +15,9 @@ const { ExpiryManager } = require("./sharing/expiryManager");
 const { resolveOwnerPath } = require("./security/pathGuard");
 const { TunnelManager } = require("./tunnel/TunnelManager");
 const { createLogger } = require("./utils/logger");
+const { createTelemetryStore } = require("./telemetry/store");
+const { createTelemetrySync } = require("./telemetry/sync");
+const crypto = require("crypto");
 
 async function ensureOwnerStorage(rootPath) {
   await fs.mkdir(rootPath, { recursive: true });
@@ -28,9 +32,131 @@ async function ensureLogDir(logDir) {
   await fs.mkdir(logDir, { recursive: true });
 }
 
+async function ensureUserConfig(configPath) {
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  try {
+    const raw = await fs.readFile(configPath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.telemetry_enabled !== "boolean") {
+      parsed.telemetry_enabled = true;
+    }
+    if (!parsed.display_name) {
+      parsed.display_name = generateDisplayName();
+    }
+    if (typeof parsed.network_visibility !== "boolean") {
+      parsed.network_visibility = true;
+    }
+    return parsed;
+  } catch (error) {
+    const userId = `jc_${crypto.randomUUID()}`;
+    const payload = {
+      user_id: userId,
+      created_at: new Date().toISOString(),
+      telemetry_enabled: true,
+      telemetry_last_sync: null,
+      display_name: generateDisplayName(),
+      network_visibility: true,
+    };
+    await fs.writeFile(configPath, JSON.stringify(payload, null, 2));
+    return payload;
+  }
+}
+
+async function updateUserConfig(configPath, payload) {
+  await fs.writeFile(configPath, JSON.stringify(payload, null, 2));
+}
+
 function toPosixPath(input) {
   const value = input ? input.replace(/\\/g, "/") : "/";
   return value.startsWith("/") ? value : `/${value}`;
+}
+
+function getAppVersion() {
+  try {
+    const rootPath = path.resolve(__dirname, "..", "package.json");
+    const raw = require(rootPath);
+    return raw.version || "0.1.0";
+  } catch (error) {
+    return "0.1.0";
+  }
+}
+
+function generateDisplayName() {
+  const names = [
+    "Orion",
+    "Nebula",
+    "Andromeda",
+    "Aquila",
+    "Cosmos",
+    "Lyra",
+    "Phoenix",
+    "Nova",
+    "Pulsar",
+    "Vega",
+  ];
+  const pick = names[Math.floor(Math.random() * names.length)];
+  return `join_${pick}`;
+}
+
+
+
+function startPresenceService({ displayName, port }) {
+  const service = bonjour.publish({
+    name: displayName,
+    type: "joincloud",
+    protocol: "tcp",
+    port,
+    txt: {
+      display_name: displayName,
+      protocol: "v1",
+    },
+  });
+  return service;
+}
+
+function startPresenceBrowser(onUpdate) {
+  const peers = new Map();
+  const browser = bonjour.find({ type: "joincloud" });
+
+  function emit() {
+    onUpdate(Array.from(peers.values()));
+  }
+
+  browser.on("up", (service) => {
+    const displayName = service.txt?.display_name;
+    if (!displayName) return;
+    peers.set(service.fqdn, { display_name: displayName, status: "online" });
+    emit();
+  });
+
+  browser.on("down", (service) => {
+    peers.delete(service.fqdn);
+    emit();
+  });
+
+  return { browser, peers };
+}
+
+function isValidDisplayName(value) {
+  if (!value || typeof value !== "string") return false;
+  if (value.length > 32) return false;
+  return /^[A-Za-z0-9_]+$/.test(value);
+}
+
+function startUptimeTracker(telemetry) {
+  let lastTick = Date.now();
+  return setInterval(() => {
+    const now = Date.now();
+    const deltaMs = now - lastTick;
+    lastTick = now;
+    if (deltaMs > 5000) {
+      return;
+    }
+    const seconds = Math.floor(deltaMs / 1000);
+    if (seconds > 0) {
+      telemetry.addUptime(seconds);
+    }
+  }, 1000);
 }
 
 function getLanAddress() {
@@ -81,6 +207,20 @@ async function bootstrap() {
   await ensureLogDir(config.storage.logDir);
   const logger = createLogger(config.storage.logDir);
   logger.info("storage initialized");
+  const userConfig = await ensureUserConfig(config.storage.userConfigPath);
+  logger.info("user initialized", { user_id: userConfig.user_id });
+  const telemetry = createTelemetryStore(config.storage.telemetryPath);
+  telemetry.trackEvent("app_started", { user_id: userConfig.user_id });
+  const telemetrySync = createTelemetrySync({
+    telemetryStore: telemetry,
+    userConfig,
+    updateUserConfig: (payload) => updateUserConfig(config.storage.userConfigPath, payload),
+    adminHost: config.telemetry.adminHost,
+    appVersion: getAppVersion(),
+    logger,
+  });
+  telemetrySync.start();
+  const uptimeTimer = startUptimeTracker(telemetry);
 
   const ownerServer = createOwnerServer({
     ownerRoot: config.storage.ownerRoot,
@@ -95,6 +235,7 @@ async function bootstrap() {
     defaultTtlMs: config.share.defaultTtlMs,
     storagePath: config.storage.shareStorePath,
     logger,
+    telemetry,
   });
   await shareService.init();
 
@@ -115,12 +256,16 @@ async function bootstrap() {
     shareService,
     shareServerFactory: createShareServer,
     config,
+    telemetry,
   });
 
   const app = express();
   app.use(express.json());
   const upload = multer({ storage: multer.memoryStorage() });
   app.use("/", express.static(path.join(__dirname, "ui")));
+  app.get("/privacy", (_req, res) => {
+    res.sendFile(path.join(__dirname, "..", "docs", "privacy.md"));
+  });
 
   app.get("/api/status", (_req, res) => {
     const lanIp = getLanAddress();
@@ -193,13 +338,20 @@ async function bootstrap() {
       const targetPath = resolveOwnerPath(config.storage.ownerRoot, toPosixPath(target));
       await fs.mkdir(targetPath, { recursive: true });
       const stored = [];
+      let totalBytes = 0;
       for (const file of req.files || []) {
         const cleanName = file.originalname || "upload";
         const destination = path.join(targetPath, cleanName);
         await fs.writeFile(destination, file.buffer);
         stored.push(cleanName);
+        totalBytes += file.buffer.length;
       }
       logger.info("upload completed", { count: stored.length });
+      telemetry.trackEvent("file_uploaded", {
+        user_id: userConfig.user_id,
+        count: stored.length,
+        bytes: totalBytes,
+      });
       res.json({ success: true });
     } catch (error) {
       res.status(400).json({ error: error.message });
@@ -230,23 +382,124 @@ async function bootstrap() {
 
   app.get("/api/logs", async (_req, res) => {
     try {
-      const logPath = path.join(config.storage.logDir, "server.log");
-      const raw = await fs.readFile(logPath, "utf8");
-      const lines = raw.split("\n").filter(Boolean);
-      const entries = lines
-        .slice(-200)
-        .map((line) => {
-          try {
-            return JSON.parse(line);
-          } catch (error) {
-            return null;
-          }
-        })
-        .filter(Boolean);
-      res.json(entries);
+      res.json(logger.getBuffer());
     } catch (error) {
       res.json([]);
     }
+  });
+
+  app.get("/api/v1/logs", async (_req, res) => {
+    try {
+      res.json(logger.getBuffer());
+    } catch (error) {
+      res.json([]);
+    }
+  });
+
+  let presenceList = [];
+  let presenceService = null;
+  let presenceBrowser = null;
+
+  function updatePresenceList(list) {
+    presenceList = list.filter((peer) => peer.display_name !== userConfig.display_name);
+  }
+
+  function startBroadcast() {
+    if (presenceService) return;
+    presenceService = startPresenceService({
+      displayName: userConfig.display_name,
+      port: config.server.port,
+    });
+  }
+
+  function stopBroadcast() {
+    if (!presenceService) return;
+    presenceService.stop();
+    presenceService = null;
+  }
+
+  function startDiscovery() {
+    if (presenceBrowser) return;
+    presenceBrowser = startPresenceBrowser(updatePresenceList);
+  }
+
+  function stopDiscovery() {
+    if (!presenceBrowser) return;
+    presenceBrowser.browser.stop();
+    presenceBrowser = null;
+    presenceList = [];
+  }
+
+  function updateDisplayName(newName) {
+    if (!isValidDisplayName(newName)) return false;
+    userConfig.display_name = newName;
+    stopBroadcast();
+    if (userConfig.network_visibility) {
+      startBroadcast();
+    }
+    return true;
+  }
+
+  if (userConfig.network_visibility) {
+    startBroadcast();
+    startDiscovery();
+  }
+
+  app.get("/api/v1/network", (_req, res) => {
+    res.json(presenceList);
+  });
+
+  app.get("/api/v1/network/settings", (_req, res) => {
+    res.json({
+      display_name: userConfig.display_name,
+      network_visibility: !!userConfig.network_visibility,
+    });
+  });
+
+  app.post("/api/v1/network/settings", async (req, res) => {
+    const requestedName = req.body?.display_name;
+    const requestedVisibility = req.body?.network_visibility;
+    let updated = false;
+
+    if (typeof requestedName === "string") {
+      if (isValidDisplayName(requestedName)) {
+        updateDisplayName(requestedName);
+        updated = true;
+      }
+    }
+
+    if (typeof requestedVisibility === "boolean") {
+      userConfig.network_visibility = requestedVisibility;
+      if (requestedVisibility) {
+        startBroadcast();
+        startDiscovery();
+      } else {
+        stopBroadcast();
+        stopDiscovery();
+      }
+      updated = true;
+    }
+
+    if (updated) {
+      await updateUserConfig(config.storage.userConfigPath, userConfig);
+    }
+
+    res.json({
+      display_name: userConfig.display_name,
+      network_visibility: !!userConfig.network_visibility,
+    });
+  });
+
+  app.get("/api/v1/telemetry/settings", (_req, res) => {
+    res.json({ enabled: !!userConfig.telemetry_enabled });
+  });
+
+  app.post("/api/v1/telemetry/settings", async (req, res) => {
+    const enabled = !!req.body?.enabled;
+    userConfig.telemetry_enabled = enabled;
+    await updateUserConfig(config.storage.userConfigPath, userConfig);
+    logger.info("telemetry setting updated", { enabled });
+    res.json({ enabled });
   });
 
   const server = http.createServer((req, res) => {
@@ -309,6 +562,12 @@ async function bootstrap() {
   const shutdown = () => {
     expiryManager.stop();
     tunnelManager.stop();
+    telemetrySync.flush().catch(() => {});
+    telemetrySync.stop();
+    stopDiscovery();
+    stopBroadcast();
+    bonjour.destroy();
+    clearInterval(uptimeTimer);
     shareOnlyServer.close(() => {
       server.close(() => process.exit(0));
     });
