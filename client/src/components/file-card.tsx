@@ -39,13 +39,18 @@ interface FileCardProps {
 
 export function FileCard({ file, onRename, onDelete, onPreview, onShare, onClick }: FileCardProps) {
   const [isHovered, setIsHovered] = useState(false);
-  
+
+  const sharePath =
+    file.path || (file as any)?.virtualPath || `/${file.name}`;
+
   const { data: shareData } = useQuery<{ isShared: boolean; share: ShareLink | null }>({
-    queryKey: ["/api/shares", file.id, "check"],
+    queryKey: ["/api/shares", sharePath, "check"],
     queryFn: async () => {
       if (file.type !== "file") return { isShared: false, share: null };
-      const res = await fetch(`/api/shares/${file.id}/check`);
-      return res.json();
+      const res = await fetch("/api/shares");
+      const shares: ShareLink[] = await res.json();
+      const matched = shares.find((share) => share.path === sharePath) || null;
+      return { isShared: !!matched, share: matched };
     },
   });
 

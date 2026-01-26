@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Upload, X, FileText, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -26,6 +26,7 @@ export function UploadZone({ open, onOpenChange, parentPath = "/" }: UploadZoneP
   const [isDragging, setIsDragging] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([]);
   const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const uploadMutation = useMutation({
     mutationFn: async (files: File[]) => {
@@ -142,18 +143,20 @@ export function UploadZone({ open, onOpenChange, parentPath = "/" }: UploadZoneP
                 <p className="text-sm text-muted-foreground mb-4">
                   or click to browse
                 </p>
-                <Button asChild data-testid="button-browse-files bg-primary">
-                  <label className="cursor-pointer">
-                    <input
-                      type="file"
-                      multiple
-                      className="hidden"
-                      onChange={handleFileSelect}
-                      data-testid="input-file-upload"
-                    />
-                    Browse Files
-                  </label>
+                <Button
+                  onClick={() => fileInputRef.current?.click()}
+                  data-testid="button-browse-files"
+                >
+                  Browse Files
                 </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={handleFileSelect}
+                  data-testid="input-file-upload"
+                />
               </div>
             </motion.div>
           </div>

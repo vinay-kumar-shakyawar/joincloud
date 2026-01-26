@@ -95,23 +95,46 @@ function renderBreadcrumbs() {
   });
 }
 
+function getFileIcon(item) {
+  if (item.type === "folder") return "📁";
+  const ext = item.name.split(".").pop()?.toLowerCase();
+  const iconMap = {
+    jpg: "🖼️", jpeg: "🖼️", png: "🖼️", gif: "🖼️", webp: "🖼️", svg: "🖼️",
+    pdf: "📄", doc: "📄", docx: "📄", txt: "📄",
+    mp3: "🎵", wav: "🎵", flac: "🎵",
+    mp4: "🎬", mov: "🎬", avi: "🎬", mkv: "🎬",
+    zip: "📦", rar: "📦", tar: "📦", gz: "📦",
+    js: "📜", ts: "📜", py: "📜", json: "📜",
+  };
+  return iconMap[ext] || "📄";
+}
+
 function renderFiles() {
   els.fileList.innerHTML = "";
+  if (!state.items.length) {
+    const emptyState = document.createElement("div");
+    emptyState.className = "empty-state";
+    emptyState.innerHTML = `
+      <div class="empty-state-title">No files yet</div>
+      <div class="empty-state-sub">Drop files here or click Upload</div>
+    `;
+    els.fileList.appendChild(emptyState);
+    return;
+  }
   state.items.forEach((item) => {
     const row = document.createElement("div");
-    row.className = "item";
+    row.className = "item file-item";
+
+    const icon = document.createElement("span");
+    icon.className = "file-icon";
+    icon.textContent = getFileIcon(item);
+    row.appendChild(icon);
 
     const info = document.createElement("div");
+    info.className = "file-info";
     info.innerHTML = `<div class="item-title">${item.name}</div>
-      <div class="item-sub">${item.type === "folder" ? "Folder" : "File"} · ${formatBytes(
-      item.size,
-    )}</div>`;
+      <div class="item-sub">${item.type === "folder" ? "Folder" : formatBytes(item.size)}</div>`;
     row.appendChild(info);
-
-    const typeBadge = document.createElement("span");
-    typeBadge.className = "badge";
-    typeBadge.textContent = item.type === "folder" ? "Folder" : "File";
-    row.appendChild(typeBadge);
 
     const openButton = document.createElement("button");
     openButton.className = "button secondary";
@@ -133,33 +156,36 @@ function renderFiles() {
       row.appendChild(shareButton);
     }
 
-    if (item.type === "file") {
-      const spacer = document.createElement("div");
-      row.appendChild(spacer);
-    }
-
     els.fileList.appendChild(row);
   });
 }
 
 function renderShares() {
   els.shareList.innerHTML = "";
-  if (!state.shares.length) {
-    els.shareList.textContent = "No active shares yet.";
+  // Filter to only show active shares (not revoked or expired)
+  const activeShares = state.shares.filter((share) => share.status === "active");
+  if (!activeShares.length) {
+    const emptyState = document.createElement("div");
+    emptyState.className = "empty-state";
+    emptyState.innerHTML = `
+      <div class="empty-state-title">No active shares</div>
+      <div class="empty-state-sub">When there's no content</div>
+    `;
+    els.shareList.appendChild(emptyState);
     return;
   }
-  state.shares.forEach((share) => {
+  activeShares.forEach((share) => {
     const row = document.createElement("div");
     row.className = "item";
     const info = document.createElement("div");
     const expiryText = new Date(share.expiresAt).toLocaleString();
     info.innerHTML = `<div class="item-title">${share.path}</div>
-      <div class="item-sub">${share.scope} · ${share.permission} · ${share.status} · expires ${expiryText}</div>`;
+      <div class="item-sub">${share.scope} · ${share.permission} · expires ${expiryText}</div>`;
     row.appendChild(info);
 
     const statusBadge = document.createElement("span");
-    statusBadge.className = "badge";
-    statusBadge.textContent = share.status;
+    statusBadge.className = "badge badge-active";
+    statusBadge.textContent = "Active";
     row.appendChild(statusBadge);
 
     const copyButton = document.createElement("button");
@@ -171,8 +197,7 @@ function renderShares() {
           ? stateMeta.publicUrl
           : null
         : stateMeta.lanBaseUrl;
-    const shareUrl =
-      share.status === "active" && baseUrl ? `${baseUrl}/share/${share.shareId}` : null;
+    const shareUrl = baseUrl ? `${baseUrl}/share/${share.shareId}` : null;
     copyButton.disabled = !shareUrl;
     copyButton.onclick = async () => {
       if (!shareUrl) return;
@@ -183,7 +208,7 @@ function renderShares() {
     row.appendChild(copyButton);
 
     const revokeButton = document.createElement("button");
-    revokeButton.className = "button";
+    revokeButton.className = "button danger";
     revokeButton.textContent = "Revoke";
     revokeButton.onclick = async () => {
       revokeButton.disabled = true;
@@ -274,6 +299,7 @@ async function createShare() {
     setTimeout(() => (els.copyShare.textContent = "Copy Link"), 1500);
   };
   await loadShares();
+  await loadLogs();
 }
 
 async function revokeShare(shareId) {
@@ -281,6 +307,7 @@ async function revokeShare(shareId) {
   renderShares();
   await fetch(`/api/share/${shareId}`, { method: "DELETE" });
   await loadShares();
+  await loadLogs();
 }
 
 async function waitForPublicAccess(timeoutMs) {
@@ -391,6 +418,7 @@ async function uploadFiles(files) {
   });
   if (res.ok) {
     await loadFiles(state.path);
+    await loadLogs();
   }
 }
 
@@ -414,16 +442,49 @@ els.dropZone.addEventListener("drop", (event) => {
   uploadFiles(event.dataTransfer.files);
 });
 
+function formatLogTime(timestamp) {
+  try {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  } catch {
+    return timestamp;
+  }
+}
+
+function getLogIcon(level, message) {
+  const msg = message.toLowerCase();
+  if (msg.includes("upload")) return "📤";
+  if (msg.includes("download")) return "📥";
+  if (msg.includes("share")) return "🔗";
+  if (msg.includes("revoke")) return "🚫";
+  if (msg.includes("started") || msg.includes("app started")) return "🚀";
+  if (level === "error") return "❌";
+  if (level === "warn") return "⚠️";
+  return "ℹ️";
+}
+
 function renderLogs(entries) {
   els.logList.innerHTML = "";
   if (!entries.length) {
-    els.logList.textContent = "No logs available.";
+    const emptyState = document.createElement("div");
+    emptyState.className = "empty-state";
+    emptyState.innerHTML = `
+      <div class="empty-state-title">No logs yet</div>
+      <div class="empty-state-sub">Activity will appear here</div>
+    `;
+    els.logList.appendChild(emptyState);
     return;
   }
   entries.forEach((entry) => {
     const row = document.createElement("div");
-    row.className = "log-item";
-    row.textContent = `${entry.timestamp} [${entry.level}] ${entry.message}`;
+    row.className = `log-item log-${entry.level}`;
+    const icon = getLogIcon(entry.level, entry.message);
+    const time = formatLogTime(entry.timestamp);
+    row.innerHTML = `
+      <span class="log-icon">${icon}</span>
+      <span class="log-time">${time}</span>
+      <span class="log-message">${entry.message}</span>
+    `;
     els.logList.appendChild(row);
   });
 }
@@ -441,17 +502,25 @@ async function loadLogs() {
 function renderNetwork(entries) {
   els.networkList.innerHTML = "";
   if (!entries.length) {
-    els.networkList.textContent =
-      "No other JoinCloud users detected on this network.";
+    const emptyState = document.createElement("div");
+    emptyState.className = "empty-state";
+    emptyState.innerHTML = `
+      <div class="empty-state-title">No devices found</div>
+      <div class="empty-state-sub">When there's no content</div>
+    `;
+    els.networkList.appendChild(emptyState);
     return;
   }
   entries.forEach((entry) => {
     const row = document.createElement("div");
-    row.className = "item";
+    row.className = "item network-item";
     const info = document.createElement("div");
-    info.innerHTML = `<div class="item-title">${entry.display_name}</div>
-      <div class="item-sub">${entry.status}</div>`;
+    info.innerHTML = `<div class="item-title">${entry.display_name}</div>`;
     row.appendChild(info);
+    const statusBadge = document.createElement("span");
+    statusBadge.className = `badge ${entry.status === "online" ? "badge-public" : "badge-private"}`;
+    statusBadge.textContent = entry.status === "online" ? "Public" : "Private";
+    row.appendChild(statusBadge);
     els.networkList.appendChild(row);
   });
 }
@@ -543,6 +612,10 @@ loadTelemetrySettings();
 loadNetworkSettings();
 const initial = window.location.hash.replace("#", "") || "home";
 setActiveSection(initial);
+
+setInterval(() => {
+  loadLogs();
+}, 10000);
 
 els.telemetryToggle.addEventListener("change", async (event) => {
   await updateTelemetrySettings(event.target.checked);

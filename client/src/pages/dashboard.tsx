@@ -5,6 +5,7 @@ import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { EmptyState, PageContainer, SectionHeading } from "@/ui-kit";
 import { 
   FolderOpen, 
   FileText, 
@@ -109,8 +110,8 @@ function InstanceOverview({ storageInfo }: { storageInfo?: StorageInfo }) {
               <Globe className="h-4 w-4" />
               Storage Path
             </div>
-            <p className="text-sm font-medium truncate" data-testid="text-storage-path" title={storageInfo?.storagePath}>
-              ~/AREVEI
+            <p className="text-sm font-medium truncate" data-testid="text-storage-path">
+              {storageInfo?.storageLabel || "Local storage"}
             </p>
           </div>
         </div>
@@ -208,11 +209,11 @@ function ActivityLogs({ files, shares }: { files?: FileItem[], shares?: ShareLin
         <ScrollArea className="h-[280px] pr-4">
           <div className="space-y-2">
             {logs.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                <Activity className="h-8 w-8 mb-2 opacity-50" />
-                <p className="text-sm">No recent activity</p>
-                <p className="text-xs">Upload files to see activity here</p>
-              </div>
+              <EmptyState
+                icon={<Activity className="h-8 w-8" />}
+                title="No recent activity"
+                description="Upload files to see activity here"
+              />
             ) : (
               logs.slice(0, 10).map((log) => (
                 <div
@@ -345,13 +346,16 @@ export default function Dashboard() {
   });
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold mb-1" data-testid="text-dashboard-title">Dashboard</h1>
-          <p className="text-muted-foreground">Welcome to your AREVEI file management system</p>
-        </div>
-      </div>
+    <PageContainer className="space-y-6">
+      <SectionHeading
+        title="Dashboard"
+        description="Welcome to your AREVEI file management system"
+      />
+
+      <SectionHeading
+        title="Overview"
+        description="Quick snapshot of your instance"
+      />
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -362,6 +366,11 @@ export default function Dashboard() {
       </motion.div>
 
       <QuickStats storageInfo={storageInfo} shares={shares} />
+
+      <SectionHeading
+        title="Storage & Activity"
+        description="Usage details and recent actions"
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <motion.div
@@ -380,6 +389,6 @@ export default function Dashboard() {
           <ActivityLogs files={files} shares={shares} />
         </motion.div>
       </div>
-    </div>
+    </PageContainer>
   );
 }

@@ -4,6 +4,7 @@ import { Progress } from "@/components/ui/progress";
 import { HardDrive } from "lucide-react";
 import { motion } from "framer-motion";
 import { StorageAPI } from "@/lib/storage-api";
+import { EmptyState, PageContainer, SectionHeading } from "@/ui-kit";
 
 interface StorageStats {
   totalSize: number;
@@ -24,11 +25,23 @@ export default function Storage() {
   const availableGB = (totalGB - parseFloat(usedGB)).toFixed(2);
 
   return (
-    <div className="p-8 space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold mb-2" data-testid="text-storage-title">Storage</h1>
-        <p className="text-muted-foreground">Monitor your storage usage and capacity</p>
-      </div>
+    <PageContainer className="space-y-8">
+      <SectionHeading
+        title="Storage"
+        description="Monitor your storage usage and capacity"
+      />
+
+      {!isLoading && !storageStats && (
+        <EmptyState
+          title="Storage details unavailable"
+          description="Try again in a moment to load usage details."
+        />
+      )}
+
+      <SectionHeading
+        title="Capacity"
+        description="Space usage for this device"
+      />
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -80,6 +93,11 @@ export default function Storage() {
         </Card>
       </motion.div>
 
+      <SectionHeading
+        title="Content"
+        description="Files and folders stored locally"
+      />
+
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -108,6 +126,6 @@ export default function Storage() {
           </CardContent>
         </Card>
       </motion.div>
-    </div>
+    </PageContainer>
   );
 }

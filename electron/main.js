@@ -20,6 +20,18 @@ const http = require("http");
 let backendProcess = null;
 let mainWindow = null;
 let logPath = null;
+let healthTimer = null;
+let restartTimer = null;
+let consecutiveHealthFailures = 0;
+let restartHistory = [];
+let backendState = "healthy";
+let isStopping = false;
+
+const HEALTH_URL = "http://127.0.0.1:8787/api/v1/health";
+const HEALTH_INTERVAL_MS = 12000;
+const HEALTH_FAILURE_THRESHOLD = 2;
+const RESTART_WINDOW_MS = 10 * 60 * 1000;
+const MAX_RESTARTS_IN_WINDOW = 3;
 
 function initLogging() {
   const userData = app.getPath("userData");
@@ -43,6 +55,13 @@ function getBackendScriptPath() {
   return path.join(__dirname, "..", "server", "index.js");
 }
 
+function getBackendCwd() {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "server");
+  }
+  return path.join(__dirname, "..", "server");
+}
+
 function getStoragePath() {
   return path.join(app.getPath("userData"), "storage");
 }
@@ -50,20 +69,26 @@ function getStoragePath() {
 function startBackend() {
   if (backendProcess) return;
 
+  // Native modules used by backend that require Electron rebuilds: sqlite3.
   const backendScript = getBackendScriptPath();
+  const backendCwd = getBackendCwd();
   logLine(`Backend start ${backendScript}`);
   const env = {
     ...process.env,
+    NODE_ENV: app.isPackaged ? "production" : "development",
     ELECTRON_RUN_AS_NODE: "1",
     JOINCLOUD_HOST: "0.0.0.0",
     JOINCLOUD_STORAGE_ROOT: getStoragePath(),
     JOINCLOUD_RESOURCES_PATH: process.resourcesPath || "",
+    PATH: process.env.PATH || "",
   };
 
   backendProcess = spawn(process.execPath, [backendScript], {
     env,
+    cwd: backendCwd,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  logLine(`Backend pid ${backendProcess.pid}`);
 
   backendProcess.stdout.on("data", (chunk) => {
     logLine(chunk.toString().trim());
@@ -73,9 +98,17 @@ function startBackend() {
     logLine(chunk.toString().trim());
   });
 
-  backendProcess.on("exit", () => {
-    logLine("Backend exit");
+  const startTime = Date.now();
+  backendProcess.on("exit", (code, signal) => {
+    const elapsedMs = Date.now() - startTime;
+    logLine(`Backend exit code=${code ?? "null"} signal=${signal ?? "null"}`);
+    if (elapsedMs < 5000) {
+      logLine("Backend exit within 5s");
+    }
     backendProcess = null;
+    if (!isStopping) {
+      scheduleBackendRestart("backend exit");
+    }
   });
 }
 
@@ -85,6 +118,45 @@ function stopBackend() {
     backendProcess = null;
     logLine("Backend stop");
   }
+}
+
+function stopBackendGracefully(timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    if (!backendProcess) {
+      resolve();
+      return;
+    }
+    const proc = backendProcess;
+    let settled = false;
+
+    const finalize = () => {
+      if (settled) return;
+      settled = true;
+      backendProcess = null;
+      resolve();
+    };
+
+    const timer = setTimeout(() => {
+      try {
+        proc.kill("SIGKILL");
+      } catch (error) {
+        // ignore
+      }
+      finalize();
+    }, timeoutMs);
+
+    proc.once("exit", () => {
+      clearTimeout(timer);
+      finalize();
+    });
+
+    try {
+      proc.kill("SIGTERM");
+    } catch (error) {
+      clearTimeout(timer);
+      finalize();
+    }
+  });
 }
 
 function showBackendError(message) {
@@ -110,7 +182,7 @@ function checkPortFree() {
 
 function checkBackend() {
   return new Promise((resolve) => {
-    const req = http.get("http://127.0.0.1:8787/api/status", (res) => {
+    const req = http.get(HEALTH_URL, (res) => {
       res.resume();
       resolve(res.statusCode === 200);
     });
@@ -120,6 +192,68 @@ function checkBackend() {
       resolve(false);
     });
   });
+}
+
+function setBackendState(state, reason) {
+  if (backendState === state) return;
+  backendState = state;
+  logLine(`Backend state ${state}${reason ? ` (${reason})` : ""}`);
+}
+
+function recordRestartAttempt() {
+  const now = Date.now();
+  restartHistory = restartHistory.filter((ts) => now - ts < RESTART_WINDOW_MS);
+  restartHistory.push(now);
+  return restartHistory.length;
+}
+
+function shouldThrottleRestarts() {
+  const now = Date.now();
+  restartHistory = restartHistory.filter((ts) => now - ts < RESTART_WINDOW_MS);
+  return restartHistory.length >= MAX_RESTARTS_IN_WINDOW;
+}
+
+async function attemptBackendRestart(reason) {
+  if (isStopping) return;
+  if (shouldThrottleRestarts()) {
+    setBackendState("degraded", "restart limit exceeded");
+    logLine(`Backend restart suppressed (${reason})`);
+    return;
+  }
+
+  const attempt = recordRestartAttempt();
+  const backoffMs = Math.min(30000, 1000 * Math.pow(2, attempt - 1));
+  setBackendState("recovering", reason);
+  logLine(`Backend restart scheduled in ${backoffMs}ms`);
+
+  if (restartTimer) return;
+  restartTimer = setTimeout(async () => {
+    restartTimer = null;
+    if (isStopping) return;
+    if (backendProcess) {
+      await stopBackendGracefully();
+    }
+    const portFree = await checkPortFree();
+    if (!portFree) {
+      setBackendState("degraded", "port in use");
+      logLine("Backend restart failed: port in use");
+      return;
+    }
+    startBackend();
+    const ok = await waitForBackend(15000);
+    if (ok) {
+      consecutiveHealthFailures = 0;
+      setBackendState("healthy", "restart succeeded");
+      return;
+    }
+    logLine("Backend restart failed: health check");
+    attemptBackendRestart("health check failed after restart");
+  }, backoffMs);
+}
+
+function scheduleBackendRestart(reason) {
+  if (isStopping) return;
+  attemptBackendRestart(reason).catch(() => {});
 }
 
 async function waitForBackend(timeoutMs) {
@@ -136,6 +270,7 @@ async function ensureBackend() {
   const existing = await waitForBackend(1000);
   if (existing) {
     logLine("Backend already running");
+    setBackendState("healthy", "existing");
     return true;
   }
 
@@ -143,6 +278,7 @@ async function ensureBackend() {
   if (!portFree) {
     logLine("Port 8787 in use");
     showBackendError("App failed to initialize.");
+    setBackendState("degraded", "port in use");
     return false;
   }
 
@@ -152,9 +288,37 @@ async function ensureBackend() {
     logLine("Backend did not respond");
     showBackendError("App failed to initialize.");
     stopBackend();
+    setBackendState("degraded", "init failed");
     return false;
   }
+  setBackendState("healthy", "init ok");
   return true;
+}
+
+function startHealthMonitor() {
+  if (healthTimer) return;
+  healthTimer = setInterval(async () => {
+    const ok = await checkBackend();
+    if (!ok) {
+      consecutiveHealthFailures += 1;
+      logLine(`Backend health failed (${consecutiveHealthFailures})`);
+      if (consecutiveHealthFailures >= HEALTH_FAILURE_THRESHOLD) {
+        scheduleBackendRestart("health check failed");
+      }
+      return;
+    }
+    consecutiveHealthFailures = 0;
+    if (backendState !== "healthy") {
+      setBackendState("healthy", "health check ok");
+    }
+  }, HEALTH_INTERVAL_MS);
+}
+
+function stopHealthMonitor() {
+  if (healthTimer) {
+    clearInterval(healthTimer);
+    healthTimer = null;
+  }
 }
 
 async function createWindow() {
@@ -174,6 +338,7 @@ async function createWindow() {
     app.quit();
     return;
   }
+  startHealthMonitor();
 
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -186,7 +351,7 @@ async function createWindow() {
   });
 
   try {
-    await mainWindow.loadURL("http://127.0.0.1:8787/");
+    await mainWindow.loadURL("http://127.0.0.1:8787");
   } catch (error) {
     logLine("UI load failed");
     showBackendError("App failed to initialize.");
@@ -212,10 +377,15 @@ ipcMain.handle("joincloud-open-storage", async () => {
 });
 
 app.on("window-all-closed", () => {
-  stopBackend();
-  app.quit();
+  isStopping = true;
+  stopHealthMonitor();
+  stopBackendGracefully().finally(() => app.quit());
 });
 
-app.on("before-quit", () => {
-  stopBackend();
+app.on("before-quit", (event) => {
+  if (isStopping) return;
+  isStopping = true;
+  stopHealthMonitor();
+  event.preventDefault();
+  stopBackendGracefully().finally(() => app.quit());
 });

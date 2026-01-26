@@ -1,11 +1,16 @@
-function createMountManager({ ownerServer, shareService, shareServerFactory, config, telemetry }) {
+function createMountManager({ ownerServer, shareService, shareServerFactory, config, telemetry, logger }) {
   const shareCache = new Map();
 
   const { ownerBasePath, shareBasePath } = config.server;
 
   function getShareServer(share) {
     if (!shareCache.has(share.shareId)) {
-      const server = shareServerFactory({ share, realm: config.auth.realm, telemetry });
+      const server = shareServerFactory({
+        share,
+        realm: config.auth.realm,
+        telemetry,
+        logger,
+      });
       shareCache.set(share.shareId, server.webdavServer);
     }
     return shareCache.get(share.shareId);

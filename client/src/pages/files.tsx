@@ -10,6 +10,7 @@ import { UploadZone } from "@/components/upload-zone";
 import { CreateFolderDialog } from "@/components/create-folder-dialog";
 import { StorageAPI } from "@/lib/storage-api";
 import type { FileItem } from "@shared/schema";
+import { EmptyState, PageContainer, SectionHeading } from "@/ui-kit";
 
 export default function Files() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
@@ -70,11 +71,13 @@ export default function Files() {
     });
   }, [filteredFiles]);
 
+  const itemCountLabel = `${sortedFiles.length} item${sortedFiles.length === 1 ? "" : "s"}`;
+
   return (
-    <div className="flex flex-col h-full">
-      <div className="p-6 border-b space-y-4">
+    <PageContainer className="flex flex-col h-full">
+      <div className="border-b space-y-4">
         <div className="flex items-center justify-between gap-4">
-          <h1 className="text-3xl font-bold" data-testid="text-files-title">Files</h1>
+          <SectionHeading title="Files" />
           <div className="flex items-center gap-2">
             <Button
               variant="outline"
@@ -122,6 +125,12 @@ export default function Files() {
           ))}
         </div>
 
+        <div>
+          <p className="text-sm text-muted-foreground">
+            {itemCountLabel} in {currentPath === "/" ? "Home" : currentPath}
+          </p>
+        </div>
+
         <div className="flex items-center gap-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -151,7 +160,7 @@ export default function Files() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto p-6">
+      <div className="flex-1 overflow-auto">
         {isLoading ? (
           <div className="flex items-center justify-center h-64">
             <p className="text-muted-foreground">Loading files...</p>
@@ -162,25 +171,27 @@ export default function Files() {
             animate={{ opacity: 1, y: 0 }}
             className="flex flex-col items-center justify-center h-64 text-center"
           >
-            <FolderPlus className="h-16 w-16 text-muted-foreground mb-4" />
-            <h3 className="text-xl font-semibold mb-2">
-              {currentPath === "/" ? "No files yet" : "This folder is empty"}
-            </h3>
-            <p className="text-muted-foreground mb-6">
-              {currentPath === "/" 
-                ? "Upload your first file or create a folder to get started"
-                : "Upload files or create a subfolder"}
-            </p>
-            <div className="flex gap-3">
-              <Button onClick={() => setShowCreateFolder(true)} variant="outline">
-                <FolderPlus className="h-4 w-4 mr-2" />
-                Create Folder
-              </Button>
-              <Button onClick={() => setShowUploadZone(true)}>
-                <Upload className="h-4 w-4 mr-2" />
-                Upload Files
-              </Button>
-            </div>
+            <EmptyState
+              icon={<FolderPlus className="h-10 w-10" />}
+              title={currentPath === "/" ? "Your files will appear here" : "This folder is empty"}
+              description={
+                currentPath === "/"
+                  ? "Upload files or create a folder to start organizing."
+                  : "Upload files or create a subfolder to keep things tidy."
+              }
+              action={
+                <div className="flex gap-3">
+                  <Button onClick={() => setShowCreateFolder(true)} variant="outline">
+                    <FolderPlus className="h-4 w-4 mr-2" />
+                    Create Folder
+                  </Button>
+                  <Button onClick={() => setShowUploadZone(true)}>
+                    <Upload className="h-4 w-4 mr-2" />
+                    Upload Files
+                  </Button>
+                </div>
+              }
+            />
           </motion.div>
         ) : (
           <AnimatePresence mode="wait">
@@ -211,6 +222,6 @@ export default function Files() {
         onOpenChange={setShowCreateFolder}
         parentPath={currentPath}
       />
-    </div>
+    </PageContainer>
   );
 }

@@ -4,13 +4,11 @@ import type React from "react"
 
 import { useState, useEffect } from "react"
 import { Switch, Route } from "wouter"
-import { queryClient } from "./lib/queryClient"
-import { QueryClientProvider } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 import { Toaster } from "@/components/ui/toaster"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
 import { AppSidebar } from "@/components/app-sidebar"
-import { ThemeToggle } from "@/components/theme-toggle"
 import { SharedFilesBar } from "@/components/shared-files-bar";
 import Dashboard from "@/pages/dashboard"
 import Files from "@/pages/files"
@@ -22,6 +20,7 @@ import NotFound from "@/pages/not-found"
 import { useToast } from "@/hooks/use-toast"
 import Shares from "@/pages/sharing";
 import ElectronDashboard from "./pages/electron"
+import { Badge } from "@/ui-kit"
 
 interface User {
   id: string
@@ -58,6 +57,18 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(false)
   const { toast } = useToast()
+  const statusQuery = useQuery<{ status?: string }>({
+    queryKey: ["/api/status"],
+    queryFn: async () => {
+      const res = await fetch("/api/status");
+      if (!res.ok) {
+        throw new Error("Status unavailable");
+      }
+      return res.json();
+    },
+    refetchInterval: 10000,
+    retry: false,
+  });
 
   // useEffect(() => {
   //   const fetchUser = async () => {
@@ -102,26 +113,39 @@ export default function App() {
   // }
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <SidebarProvider style={style as React.CSSProperties}>
-          <div className="flex h-screen w-full">
-            <AppSidebar  />
-            <div className="flex flex-col flex-1">
-              <header className="flex items-center justify-between h-16 px-6 border-b gap-4  border-slate-700">
-                <SidebarTrigger data-testid="button-sidebar-toggle" />
-                {/* <div className="text-sm text-slate-300 flex-1 text-center">Welcome, {user.username}</div> */}
-                <ThemeToggle />
-              </header>
-              <SharedFilesBar />
-              <main className="flex-1 overflow-auto">
-                <Router user={user} />
-              </main>
-            </div>
+    <TooltipProvider>
+      <SidebarProvider style={style as React.CSSProperties}>
+        <div className="flex h-screen w-full">
+          <AppSidebar />
+          <div className="flex flex-col flex-1">
+            <header className="flex items-center justify-between h-16 px-6 border-b gap-4 border-slate-700">
+              <SidebarTrigger data-testid="button-sidebar-toggle" />
+              <div>
+                <Badge
+                  variant={
+                    statusQuery.isLoading
+                      ? "warning"
+                      : statusQuery.isError || statusQuery.data?.status !== "running"
+                        ? "error"
+                        : "success"
+                  }
+                >
+                  {statusQuery.isLoading
+                    ? "Recovering"
+                    : statusQuery.isError || statusQuery.data?.status !== "running"
+                      ? "Offline"
+                      : "Healthy"}
+                </Badge>
+              </div>
+            </header>
+            <SharedFilesBar />
+            <main className="flex-1 overflow-auto">
+              <Router user={user} />
+            </main>
           </div>
-        </SidebarProvider>
-        <Toaster />
-      </TooltipProvider>
-    </QueryClientProvider>
+        </div>
+      </SidebarProvider>
+      <Toaster />
+    </TooltipProvider>
   )
 }

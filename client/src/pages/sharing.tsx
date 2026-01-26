@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { 
   Share2, 
   Link2, 
@@ -15,11 +16,13 @@ import {
   ExternalLink,
   Download,
   Loader2,
-  FileText
+  FileText,
+  Info
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import type { ShareLink } from "@shared/schema";
+import { Badge as KitBadge, EmptyState, PageContainer, SectionHeading } from "@/ui-kit";
 
 function formatTimeRemaining(expiresAt: string | null): string {
   if (!expiresAt) return "Never expires";
@@ -55,9 +58,12 @@ export default function Sharing() {
 
   const stopShareMutation = useMutation({
     mutationFn: async (shareId: string) => {
-      return apiRequest("DELETE", `/api/shares/${shareId}`, null);
+      return apiRequest("DELETE", `/api/share/${shareId}`, null);
     },
-    onSuccess: () => {
+    onSuccess: (_data, shareId) => {
+      queryClient.setQueryData<ShareLink[]>(["/api/shares"], (prev) =>
+        (prev || []).filter((share) => share.id !== shareId && share.shareId !== shareId)
+      );
       queryClient.invalidateQueries({ queryKey: ["/api/shares"] });
       toast({
         title: "Share removed",
@@ -91,12 +97,14 @@ export default function Sharing() {
 
   const activeShares = shares.filter(s => s.isActive);
 
+  const activeLabel = `${activeShares.length} active`;
+
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold mb-1" data-testid="text-sharing-title">Sharing</h1>
-        <p className="text-muted-foreground">Manage your shared files and access control</p>
-      </div>
+    <PageContainer className="space-y-6">
+      <SectionHeading
+        title="Sharing"
+        description="Manage your shared files and access control"
+      />
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -108,6 +116,19 @@ export default function Sharing() {
             <CardTitle className="flex items-center gap-2">
               <Share2 className="h-5 w-5 text-primary" />
               Active Shares
+              <KitBadge variant={activeShares.length > 0 ? "success" : "neutral"}>
+                {activeLabel}
+              </KitBadge>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex items-center text-muted-foreground">
+                    <Info className="h-4 w-4" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  Removing a share disables the link immediately.
+                </TooltipContent>
+              </Tooltip>
             </CardTitle>
             <CardDescription>
               Files currently being shared via secure links
@@ -119,11 +140,11 @@ export default function Sharing() {
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
             ) : activeShares.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
-                <Share2 className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                <p className="font-medium">No active shares</p>
-                <p className="text-sm mt-1">Share files from the Files page to see them here</p>
-              </div>
+              <EmptyState
+                icon={<Share2 className="h-10 w-10" />}
+                title="No shared files yet"
+                description="Create a share from Files to get a link here."
+              />
             ) : (
               <ScrollArea className="max-h-[600px]">
                 <div className="space-y-4">
@@ -143,6 +164,9 @@ export default function Sharing() {
                             <h4 className="font-medium truncate" data-testid={`text-share-name-${share.id}`}>
                               {share.fileName}
                             </h4>
+                            <KitBadge variant={share.isActive ? "success" : "warning"}>
+                              {share.isActive ? "Active" : "Expired"}
+                            </KitBadge>
                           </div>
                           <div className="flex flex-wrap items-center gap-2 mt-2">
                             <Badge variant="secondary" className="text-xs">
@@ -203,7 +227,8 @@ export default function Sharing() {
                       {!share.tunnelUrl && (
                         <div className="flex items-center gap-2 p-2 rounded bg-muted text-sm text-muted-foreground">
                           <Loader2 className="h-4 w-4 animate-spin" />
-                          Starting ngrok tunnel...
+                          <KitBadge variant="warning">Link pending</KitBadge>
+                          <span>Public link will appear when ready</span>
                         </div>
                       )}
 
@@ -279,6 +304,6 @@ export default function Sharing() {
           </CardContent>
         </Card>
       </motion.div>
-    </div>
+    </PageContainer>
   );
 }

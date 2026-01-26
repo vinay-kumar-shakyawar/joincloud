@@ -4,7 +4,7 @@ const fs = require("fs/promises");
 const mime = require("mime-types");
 const { resolveRights } = require("../sharing/permissionResolver");
 
-function createShareServer({ share, realm, telemetry }) {
+function createShareServer({ share, realm, telemetry, logger }) {
   const userManager = new v2.SimpleUserManager();
   const privilegeManager = new v2.SimplePathPrivilegeManager();
 
@@ -25,15 +25,23 @@ function createShareServer({ share, realm, telemetry }) {
     const method = ctx.request.method || "";
     if (method === "GET" || method === "HEAD") {
       const resourcePath = ctx.requested.path.toString();
-      const filename = path.basename(resourcePath);
+      const filename = path.basename(resourcePath) || path.basename(share.targetPath);
       if (filename) {
         const contentType =
           mime.lookup(filename) || "application/octet-stream";
         ctx.response.setHeader("Content-Type", contentType);
+        const safeName = filename.replace(/"/g, "");
+        const encodedName = encodeURIComponent(filename);
         ctx.response.setHeader(
           "Content-Disposition",
-          `inline; filename="${filename}"`
+          `inline; filename="${safeName}"; filename*=UTF-8''${encodedName}`
         );
+        if (logger) {
+          logger.info("download requested", {
+            share_id: share.shareId,
+            name: filename,
+          });
+        }
       }
       if (telemetry) {
         let bytes = 0;

@@ -13,9 +13,11 @@ class TunnelManager {
     this.lastError = null;
     this.lastReason = null;
     this.startTimeout = null;
-    this.restartAttempts = 0;
-    this.maxRestarts = 3;
+    this.restartHistory = [];
+    this.restartTimer = null;
     this.desiredActive = false;
+    this.restartWindowMs = 10 * 60 * 1000;
+    this.maxRestartsInWindow = 3;
   }
 
   parsePublicUrl(output) {
@@ -53,6 +55,7 @@ class TunnelManager {
         this.stopProcess();
         if (this.logger) this.logger.error("public access failed", { reason: this.lastReason });
         this.emitStatus();
+        this.scheduleRestart("No URL received");
       }
     }, 10000);
   }
@@ -77,6 +80,47 @@ class TunnelManager {
         // ignore
       }
     }
+  }
+
+  recordRestartAttempt() {
+    const now = Date.now();
+    this.restartHistory = this.restartHistory.filter(
+      (ts) => now - ts < this.restartWindowMs
+    );
+    this.restartHistory.push(now);
+    return this.restartHistory.length;
+  }
+
+  shouldThrottleRestarts() {
+    const now = Date.now();
+    this.restartHistory = this.restartHistory.filter(
+      (ts) => now - ts < this.restartWindowMs
+    );
+    return this.restartHistory.length >= this.maxRestartsInWindow;
+  }
+
+  scheduleRestart(reason) {
+    if (!this.desiredActive) return;
+    if (this.restartTimer) return;
+    if (this.shouldThrottleRestarts()) {
+      this.status = "failed";
+      this.lastError = "Public sharing is unavailable on this system";
+      this.lastReason = reason || "Tunnel exited";
+      if (this.logger) this.logger.error("public access failed", { reason: this.lastReason });
+      this.emitStatus();
+      return;
+    }
+
+    const attempt = this.recordRestartAttempt();
+    const backoffMs = Math.min(30000, 1000 * Math.pow(2, attempt - 1));
+    this.status = "restarting";
+    if (this.logger) this.logger.info("public access restarting");
+    this.emitStatus();
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null;
+      if (!this.desiredActive) return;
+      this.start();
+    }, backoffMs);
   }
 
   async start() {
@@ -118,7 +162,7 @@ class TunnelManager {
       this.publicUrl = found;
       this.status = "active";
       this.clearTimeoutWatch();
-      this.restartAttempts = 0;
+      this.restartHistory = [];
       this.lastReason = null;
       if (this.logger) this.logger.info("public access active");
       this.emitStatus();
@@ -135,7 +179,7 @@ class TunnelManager {
       this.publicUrl = found;
       this.status = "active";
       this.clearTimeoutWatch();
-      this.restartAttempts = 0;
+      this.restartHistory = [];
       this.lastReason = null;
       if (this.logger) this.logger.info("public access active");
       this.emitStatus();
@@ -143,6 +187,15 @@ class TunnelManager {
         this.lastError = "Public sharing is unavailable on this system";
         this.lastReason = "Tunnel exited";
       }
+    });
+
+    this.process.on("error", () => {
+      this.process = null;
+      this.publicUrl = null;
+      this.clearTimeoutWatch();
+      this.lastError = "Public sharing is unavailable on this system";
+      this.lastReason = "Tunnel exited";
+      this.scheduleRestart("Tunnel error");
     });
 
     this.process.on("exit", () => {
@@ -156,22 +209,9 @@ class TunnelManager {
         this.emitStatus();
         return;
       }
-
-      if (this.restartAttempts < this.maxRestarts) {
-        this.restartAttempts += 1;
-        this.status = "restarting";
-        if (this.logger) this.logger.info("public access restarting");
-        this.emitStatus();
-        setTimeout(() => {
-          this.start();
-        }, 1000);
-      } else {
-        this.status = "failed";
-        this.lastError = "Public sharing is unavailable on this system";
-        this.lastReason = "Tunnel exited";
-        if (this.logger) this.logger.error("public access failed", { reason: this.lastReason });
-        this.emitStatus();
-      }
+      this.lastError = "Public sharing is unavailable on this system";
+      this.lastReason = "Tunnel exited";
+      this.scheduleRestart("Tunnel exited");
     });
 
     return this.getStatus();
@@ -179,7 +219,11 @@ class TunnelManager {
 
   stop() {
     this.desiredActive = false;
-    this.restartAttempts = 0;
+    this.restartHistory = [];
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
     this.lastError = null;
     this.lastReason = null;
     this.status = "stopping";

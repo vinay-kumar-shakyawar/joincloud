@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { 
   Settings as SettingsIcon, 
   RefreshCw, 
@@ -25,6 +26,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { StorageInfo } from "@shared/schema";
+import { PageContainer, SectionHeading } from "@/ui-kit";
 
 function SyncSettings({ storagePath }: { storagePath?: string }) {
   const { toast } = useToast();
@@ -63,7 +65,19 @@ function SyncSettings({ storagePath }: { storagePath?: string }) {
       <CardContent className="space-y-6">
         <div className="flex items-center justify-between">
           <div className="space-y-0.5">
-            <Label htmlFor="auto-sync" className="text-base">Auto Sync</Label>
+            <Label htmlFor="auto-sync" className="text-base flex items-center gap-2">
+              Auto Sync
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex items-center text-muted-foreground">
+                    <Info className="h-4 w-4" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  Keeps your local files up to date automatically.
+                </TooltipContent>
+              </Tooltip>
+            </Label>
             <p className="text-sm text-muted-foreground">
               Automatically sync files when changes are detected
             </p>
@@ -332,11 +346,11 @@ export default function Settings() {
   });
 
   return (
-    <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold mb-1" data-testid="text-settings-title">Settings</h1>
-        <p className="text-muted-foreground">Manage your AREVEI Cloud preferences</p>
-      </div>
+    <PageContainer className="space-y-6">
+      <SectionHeading
+        title="Settings"
+        description="Manage your AREVEI Cloud preferences"
+      />
 
       <div className="grid grid-cols-1  gap-6">
         <motion.div
@@ -361,6 +375,7 @@ export default function Settings() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2, duration: 0.3 }}
       >
+        <SectionHeading title="Support" description="Get help or contact us" />
         <SupportSection />
       </motion.div>
 
@@ -369,6 +384,7 @@ export default function Settings() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.3, duration: 0.3 }}
       >
+        <SectionHeading title="About" description="Product details" />
         <Card data-testid="card-about">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -402,6 +418,6 @@ export default function Settings() {
           </CardContent>
         </Card>
       </motion.div>
-    </div>
+    </PageContainer>
   );
 }

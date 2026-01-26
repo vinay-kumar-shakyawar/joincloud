@@ -201,6 +201,51 @@ async function listDirectory(ownerRoot, requestedPath) {
   return results;
 }
 
+async function getStorageStats(ownerRoot) {
+  let fileCount = 0;
+  let folderCount = 0;
+  let usedBytes = 0;
+
+  async function walk(dir) {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") || entry.name.startsWith("._")) {
+        continue;
+      }
+      if (entry.isSymbolicLink()) {
+        continue;
+      }
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        folderCount += 1;
+        await walk(entryPath);
+        continue;
+      }
+      const stats = await fs.stat(entryPath);
+      fileCount += 1;
+      usedBytes += stats.size;
+    }
+  }
+
+  await walk(ownerRoot);
+
+  return {
+    usedBytes,
+    totalBytes: 10 * 1024 * 1024 * 1024,
+    fileCount,
+    folderCount,
+  };
+}
+
+function formatSharePath(ownerRoot, targetPath) {
+  const rel = path.relative(ownerRoot, targetPath);
+  const posixRel = rel.replace(/\\/g, "/");
+  if (posixRel.startsWith("..")) {
+    return `/${path.basename(targetPath)}`;
+  }
+  return posixRel.startsWith("/") ? posixRel : `/${posixRel}`;
+}
+
 async function bootstrap() {
   await ensureOwnerStorage(config.storage.ownerRoot);
   await ensureShareStore(config.storage.shareStorePath);
@@ -257,6 +302,7 @@ async function bootstrap() {
     shareServerFactory: createShareServer,
     config,
     telemetry,
+    logger,
   });
 
   const app = express();
@@ -277,6 +323,18 @@ async function bootstrap() {
       publicBaseUrl: config.server.publicBaseUrl,
       storageLabel: "Local storage",
     });
+  });
+
+  app.get("/api/storage", async (_req, res) => {
+    try {
+      const stats = await getStorageStats(config.storage.ownerRoot);
+      res.json({
+        ...stats,
+        storageLabel: "Local storage",
+      });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to load storage stats" });
+    }
   });
 
   app.get("/api/files", async (req, res) => {
@@ -312,18 +370,31 @@ async function bootstrap() {
 
   app.get("/api/shares", (req, res) => {
     const host = req.headers.host || `127.0.0.1:${config.server.port}`;
-    const shares = shareService.listShares().map((share) => ({
-      shareId: share.shareId,
-      path: toPosixPath(path.relative(config.storage.ownerRoot, share.targetPath)),
-      permission: share.permission,
-      expiresAt: share.expiryTime,
-      status: share.status,
-      scope: share.scope || "local",
-      url:
-        share.status === "active"
-          ? `http://${host}${config.server.shareBasePath}/${share.shareId}`
-          : null,
-    }));
+    const shares = shareService.listShares().map((share) => {
+      const relativePath = formatSharePath(config.storage.ownerRoot, share.targetPath);
+      const fileName = path.posix.basename(relativePath || "/");
+      const isActive = share.status === "active";
+      const url = isActive
+        ? `http://${host}${config.server.shareBasePath}/${share.shareId}`
+        : null;
+      return {
+        shareId: share.shareId,
+        id: share.shareId,
+        path: relativePath,
+        fileName,
+        permission: share.permission,
+        expiresAt: share.expiryTime,
+        createdAt: share.createdAt,
+        status: share.status,
+        isActive,
+        scope: share.scope || "local",
+        url,
+        tunnelUrl: url,
+        downloadCount: 0,
+        maxDownloads: null,
+        passwordHash: null,
+      };
+    });
     res.json(shares);
   });
 
@@ -334,8 +405,12 @@ async function bootstrap() {
 
   app.post("/api/upload", upload.array("files"), async (req, res) => {
     try {
-      const target = req.body?.path || "/";
+      const target = req.body?.path || req.body?.parentPath || "/";
       const targetPath = resolveOwnerPath(config.storage.ownerRoot, toPosixPath(target));
+      logger.info("upload started", {
+        count: (req.files || []).length,
+        target: toPosixPath(target),
+      });
       await fs.mkdir(targetPath, { recursive: true });
       const stored = [];
       let totalBytes = 0;
@@ -354,6 +429,7 @@ async function bootstrap() {
       });
       res.json({ success: true });
     } catch (error) {
+      logger.error("upload failed", { error: error.message });
       res.status(400).json({ error: error.message });
     }
   });
@@ -394,6 +470,10 @@ async function bootstrap() {
     } catch (error) {
       res.json([]);
     }
+  });
+
+  app.get("/api/v1/health", (_req, res) => {
+    res.json({ status: "ok" });
   });
 
   let presenceList = [];
@@ -528,6 +608,11 @@ async function bootstrap() {
   shareOnlyServer.listen(config.server.sharePort, "127.0.0.1");
   server.listen(config.server.port, config.server.host, () => {
     const publicHost = config.server.host === "0.0.0.0" ? "127.0.0.1" : config.server.host;
+    logger.info("app started", {
+      host: config.server.host,
+      port: config.server.port,
+      sharePort: config.server.sharePort,
+    });
     console.log("[joincloud] WebDAV owner mounted", {
       path: config.server.ownerBasePath,
       root: config.storage.ownerRoot,

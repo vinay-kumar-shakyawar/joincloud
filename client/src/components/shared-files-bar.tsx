@@ -33,9 +33,12 @@ export function SharedFilesBar() {
 
   const stopShareMutation = useMutation({
     mutationFn: async (shareId: string) => {
-      return apiRequest("DELETE", `/api/shares/${shareId}`, null);
+      return apiRequest("DELETE", `/api/share/${shareId}`, null);
     },
-    onSuccess: () => {
+    onSuccess: (_data, shareId) => {
+      queryClient.setQueryData<ShareLink[]>(["/api/shares"], (prev) =>
+        (prev || []).filter((share) => share.id !== shareId && share.shareId !== shareId)
+      );
       queryClient.invalidateQueries({ queryKey: ["/api/shares"] });
       queryClient.invalidateQueries({ queryKey: ["/api/shares", "check"] });
       toast({

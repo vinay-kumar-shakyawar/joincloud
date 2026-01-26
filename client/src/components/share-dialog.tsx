@@ -61,12 +61,20 @@ export function ShareDialog({ file, open, onOpenChange }: ShareDialogProps) {
   const [accessType, setAccessType] = useState<"view" | "download">("download");
   const { toast } = useToast();
 
-  const { data: existingShare, isLoading: checkingShare } = useQuery<{ isShared: boolean; share: ShareLink | null }>({
-    queryKey: ["/api/shares", file?.id, "check"],
+  const sharePath =
+    file?.path || (file as any)?.virtualPath || (file ? `/${file.name}` : "/");
+
+  const { data: existingShare, isLoading: checkingShare } = useQuery<{
+    isShared: boolean;
+    share: ShareLink | null;
+  }>({
+    queryKey: ["/api/shares", sharePath, "check"],
     queryFn: async () => {
       if (!file) return { isShared: false, share: null };
-      const res = await fetch(`/api/shares/${file.id}/check`);
-      return res.json();
+      const res = await fetch("/api/shares");
+      const shares: ShareLink[] = await res.json();
+      const matched = shares.find((share) => share.path === sharePath) || null;
+      return { isShared: !!matched, share: matched };
     },
     enabled: !!file && open,
   });
@@ -85,20 +93,37 @@ export function ShareDialog({ file, open, onOpenChange }: ShareDialogProps) {
       maxDownloads?: number;
       accessType: "view" | "download";
     }) => {
-      return apiRequest("POST", "/api/shares", { 
-        fileId, 
-        duration,
-        accessType,
-        ...(password && { password }),
-        ...(maxDownloads && maxDownloads > 0 && { maxDownloads }),
+      const ttlMs = (() => {
+        switch (duration) {
+          case "1h":
+            return 60 * 60 * 1000;
+          case "6h":
+            return 6 * 60 * 60 * 1000;
+          case "24h":
+            return 24 * 60 * 60 * 1000;
+          case "7d":
+            return 7 * 24 * 60 * 60 * 1000;
+          case "30d":
+            return 30 * 24 * 60 * 60 * 1000;
+          case "never":
+            return 365 * 24 * 60 * 60 * 1000;
+          default:
+            return 24 * 60 * 60 * 1000;
+        }
+      })();
+      return apiRequest("POST", "/api/share", { 
+        path: sharePath,
+        permission: "read-only",
+        ttlMs,
+        scope: "local",
       });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/shares"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/shares", file?.id, "check"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/shares", sharePath, "check"] });
       toast({
         title: "Share link created",
-        description: "Your file is now being shared via ngrok",
+        description: "Your file is now shared",
       });
       setPassword("");
       setUsePassword(false);
@@ -115,11 +140,14 @@ export function ShareDialog({ file, open, onOpenChange }: ShareDialogProps) {
 
   const stopShareMutation = useMutation({
     mutationFn: async (shareId: string) => {
-      return apiRequest("DELETE", `/api/shares/${shareId}`, null);
+      return apiRequest("DELETE", `/api/share/${shareId}`, null);
     },
-    onSuccess: () => {
+    onSuccess: (_data, shareId) => {
+      queryClient.setQueryData<ShareLink[]>(["/api/shares"], (prev) =>
+        (prev || []).filter((share) => share.id !== shareId && share.shareId !== shareId)
+      );
       queryClient.invalidateQueries({ queryKey: ["/api/shares"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/shares", file?.id, "check"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/shares", sharePath, "check"] });
       toast({
         title: "Sharing stopped",
         description: "The share link has been disabled",
@@ -147,9 +175,9 @@ export function ShareDialog({ file, open, onOpenChange }: ShareDialogProps) {
     createShareMutation.mutate({ 
       fileId: file.id, 
       duration,
-      accessType: "download", // Forced to download
+      accessType: "download",
       password: usePassword ? password : undefined,
-      maxDownloads: undefined, // Removed download limit
+      maxDownloads: undefined,
     });
   };
 
