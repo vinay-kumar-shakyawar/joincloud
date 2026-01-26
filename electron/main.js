@@ -324,6 +324,14 @@ function stopHealthMonitor() {
 async function createWindow() {
   initLogging();
   logLine("UI init");
+  const iconPath = path.join(__dirname, "..", "assets", "icon", "icon.png");
+  if (app.dock && typeof app.dock.setIcon === "function") {
+    try {
+      app.dock.setIcon(iconPath);
+    } catch (error) {
+      logLine("Dock icon unavailable");
+    }
+  }
   try {
     const resolver = require(path.join(__dirname, "..", "server", "tunnel", "resolveBinary"));
     resolver.resolveTunnelBinaryPath();
@@ -343,6 +351,7 @@ async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    icon: iconPath,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -374,6 +383,15 @@ app.whenReady().then(createWindow);
 ipcMain.handle("joincloud-open-storage", async () => {
   const storagePath = getStoragePath();
   await shell.openPath(storagePath);
+});
+
+ipcMain.handle("joincloud-stop-server", async () => {
+  if (isStopping) return true;
+  isStopping = true;
+  stopHealthMonitor();
+  await stopBackendGracefully();
+  app.quit();
+  return true;
 });
 
 app.on("window-all-closed", () => {

@@ -16,10 +16,6 @@
     {
       "from": "server/bin",
       "to": "bin"
-    },
-    {
-      "from": "client/dist",
-      "to": "renderer"
     }
   ]
 }

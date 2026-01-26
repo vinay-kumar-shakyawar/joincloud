@@ -1,4 +1,5 @@
 const http = require("http");
+const https = require("https");
 const fs = require("fs/promises");
 const path = require("path");
 const os = require("os");
@@ -16,7 +17,9 @@ const { resolveOwnerPath } = require("./security/pathGuard");
 const { TunnelManager } = require("./tunnel/TunnelManager");
 const { createLogger } = require("./utils/logger");
 const { createTelemetryStore } = require("./telemetry/store");
-const { createTelemetrySync } = require("./telemetry/sync");
+const { createTelemetryEngine } = require("./telemetry/engine");
+const { createTelemetryCounters } = require("./telemetry/counters");
+const { getDeviceUUID } = require("./telemetry/identity");
 const crypto = require("crypto");
 
 async function ensureOwnerStorage(rootPath) {
@@ -37,14 +40,33 @@ async function ensureUserConfig(configPath) {
   try {
     const raw = await fs.readFile(configPath, "utf8");
     const parsed = JSON.parse(raw);
+    let changed = false;
     if (typeof parsed.telemetry_enabled !== "boolean") {
       parsed.telemetry_enabled = true;
+      changed = true;
     }
     if (!parsed.display_name) {
       parsed.display_name = generateDisplayName();
+      changed = true;
     }
     if (typeof parsed.network_visibility !== "boolean") {
       parsed.network_visibility = true;
+      changed = true;
+    }
+    if (!parsed.device_uuid) {
+      parsed.device_uuid = crypto.randomUUID();
+      changed = true;
+    }
+    if (!parsed.first_launch_at) {
+      parsed.first_launch_at = new Date().toISOString();
+      changed = true;
+    }
+    if (typeof parsed.install_registered !== "boolean") {
+      parsed.install_registered = false;
+      changed = true;
+    }
+    if (changed) {
+      await fs.writeFile(configPath, JSON.stringify(parsed, null, 2));
     }
     return parsed;
   } catch (error) {
@@ -56,6 +78,9 @@ async function ensureUserConfig(configPath) {
       telemetry_last_sync: null,
       display_name: generateDisplayName(),
       network_visibility: true,
+      device_uuid: crypto.randomUUID(),
+      first_launch_at: new Date().toISOString(),
+      install_registered: false,
     };
     await fs.writeFile(configPath, JSON.stringify(payload, null, 2));
     return payload;
@@ -159,6 +184,107 @@ function startUptimeTracker(telemetry) {
   }, 1000);
 }
 
+function checkAdminHealth(adminBaseUrl) {
+  return new Promise((resolve) => {
+    if (!adminBaseUrl) {
+      resolve({ internetAvailable: false, adminReachable: false });
+      return;
+    }
+    try {
+      const url = new URL("/health", adminBaseUrl);
+      const client = url.protocol === "https:" ? https : http;
+      const req = client.request(
+        {
+          method: "GET",
+          hostname: url.hostname,
+          port: url.port || (url.protocol === "https:" ? 443 : 80),
+          path: url.pathname,
+          timeout: 4000,
+        },
+        (res) => {
+          res.resume();
+          const ok = res.statusCode && res.statusCode >= 200 && res.statusCode < 300;
+          resolve({ internetAvailable: true, adminReachable: !!ok });
+        }
+      );
+      req.on("error", (error) => {
+        const offlineCodes = ["ENOTFOUND", "EAI_AGAIN", "ENETUNREACH", "ENETDOWN", "EHOSTUNREACH"];
+        const internetAvailable = !offlineCodes.includes(error?.code);
+        resolve({ internetAvailable, adminReachable: false });
+      });
+      req.on("timeout", () => {
+        req.destroy();
+        resolve({ internetAvailable: true, adminReachable: false });
+      });
+      req.end();
+    } catch (error) {
+      resolve({ internetAvailable: false, adminReachable: false });
+    }
+  });
+}
+
+function requestAdminJson(adminBaseUrl, pathname, options = {}) {
+  return new Promise((resolve) => {
+    if (!adminBaseUrl) {
+      resolve(null);
+      return;
+    }
+    try {
+      const url = new URL(pathname, adminBaseUrl);
+      const client = url.protocol === "https:" ? https : http;
+      const payload = options.payload ? JSON.stringify(options.payload) : null;
+      const req = client.request(
+        {
+          method: options.method || "GET",
+          hostname: url.hostname,
+          port: url.port || (url.protocol === "https:" ? 443 : 80),
+          path: `${url.pathname}${url.search}`,
+          headers: payload
+            ? {
+                "Content-Type": "application/json",
+                "Content-Length": Buffer.byteLength(payload),
+              }
+            : undefined,
+          timeout: options.timeoutMs || 5000,
+        },
+        (res) => {
+          let body = "";
+          res.setEncoding("utf8");
+          res.on("data", (chunk) => {
+            body += chunk;
+          });
+          res.on("end", () => {
+            if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+              resolve(null);
+              return;
+            }
+            if (!body) {
+              resolve({});
+              return;
+            }
+            try {
+              resolve(JSON.parse(body));
+            } catch (error) {
+              resolve({});
+            }
+          });
+        }
+      );
+      req.on("error", () => resolve(null));
+      req.on("timeout", () => {
+        req.destroy();
+        resolve(null);
+      });
+      if (payload) {
+        req.write(payload);
+      }
+      req.end();
+    } catch (error) {
+      resolve(null);
+    }
+  });
+}
+
 function getLanAddress() {
   const interfaces = os.networkInterfaces();
   for (const list of Object.values(interfaces)) {
@@ -256,16 +382,28 @@ async function bootstrap() {
   logger.info("user initialized", { user_id: userConfig.user_id });
   const telemetry = createTelemetryStore(config.storage.telemetryPath);
   telemetry.trackEvent("app_started", { user_id: userConfig.user_id });
-  const telemetrySync = createTelemetrySync({
-    telemetryStore: telemetry,
+  const telemetryCounters = createTelemetryCounters(
+    config.storage.telemetryCountersPath,
+    logger
+  );
+  await telemetryCounters.load();
+  const deviceUUID = await getDeviceUUID(
+    userConfig,
+    (payload) => updateUserConfig(config.storage.userConfigPath, payload)
+  );
+  const telemetryEngine = createTelemetryEngine({
+    adminBaseUrl: config.telemetry.adminBaseUrl,
+    deviceUUID,
+    appVersion: getAppVersion(),
     userConfig,
     updateUserConfig: (payload) => updateUserConfig(config.storage.userConfigPath, payload),
-    adminHost: config.telemetry.adminHost,
-    appVersion: getAppVersion(),
+    telemetryCounters,
+    getBackendHealthy: () => true,
     logger,
   });
-  telemetrySync.start();
+  telemetryEngine.start();
   const uptimeTimer = startUptimeTracker(telemetry);
+  const recordTelemetryError = () => telemetryCounters.increment({ errorCount: 1 });
 
   const ownerServer = createOwnerServer({
     ownerRoot: config.storage.ownerRoot,
@@ -343,6 +481,7 @@ async function bootstrap() {
       const items = await listDirectory(config.storage.ownerRoot, requestedPath);
       res.json({ path: toPosixPath(requestedPath), items });
     } catch (error) {
+      recordTelemetryError();
       res.status(400).json({ error: error.message });
     }
   });
@@ -356,6 +495,11 @@ async function bootstrap() {
       }
       const targetPath = resolveOwnerPath(config.storage.ownerRoot, toPosixPath(sharePath));
       const share = await shareService.createShare({ targetPath, permission, ttlMs, scope });
+      telemetryCounters.increment({
+        sharesCreatedCount: 1,
+        publicSharesCount: share.scope === "public" ? 1 : 0,
+        lanSharesCount: share.scope === "local" ? 1 : 0,
+      });
       const host = req.headers.host || `127.0.0.1:${config.server.port}`;
       logger.info("share link generated", { scope: share.scope });
       res.json({
@@ -364,6 +508,7 @@ async function bootstrap() {
         expiresAt: share.expiryTime,
       });
     } catch (error) {
+      recordTelemetryError();
       res.status(400).json({ error: error.message });
     }
   });
@@ -427,9 +572,14 @@ async function bootstrap() {
         count: stored.length,
         bytes: totalBytes,
       });
+      telemetryCounters.increment({
+        filesUploadedCount: stored.length,
+        totalDataUploadedSize: totalBytes,
+      });
       res.json({ success: true });
     } catch (error) {
       logger.error("upload failed", { error: error.message });
+      recordTelemetryError();
       res.status(400).json({ error: error.message });
     }
   });
@@ -470,6 +620,44 @@ async function bootstrap() {
     } catch (error) {
       res.json([]);
     }
+  });
+
+  app.get("/api/v1/admin/health", async (_req, res) => {
+    const status = await checkAdminHealth(config.telemetry.adminBaseUrl);
+    res.json(status);
+  });
+
+  app.get("/api/v1/messages", async (_req, res) => {
+    const payload = await requestAdminJson(
+      config.telemetry.adminBaseUrl,
+      `/api/messages/${deviceUUID}`
+    );
+    if (!payload) {
+      res.json({ messages: [] });
+      return;
+    }
+    res.json(payload);
+  });
+
+  app.post("/api/v1/messages/reply", async (req, res) => {
+    const text = `${req.body?.text || req.body?.message || ""}`.trim();
+    if (!text) {
+      res.json({ ok: false });
+      return;
+    }
+    const payload = await requestAdminJson(
+      config.telemetry.adminBaseUrl,
+      `/api/messages/${deviceUUID}/reply`,
+      {
+        method: "POST",
+        payload: { text, sender: "user" },
+      }
+    );
+    if (!payload) {
+      res.json({ ok: false });
+      return;
+    }
+    res.json(payload.ok === undefined ? { ok: true } : payload);
   });
 
   app.get("/api/v1/health", (_req, res) => {
@@ -543,12 +731,18 @@ async function bootstrap() {
 
     if (typeof requestedName === "string") {
       if (isValidDisplayName(requestedName)) {
+        const oldName = userConfig.display_name;
         updateDisplayName(requestedName);
         updated = true;
+        // Task 2: Log display name change
+        if (oldName !== requestedName) {
+          logger.info("Display name updated");
+        }
       }
     }
 
     if (typeof requestedVisibility === "boolean") {
+      const wasVisible = !!userConfig.network_visibility;
       userConfig.network_visibility = requestedVisibility;
       if (requestedVisibility) {
         startBroadcast();
@@ -558,6 +752,10 @@ async function bootstrap() {
         stopDiscovery();
       }
       updated = true;
+      // Task 2: Log visibility change
+      if (wasVisible !== requestedVisibility) {
+        logger.info(requestedVisibility ? "Network visibility enabled" : "Network visibility disabled");
+      }
     }
 
     if (updated) {
@@ -576,10 +774,26 @@ async function bootstrap() {
 
   app.post("/api/v1/telemetry/settings", async (req, res) => {
     const enabled = !!req.body?.enabled;
+    const wasEnabled = !!userConfig.telemetry_enabled;
     userConfig.telemetry_enabled = enabled;
     await updateUserConfig(config.storage.userConfigPath, userConfig);
-    logger.info("telemetry setting updated", { enabled });
+    // Task 2: Log telemetry changes
+    if (enabled !== wasEnabled) {
+      logger.info(enabled ? "Telemetry enabled" : "Telemetry disabled");
+    }
     res.json({ enabled });
+  });
+
+  // Task 1: System Information API
+  app.get("/api/v1/system", (_req, res) => {
+    res.json({
+      user_id: userConfig.user_id,
+      device_uuid: deviceUUID,
+      os: process.platform === "darwin" ? "macOS" : process.platform,
+      arch: process.arch,
+      app_version: getAppVersion(),
+      backend_status: "Running",
+    });
   });
 
   const server = http.createServer((req, res) => {
@@ -647,8 +861,8 @@ async function bootstrap() {
   const shutdown = () => {
     expiryManager.stop();
     tunnelManager.stop();
-    telemetrySync.flush().catch(() => {});
-    telemetrySync.stop();
+    telemetryEngine.flush();
+    telemetryEngine.stop();
     stopDiscovery();
     stopBroadcast();
     bonjour.destroy();
@@ -660,6 +874,15 @@ async function bootstrap() {
 
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+  process.on("uncaughtException", (error) => {
+    telemetryCounters.increment({ crashCount: 1 });
+    logger.error("uncaught exception", { error: error.message });
+    setTimeout(() => process.exit(1), 50);
+  });
+  process.on("unhandledRejection", (reason) => {
+    telemetryCounters.increment({ crashCount: 1 });
+    logger.error("unhandled rejection", { error: String(reason) });
+  });
 
   return { shareService };
 }

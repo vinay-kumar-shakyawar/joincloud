@@ -8,7 +8,7 @@
     "ui:build": "vite build --config vite.config.ts",
     "electron:dev": "ELECTRON_RUN_AS_NODE= electron .",
     "test:electron": "ELECTRON_RUN_AS_NODE= node electron/tests/smoke.test.js",
-    "build:mac": "npm run ui:build && electron-builder --mac",
+    "build:mac": "electron-builder --mac",
     "rebuild:server": "electron-rebuild -w sqlite3 --module-dir server",
     "postinstall": "npm run rebuild:server",
     "prebuild:mac": "npm run rebuild:server"

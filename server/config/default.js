@@ -35,6 +35,9 @@ module.exports = {
     telemetryPath:
       process.env.JOINCLOUD_TELEMETRY_DB ||
       path.join(APP_SUPPORT_DIR, "telemetry", "telemetry.db"),
+  telemetryCountersPath:
+    process.env.JOINCLOUD_TELEMETRY_COUNTERS ||
+    path.join(APP_SUPPORT_DIR, "telemetry", "counters.json"),
   },
   share: {
     defaultPermission: "read-only",
@@ -46,5 +49,9 @@ module.exports = {
   tunnel: {},
   telemetry: {
     adminHost: process.env.JOINCLOUD_ADMIN_HOST || null,
+    adminBaseUrl:
+      process.env.ADMIN_BASE_URL ||
+      process.env.JOINCLOUD_ADMIN_BASE_URL ||
+      "https://admin-control-plane.replit.app",
   },
 };

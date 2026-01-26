@@ -12,7 +12,20 @@
         <img class="brand-logo" src="/logo.png" alt="JoinCloud" />
         <span>JoinCloud</span>
       </div>
-      <div class="status" id="node-status">Status: --</div>
+      <div class="status" id="node-status">
+        <div class="heartbeat" id="heartbeat">
+          <span class="heartbeat-icon" id="heartbeat-indicator" title="Checking connectivity" aria-label="Connectivity status">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 6 4 4 6.5 4c1.74 0 3.41.81 4.5 2.09C12.09 4.81 13.76 4 15.5 4 18 4 20 6 20 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+            </svg>
+          </span>
+          <span class="heartbeat-label">Heartbeat</span>
+          <span class="heartbeat-note" id="heartbeat-note"></span>
+        </div>
+        <span class="status-indicator" id="status-indicator" aria-hidden="true"></span>
+        <span class="status-text" id="status-text">Status: --</span>
+        <button class="button secondary small status-stop hidden" id="stop-server" type="button">Stop</button>
+      </div>
     </header>
 
     <main class="layout">
@@ -20,6 +33,10 @@
         <button class="nav-button active" data-section="home">Home</button>
         <button class="nav-button" data-section="files">Files</button>
         <button class="nav-button" data-section="shares">Shares</button>
+        <button class="nav-button" data-section="messages">
+          Messages
+          <span class="nav-badge hidden" id="messages-badge">0</span>
+        </button>
         <button class="nav-button" data-section="logs">Logs</button>
         <button class="nav-button" data-section="settings">Settings</button>
         <button class="nav-button" data-section="network">Network</button>
@@ -60,7 +77,7 @@
         <div class="row space-between">
           <h2>File Browser</h2>
           <div class="row">
-            <label class="button secondary" for="upload-input">Upload</label>
+            <button class="button" id="upload-button" type="button">Upload Files</button>
             <input id="upload-input" type="file" multiple hidden />
             <button class="button secondary" id="back-button">Back</button>
             <button class="button secondary" id="refresh-files">Refresh</button>
@@ -77,6 +94,18 @@
           <button class="button secondary" id="refresh-shares">Refresh</button>
         </div>
         <div class="share-list" id="share-list"></div>
+      </section>
+
+      <section class="card section" data-section="messages">
+        <div class="row space-between">
+          <h2>Messages</h2>
+          <div class="value message-status" id="messages-status">Support thread</div>
+        </div>
+        <div class="message-thread" id="message-thread"></div>
+        <div class="message-composer">
+          <textarea class="input message-input" id="message-input" rows="2" placeholder="Type a message"></textarea>
+          <button class="button" id="message-send" type="button">Send</button>
+        </div>
       </section>
       
       <section class="card section" data-section="logs">
@@ -124,12 +153,48 @@
             What is shared on the network? Only your chosen display name and online status are visible to other JoinCloud users on the same network. No files, device details, or identifiers are ever shared automatically.
           </div>
         </div>
+
+        <!-- Task 1: System Information -->
+        <div class="divider"></div>
+        <h3>System Information</h3>
+        <div class="info-grid" id="system-info">
+          <div class="info-row">
+            <div class="label">User ID</div>
+            <div class="value mono" id="sys-user-id">--</div>
+            <button class="button ghost small" id="copy-user-id" title="Copy">📋</button>
+          </div>
+          <div class="info-row">
+            <div class="label">Device UUID</div>
+            <div class="value mono" id="sys-device-uuid">--</div>
+            <button class="button ghost small" id="copy-device-uuid" title="Copy">📋</button>
+          </div>
+          <div class="info-row">
+            <div class="label">Device / OS</div>
+            <div class="value" id="sys-os">--</div>
+          </div>
+          <div class="info-row">
+            <div class="label">Architecture</div>
+            <div class="value" id="sys-arch">--</div>
+          </div>
+          <div class="info-row">
+            <div class="label">App Version</div>
+            <div class="value" id="sys-version">--</div>
+          </div>
+          <div class="info-row">
+            <div class="label">Backend Status</div>
+            <div class="value" id="sys-status">--</div>
+          </div>
+        </div>
       </section>
 
       <section class="card section" data-section="network">
         <div class="row space-between">
           <h2>Network</h2>
           <button class="button secondary" id="refresh-network">Refresh</button>
+        </div>
+        <!-- Task 4: Network purpose clarification -->
+        <div class="network-purpose">
+          Devices shown here can receive JoinCloud links instantly on your local network.
         </div>
         <div class="network-list" id="network-list"></div>
       </section>
