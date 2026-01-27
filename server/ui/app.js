@@ -69,8 +69,7 @@ const els = {
 
 const stateMeta = {
   lanBaseUrl: window.location.origin,
-  publicUrl: null,
-  publicActive: false,
+  publicDomain: "share.joincloud.in",
 };
 
 const messageMeta = {
@@ -616,13 +615,7 @@ function renderShares() {
     const copyButton = document.createElement("button");
     copyButton.className = "button secondary";
     copyButton.textContent = "Copy Link";
-    const baseUrl =
-      share.scope === "public"
-        ? stateMeta.publicActive
-          ? stateMeta.publicUrl
-          : null
-        : stateMeta.lanBaseUrl;
-    const shareUrl = baseUrl ? `${baseUrl}/share/${share.shareId}` : null;
+    const shareUrl = share.url || null;
     copyButton.disabled = !shareUrl;
     copyButton.onclick = async () => {
       if (!shareUrl) return;
@@ -679,17 +672,6 @@ function closeShareModal() {
 async function createShare() {
   const pathValue = els.sharePath.value;
   const selectedScope = Array.from(els.shareScope).find((el) => el.checked)?.value || "local";
-  if (selectedScope === "public" && !stateMeta.publicActive) {
-    const confirmEnable = confirm("Public access is required. Enable now?");
-    if (!confirmEnable) return;
-    els.shareResult.textContent = "Enabling public access. This may take a few seconds.";
-    await togglePublicAccess();
-    const ready = await waitForPublicAccess(10000);
-    if (!ready) {
-      els.shareResult.textContent = "Public sharing is unavailable on this system";
-      return;
-    }
-  }
   const permission = els.sharePermission.value;
   const ttlSelection = els.shareTtl.value;
   if (ttlSelection === "custom" && !els.shareTtlCustom.value) {
@@ -711,11 +693,7 @@ async function createShare() {
     els.shareResult.textContent = data.error || "Failed to create share";
     return;
   }
-  const baseUrl =
-    selectedScope === "public" && stateMeta.publicActive
-      ? stateMeta.publicUrl
-      : stateMeta.lanBaseUrl;
-  const shareUrl = `${baseUrl}/share/${data.shareId}`;
+  const shareUrl = data.url || `https://${data.shareId}.${stateMeta.publicDomain}`;
   els.shareResult.textContent = `Share created: ${shareUrl}`;
   els.copyShare.style.display = "inline-flex";
   els.copyShare.onclick = async () => {
@@ -735,66 +713,22 @@ async function revokeShare(shareId) {
   await loadLogs();
 }
 
-async function waitForPublicAccess(timeoutMs) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    await refreshPublicAccess();
-    if (stateMeta.publicActive) return true;
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  return false;
-}
-
 async function refreshPublicAccess() {
   const res = await fetch("/api/public-access/status");
   const data = await res.json();
-  stateMeta.publicActive = data.status === "active";
-  stateMeta.publicUrl = data.publicUrl || null;
-  if (data.status === "active") {
-    els.publicStatus.textContent = "Public access enabled";
-    els.publicUrl.textContent = data.publicUrl;
-    els.publicReason.textContent = "";
-    els.togglePublic.textContent = "Disable Public Sharing";
-    els.togglePublic.disabled = false;
-  } else if (data.status === "starting" || data.status === "restarting") {
-    els.publicStatus.textContent = "Starting public access…";
-    els.publicUrl.textContent = "--";
-    els.publicReason.textContent = "";
-    els.togglePublic.textContent = "Starting…";
-    els.togglePublic.disabled = true;
-  } else if (data.status === "stopping") {
-    els.publicStatus.textContent = "Stopping public access…";
-    els.publicUrl.textContent = "--";
-    els.publicReason.textContent = "";
-    els.togglePublic.textContent = "Stopping…";
-    els.togglePublic.disabled = true;
-  } else {
-    els.publicStatus.textContent =
-      data.status === "failed" || data.status === "error"
-        ? "Public access unavailable"
-        : "Public access disabled";
-    els.publicUrl.textContent = "--";
-    els.publicReason.textContent = data.reason ? `Reason: ${data.reason}` : "";
-    els.togglePublic.textContent = "Enable Public Sharing";
-    els.togglePublic.disabled = false;
+  stateMeta.publicDomain = data.domain || stateMeta.publicDomain;
+  els.publicStatus.textContent = "Public sharing via VPS";
+  els.publicUrl.textContent = `https://<share-id>.${stateMeta.publicDomain}`;
+  els.publicReason.textContent = "";
+  if (els.togglePublic) {
+    els.togglePublic.classList.add("hidden");
   }
-}
-
-async function togglePublicAccess() {
-  if (stateMeta.publicActive) {
-    els.togglePublic.disabled = true;
-    await fetch("/api/public-access/stop", { method: "POST" });
-  } else {
-    els.togglePublic.disabled = true;
-    const response = await fetch("/api/public-access/start", { method: "POST" });
-    const data = await response.json();
-    if (data.status === "failed" || data.status === "error") {
-      alert(data.message || "Public sharing is unavailable on this system");
-    }
+  if (els.retryPublic) {
+    els.retryPublic.classList.add("hidden");
   }
-  await refreshPublicAccess();
-  await loadShares();
-  els.togglePublic.disabled = false;
+  if (els.switchLan) {
+    els.switchLan.classList.add("hidden");
+  }
 }
 
 els.refreshFiles.onclick = () => loadFiles(state.path);
@@ -823,12 +757,9 @@ els.shareTtl.onchange = () => {
     els.shareTtlCustom.style.display = "none";
   }
 };
-els.togglePublic.onclick = togglePublicAccess;
-els.retryPublic.onclick = () => togglePublicAccess();
-els.switchLan.onclick = async () => {
-  await fetch("/api/public-access/stop", { method: "POST" });
-  await refreshPublicAccess();
-};
+if (els.togglePublic) {
+  els.togglePublic.onclick = () => {};
+}
 els.openStorage.onclick = async () => {
   if (window.joincloud && window.joincloud.openStorageFolder) {
     await window.joincloud.openStorageFolder();

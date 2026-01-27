@@ -14,7 +14,6 @@ const { createMountManager } = require("./webdav/mountManager");
 const { ShareService } = require("./sharing/shareService");
 const { ExpiryManager } = require("./sharing/expiryManager");
 const { resolveOwnerPath } = require("./security/pathGuard");
-const { TunnelManager } = require("./tunnel/TunnelManager");
 const { createLogger } = require("./utils/logger");
 const { createTelemetryStore } = require("./telemetry/store");
 const { createTelemetryEngine } = require("./telemetry/engine");
@@ -429,11 +428,6 @@ async function bootstrap() {
 
   expiryManager.start();
 
-  const tunnelManager = new TunnelManager({
-    url: `http://127.0.0.1:${config.server.sharePort}`,
-    logger,
-  });
-
   const handler = createMountManager({
     ownerServer,
     shareService,
@@ -443,9 +437,31 @@ async function bootstrap() {
     logger,
   });
 
+  const getPublicShareUrl = (shareId) => {
+    const domain = config.publicShareDomain || "share.joincloud.in";
+    return `https://${shareId}.${domain}`;
+  };
+
+  const isShareRequestHost = (hostHeader) => {
+    const shareDomain = (config.publicShareDomain || "").toLowerCase();
+    if (!shareDomain || !hostHeader) return false;
+    const host = hostHeader.split(":")[0].toLowerCase();
+    if (!host.endsWith(shareDomain)) return false;
+    const prefix = host.slice(0, host.length - shareDomain.length);
+    return prefix.endsWith(".") && prefix.length > 1;
+  };
+
   const app = express();
   app.use(express.json());
   const upload = multer({ storage: multer.memoryStorage() });
+  app.get("/", (req, res, next) => {
+    const accept = req.headers.accept || "";
+    if (accept.includes("text/html")) {
+      next();
+      return;
+    }
+    res.json({ status: "JoinCloud backend active" });
+  });
   app.use("/", express.static(path.join(__dirname, "ui")));
   app.get("/privacy", (_req, res) => {
     res.sendFile(path.join(__dirname, "..", "docs", "privacy.md"));
@@ -494,17 +510,24 @@ async function bootstrap() {
         return;
       }
       const targetPath = resolveOwnerPath(config.storage.ownerRoot, toPosixPath(sharePath));
-      const share = await shareService.createShare({ targetPath, permission, ttlMs, scope });
+      const shareScope = scope === "public" ? "public" : "local";
+      const share = await shareService.createShare({
+        targetPath,
+        permission,
+        ttlMs,
+        scope: shareScope,
+      });
       telemetryCounters.increment({
         sharesCreatedCount: 1,
         publicSharesCount: share.scope === "public" ? 1 : 0,
         lanSharesCount: share.scope === "local" ? 1 : 0,
       });
-      const host = req.headers.host || `127.0.0.1:${config.server.port}`;
+      const baseUrl = getPublicShareUrl(share.shareId);
       logger.info("share link generated", { scope: share.scope });
       res.json({
         shareId: share.shareId,
-        url: `http://${host}${config.server.shareBasePath}/${share.shareId}`,
+        url: baseUrl,
+        public: share.scope === "public",
         expiresAt: share.expiryTime,
       });
     } catch (error) {
@@ -514,14 +537,11 @@ async function bootstrap() {
   });
 
   app.get("/api/shares", (req, res) => {
-    const host = req.headers.host || `127.0.0.1:${config.server.port}`;
     const shares = shareService.listShares().map((share) => {
       const relativePath = formatSharePath(config.storage.ownerRoot, share.targetPath);
       const fileName = path.posix.basename(relativePath || "/");
       const isActive = share.status === "active";
-      const url = isActive
-        ? `http://${host}${config.server.shareBasePath}/${share.shareId}`
-        : null;
+      const url = isActive ? getPublicShareUrl(share.shareId) : null;
       return {
         shareId: share.shareId,
         id: share.shareId,
@@ -545,7 +565,7 @@ async function bootstrap() {
 
   app.delete("/api/share/:shareId", async (req, res) => {
     const ok = await shareService.revokeShare(req.params.shareId);
-    res.json({ revoked: ok });
+    res.json({ revoked: ok, public: false });
   });
 
   app.post("/api/upload", upload.array("files"), async (req, res) => {
@@ -585,25 +605,21 @@ async function bootstrap() {
   });
 
   app.get("/api/public-access/status", (_req, res) => {
-    res.json(tunnelManager.getStatus());
+    res.json({
+      public: true,
+      domain: config.publicShareDomain,
+    });
   });
 
   app.post("/api/public-access/start", async (_req, res) => {
-    try {
-      const status = await tunnelManager.start();
-      res.json(status);
-    } catch (error) {
-      res.json({
-        status: "failed",
-        reason: "Network blocked",
-        message: "Public sharing is unavailable on this system",
-      });
-    }
+    res.json({
+      public: true,
+      urlTemplate: `https://<share-id>.${config.publicShareDomain}`,
+    });
   });
 
-  app.post("/api/public-access/stop", (_req, res) => {
-    const status = tunnelManager.stop();
-    res.json(status);
+  app.post("/api/public-access/stop", async (_req, res) => {
+    res.json({ public: false });
   });
 
   app.get("/api/logs", async (_req, res) => {
@@ -798,6 +814,10 @@ async function bootstrap() {
 
   const server = http.createServer((req, res) => {
     const url = req.url || "/";
+    if (isShareRequestHost(req.headers.host)) {
+      handler(req, res);
+      return;
+    }
     if (
       url === config.server.ownerBasePath ||
       url.startsWith(`${config.server.ownerBasePath}/`) ||
@@ -810,23 +830,16 @@ async function bootstrap() {
     app(req, res);
   });
 
-  const shareOnlyServer = http.createServer((req, res) => {
-    const url = req.url || "/";
-    if (url === config.server.shareBasePath || url.startsWith(`${config.server.shareBasePath}/`)) {
-      handler(req, res);
-      return;
-    }
-    res.statusCode = 404;
-    res.end();
-  });
-  shareOnlyServer.listen(config.server.sharePort, "127.0.0.1");
   server.listen(config.server.port, config.server.host, () => {
     const publicHost = config.server.host === "0.0.0.0" ? "127.0.0.1" : config.server.host;
     logger.info("app started", {
       host: config.server.host,
       port: config.server.port,
-      sharePort: config.server.sharePort,
     });
+    console.log(
+      "[joincloud] Backend listening",
+      `http://0.0.0.0:${config.server.port}`
+    );
     console.log("[joincloud] WebDAV owner mounted", {
       path: config.server.ownerBasePath,
       root: config.storage.ownerRoot,
@@ -860,7 +873,6 @@ async function bootstrap() {
 
   const shutdown = () => {
     expiryManager.stop();
-    tunnelManager.stop();
     telemetryEngine.flush();
     telemetryEngine.stop();
     stopDiscovery();

@@ -8,12 +8,12 @@ const APP_SUPPORT_DIR = path.join(HOME_DIR, "Library", "Application Support", "J
 module.exports = {
   server: {
     host: process.env.JOINCLOUD_HOST || "0.0.0.0",
-    port: Number(process.env.JOINCLOUD_PORT || 8787),
+    port: Number(process.env.PORT || 3000),
     ownerBasePath: "/dav",
     shareBasePath: "/share",
-    sharePort: Number(process.env.JOINCLOUD_SHARE_PORT || 8788),
     publicBaseUrl: process.env.JOINCLOUD_PUBLIC_BASE_URL || null,
   },
+  publicShareDomain: "share.joincloud.in",
   auth: {
     realm: process.env.JOINCLOUD_REALM || "JoinCloud",
     username: process.env.JOINCLOUD_USERNAME || "joincloud",

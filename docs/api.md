@@ -125,10 +125,6 @@ Public WebDAV is available at:
 
 Read-only methods only.
 
-## Tunnel Control (UI compatibility)
+## Tunnel Control
 
-`GET /api/ngrok/status`
-
-`POST /api/ngrok/start`
-
-`POST /api/ngrok/stop`
+Tunnel control endpoints are not exposed in the VPS routing model.

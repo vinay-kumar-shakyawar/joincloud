@@ -6,13 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { EmptyState, PageContainer, SectionHeading } from "@/ui-kit";
-import { 
+import {
   FolderOpen, 
   FileText, 
   HardDrive, 
   Cloud, 
   Power, 
-  Globe, 
   Database, 
   Clock,
   Activity,
@@ -22,7 +21,8 @@ import {
   Share2,
   Upload,
   Download,
-  Trash2
+  Plus,
+  ShieldCheck
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { Link } from "wouter";
@@ -77,7 +77,7 @@ function InstanceOverview({ storageInfo }: { storageInfo?: StorageInfo }) {
         </Badge>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Power className="h-4 w-4" />
@@ -107,8 +107,8 @@ function InstanceOverview({ storageInfo }: { storageInfo?: StorageInfo }) {
 
           <div className="space-y-2">
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Globe className="h-4 w-4" />
-              Storage Path
+              <HardDrive className="h-4 w-4" />
+              Storage
             </div>
             <p className="text-sm font-medium truncate" data-testid="text-storage-path">
               {storageInfo?.storageLabel || "Local storage"}
@@ -332,8 +332,134 @@ function QuickStats({ storageInfo, shares }: { storageInfo?: StorageInfo, shares
   );
 }
 
+function RecentSummary({ files, shares }: { files?: FileItem[], shares?: ShareLink[] }) {
+  const recentFiles = [...(files || [])]
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, 4);
+  const recentShares = [...(shares || [])]
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, 4);
+
+  return (
+    <Card data-testid="card-recent-summary">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Activity className="h-5 w-5 text-primary" />
+          Recent Activity
+        </CardTitle>
+        <CardDescription>Recently added and recently shared files</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-muted-foreground">Recently added files</p>
+          <div className="space-y-2">
+            {recentFiles.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No recent uploads yet</p>
+            ) : (
+              recentFiles.map((file) => (
+                <div key={file.id} className="text-sm font-medium truncate">
+                  {file.name}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-muted-foreground">Recently shared files</p>
+          <div className="space-y-2">
+            {recentShares.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No shares yet</p>
+            ) : (
+              recentShares.map((share) => (
+                <div key={share.id} className="text-sm font-medium truncate">
+                  {share.fileName}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function QuickActions() {
+  return (
+    <Card data-testid="card-quick-actions">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Plus className="h-5 w-5 text-primary" />
+          Quick Actions
+        </CardTitle>
+        <CardDescription>Jump to common tasks</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-3">
+        <Link href="/files">
+          <Button className="w-full" data-testid="button-quick-add-files">
+            <Upload className="h-4 w-4 mr-2" />
+            Add files
+          </Button>
+        </Link>
+        <Link href="/sharing">
+          <Button variant="outline" className="w-full" data-testid="button-quick-share-files">
+            <Share2 className="h-4 w-4 mr-2" />
+            Share files
+          </Button>
+        </Link>
+      </CardContent>
+    </Card>
+  );
+}
+
+function HealthStatus() {
+  const { data: statusData, isError: statusError } = useQuery<{ status?: string }>({
+    queryKey: ["/api/status"],
+  });
+  const { data: publicStatus, isError: tunnelError } = useQuery<{ public?: boolean }>({
+    queryKey: ["/api/public-access/status"],
+  });
+
+  const appHealthy = statusData?.status === "running";
+  const uiHealthy = !statusError;
+  const tunnelHealthy = !tunnelError && publicStatus?.public === true;
+
+  const statusItem = (label: string, healthy: boolean, warning?: string) => (
+    <div className="flex items-center justify-between rounded-lg border p-3">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <ShieldCheck className="h-4 w-4 text-primary" />
+        {label}
+      </div>
+      <Badge variant={healthy ? "default" : "destructive"}>
+        {healthy ? "Healthy" : warning || "Issue"}
+      </Badge>
+    </div>
+  );
+
+  return (
+    <Card data-testid="card-health-status">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ShieldCheck className="h-5 w-5 text-primary" />
+          Health
+        </CardTitle>
+        <CardDescription>Connection status at a glance</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {statusItem("App Status", appHealthy)}
+        {statusItem("UI Status", uiHealthy)}
+        {statusItem("Tunnel Status", tunnelHealthy, "Inactive")}
+        {!tunnelHealthy && (
+          <p className="text-xs text-muted-foreground">
+            Tunnel inactive — public sharing may not work.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Dashboard() {
-  const { data: storageInfo, isLoading: storageLoading } = useQuery<StorageInfo>({
+  const { data: storageInfo } = useQuery<StorageInfo>({
     queryKey: ["/api/storage"],
   });
 
@@ -366,6 +492,23 @@ export default function Dashboard() {
       </motion.div>
 
       <QuickStats storageInfo={storageInfo} shares={shares} />
+
+      <SectionHeading
+        title="Highlights"
+        description="Recent activity and quick actions"
+      />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <RecentSummary files={files} shares={shares} />
+        <QuickActions />
+      </div>
+
+      <SectionHeading
+        title="Health"
+        description="Status overview"
+      />
+
+      <HealthStatus />
 
       <SectionHeading
         title="Storage & Activity"

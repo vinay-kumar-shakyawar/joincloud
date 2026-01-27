@@ -2,6 +2,7 @@ function createMountManager({ ownerServer, shareService, shareServerFactory, con
   const shareCache = new Map();
 
   const { ownerBasePath, shareBasePath } = config.server;
+  const shareDomain = (config.publicShareDomain || "").toLowerCase();
 
   function getShareServer(share) {
     if (!shareCache.has(share.shareId)) {
@@ -21,6 +22,16 @@ function createMountManager({ ownerServer, shareService, shareServerFactory, con
     return stripped.length === 0 ? "/" : stripped;
   }
 
+  function getShareIdFromHost(hostHeader) {
+    if (!hostHeader || !shareDomain) return null;
+    const host = hostHeader.split(":")[0].toLowerCase();
+    if (!host.endsWith(shareDomain)) return null;
+    const prefix = host.slice(0, host.length - shareDomain.length);
+    if (!prefix.endsWith(".")) return null;
+    const shareId = prefix.slice(0, -1);
+    return shareId || null;
+  }
+
   return function handleRequest(req, res) {
     const url = req.url || "/";
     const [pathname, search] = url.split("?");
@@ -31,17 +42,27 @@ function createMountManager({ ownerServer, shareService, shareServerFactory, con
       return;
     }
 
-    if (pathname === shareBasePath || pathname.startsWith(`${shareBasePath}/`)) {
-      const rest = stripPrefix(pathname, shareBasePath);
-      const [token, ...segments] = rest.split("/").filter(Boolean);
+    const hostShareId = getShareIdFromHost(req.headers.host);
+    // Deprecated: path-based access remains for localhost/LAN testing only.
+    if (hostShareId || pathname === shareBasePath || pathname.startsWith(`${shareBasePath}/`)) {
+      const rest = pathname.startsWith(shareBasePath)
+        ? stripPrefix(pathname, shareBasePath)
+        : pathname;
+      const segments = rest.split("/").filter(Boolean);
+      const shareId = hostShareId || segments[0];
+      const cleanedSegments = hostShareId
+        ? segments[0] === hostShareId
+          ? segments.slice(1)
+          : segments
+        : segments.slice(1);
 
-      if (!token) {
+      if (!shareId) {
         res.statusCode = 404;
         res.end();
         return;
       }
 
-      const share = shareService.getShare(token);
+      const share = shareService.getShare(shareId);
       if (!share) {
         res.statusCode = 404;
         res.end();
@@ -49,7 +70,7 @@ function createMountManager({ ownerServer, shareService, shareServerFactory, con
       }
 
       const shareServer = getShareServer(share);
-      const sharePath = `/${segments.join("/")}` || "/";
+      const sharePath = `/${cleanedSegments.join("/")}` || "/";
       req.url = sharePath + (search ? `?${search}` : "");
       shareServer.executeRequest(req, res, "/");
       return;

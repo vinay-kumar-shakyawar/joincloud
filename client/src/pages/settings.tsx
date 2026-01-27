@@ -31,7 +31,7 @@ import { PageContainer, SectionHeading } from "@/ui-kit";
 function SyncSettings({ storagePath }: { storagePath?: string }) {
   const { toast } = useToast();
   const [autoSync, setAutoSync] = useState(true);
-  const [tunnelProvider, setTunnelProvider] = useState("ngrok");
+  const [tunnelProvider, setTunnelProvider] = useState("vps");
 
   const handleSyncNow = () => {
     toast({
@@ -119,7 +119,7 @@ function SyncSettings({ storagePath }: { storagePath?: string }) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="none">None (Local Only)</SelectItem>
-              <SelectItem value="ngrok">ngrok</SelectItem>
+              <SelectItem value="vps">VPS Gateway</SelectItem>
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
@@ -170,7 +170,7 @@ function DomainSettings() {
           <Label>Your Cloud Access</Label>
           <div className="flex items-center gap-3 p-4 rounded-lg border bg-muted/50">
             <div className="flex-1">
-              <p className="font-mono text-sm mb-1">via ngrok tunnel</p>
+              <p className="font-mono text-sm mb-1">via VPS gateway</p>
               <div className="flex items-center gap-2">
                 <Badge variant="default">Dynamic</Badge>
                 <span className="text-xs text-muted-foreground">URL generated per share</span>
@@ -408,7 +408,7 @@ export default function Settings() {
               </div>
               {/* <div>
                 <p className="text-sm text-muted-foreground">Tunnel</p>
-                <p className="font-medium">ngrok</p>
+                <p className="font-medium">VPS Gateway</p>
               </div> */}
             </div>
             <p className="text-sm text-muted-foreground">

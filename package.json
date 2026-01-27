@@ -6,6 +6,7 @@
   "scripts": {
     "ui:dev": "vite --config vite.config.ts",
     "ui:build": "vite build --config vite.config.ts",
+    "backend:dev": "node server/index.js",
     "electron:dev": "ELECTRON_RUN_AS_NODE= electron .",
     "test:electron": "ELECTRON_RUN_AS_NODE= node electron/tests/smoke.test.js",
     "build:mac": "electron-builder --mac",

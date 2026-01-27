@@ -115,7 +115,6 @@ export function ShareDialog({ file, open, onOpenChange }: ShareDialogProps) {
         path: sharePath,
         permission: "read-only",
         ttlMs,
-        scope: "local",
       });
     },
     onSuccess: () => {
@@ -238,24 +237,27 @@ export function ShareDialog({ file, open, onOpenChange }: ShareDialogProps) {
             </div>
           ) : isShared ? (
             <div className="space-y-4 pt-4">
-              <div className="p-4 bg-muted rounded-lg space-y-3">
+              <div className="rounded-lg border bg-muted/50 p-4 space-y-3">
                 <div className="flex items-center gap-2 text-sm font-medium">
                   <Link2 className="h-4 w-4" />
-                  Share Link (via ngrok)
+                  Share created
                 </div>
-                <div className="flex gap-2">
-                  <code className="flex-1 p-2 bg-background rounded text-xs break-all" data-testid="text-share-url">
-                    {share?.tunnelUrl}
-                  </code>
-                  <Button
-                    size="icon"
-                    variant="outline"
-                    onClick={handleCopyLink}
-                    data-testid="button-copy-link"
-                  >
-                    {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                  </Button>
-                </div>
+                <code
+                  className="block w-full select-all break-all rounded bg-background p-3 text-xs"
+                  data-testid="text-share-url"
+                >
+                  {share?.tunnelUrl}
+                </code>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleCopyLink}
+                  data-testid="button-copy-link"
+                  className="w-fit"
+                >
+                  {copied ? <Check className="h-4 w-4 mr-2" /> : <Copy className="h-4 w-4 mr-2" />}
+                  Copy link
+                </Button>
                 
                 <div className="flex flex-wrap gap-2 pt-2">
                   <Badge variant="secondary" className="flex items-center gap-1">
@@ -388,7 +390,7 @@ export function ShareDialog({ file, open, onOpenChange }: ShareDialogProps) {
               </div>
 
               <p className="text-xs text-muted-foreground">
-                The file will be accessible worldwide via ngrok during the selected time period.
+                The file will be accessible worldwide via the VPS gateway during the selected time period.
               </p>
 
               <DialogFooter className="flex-col sm:flex-row gap-2">

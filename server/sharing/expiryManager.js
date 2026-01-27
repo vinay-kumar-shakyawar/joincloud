@@ -1,7 +1,8 @@
 class ExpiryManager {
-  constructor({ shareService, intervalMs }) {
+  constructor({ shareService, intervalMs, onSweep }) {
     this.shareService = shareService;
     this.intervalMs = intervalMs;
+    this.onSweep = onSweep;
     this.timer = null;
   }
 
@@ -9,6 +10,9 @@ class ExpiryManager {
     if (this.timer) return;
     this.timer = setInterval(() => {
       this.shareService.expireShares();
+      if (typeof this.onSweep === "function") {
+        this.onSweep();
+      }
     }, this.intervalMs);
   }
 

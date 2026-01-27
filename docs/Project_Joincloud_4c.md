@@ -45,8 +45,7 @@ JoinCloud is a personal cloud node that enables:
 
 | Port | Purpose |
 |------|---------|
-| `8787` | Main server (UI + API + WebDAV) |
-| `8788` | Share-only server (used by tunnel) |
+| `3000` | Main server (UI + API + WebDAV) |
 
 ---
 
@@ -577,8 +576,7 @@ Browser → GET /share/<token>/file.pdf
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `JOINCLOUD_HOST` | `0.0.0.0` | Server bind address |
-| `JOINCLOUD_PORT` | `8787` | Main server port |
-| `JOINCLOUD_SHARE_PORT` | `8788` | Share-only server port |
+| `PORT` | `3000` | Main server port |
 | `JOINCLOUD_STORAGE_ROOT` | `~/Library/.../storage` | File storage path |
 | `JOINCLOUD_SHARE_STORE` | `.../storage/shares.json` | Share persistence path |
 | `JOINCLOUD_LOG_DIR` | `.../logs` | Log directory |

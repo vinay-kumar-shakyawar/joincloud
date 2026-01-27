@@ -14,30 +14,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
-import { Copy, CheckCircle, AlertCircle } from "lucide-react"
-import useSWR from "swr"
-
-interface ShareConfig {
-  fileId: string
-  password?: string
-  expiresAt?: string
-  availableFrom?: string
-  availableUntil?: string
-  maxDownloads?: number
-}
+import { Copy, CheckCircle } from "lucide-react"
 
 interface ShareResponse {
-  share: {
-    id: string
-    shareToken: string
-    fileId: string
-    hasPassword: boolean
-    expiresAt?: string
-    availableFrom?: string
-    availableUntil?: string
-    maxDownloads?: number
-    createdAt: string
-  }
+  shareId: string
+  url?: string | null
+  expiresAt?: string
 }
 
 export function ShareFiles({ fileId, fileName }: { fileId: string; fileName: string }) {
@@ -52,30 +34,17 @@ export function ShareFiles({ fileId, fileName }: { fileId: string; fileName: str
   const [shareLink, setShareLink] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
-  const { data: ngrokStatus } = useSWR("/api/ngrok/status", (url) => fetch(url).then((r) => r.json()))
-
   const handleCreateShare = async () => {
     setLoading(true)
     try {
-      const now = new Date()
-      const expiresAt = new Date(now.getTime() + durationMinutes * 60 * 1000).toISOString()
-
-      const config: ShareConfig = {
-        fileId,
-        maxDownloads: maxDownloads || undefined,
-        expiresAt,
-        password: password || undefined,
-      }
-
-      if (hasScheduledWindow) {
-        if (startTime) config.availableFrom = new Date(startTime).toISOString()
-        if (endTime) config.availableUntil = new Date(endTime).toISOString()
-      }
-
-      const response = await fetch("/api/shares", {
+      const response = await fetch("/api/share", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(config),
+        body: JSON.stringify({
+          path: fileId,
+          permission: "read-only",
+          ttlMs: durationMinutes * 60 * 1000,
+        }),
       })
 
       if (!response.ok) {
@@ -83,9 +52,11 @@ export function ShareFiles({ fileId, fileName }: { fileId: string; fileName: str
       }
 
       const data: ShareResponse = await response.json()
-      const baseUrl = ngrokStatus?.url || window.location.origin
-      const link = `${baseUrl}/share/${data.share.shareToken}`
-      setShareLink(link)
+      if (data.url) {
+        setShareLink(data.url)
+        return
+      }
+      setShareLink(`https://${data.shareId}.share.joincloud.in`)
     } catch (error) {
       console.error("Error creating share:", error)
       alert("Failed to create share link")
@@ -122,15 +93,13 @@ export function ShareFiles({ fileId, fileName }: { fileId: string; fileName: str
               <AlertDescription className="text-green-800">Share link created successfully!</AlertDescription>
             </Alert>
 
-            <div className="space-y-2">
-              <Label>Share Link</Label>
-              <div className="flex gap-2">
-                <Input value={shareLink} readOnly className="text-sm" />
-                <Button size="sm" variant="outline" onClick={copyToClipboard} className="gap-2 bg-transparent">
-                  <Copy className="h-4 w-4" />
-                  {copied ? "Copied!" : "Copy"}
-                </Button>
-              </div>
+            <div className="rounded-lg border bg-muted/50 p-4 space-y-3">
+              <p className="text-sm font-medium">Share created</p>
+              <Input value={shareLink} readOnly className="text-sm font-mono" />
+              <Button size="sm" variant="outline" onClick={copyToClipboard} className="w-fit gap-2 bg-transparent">
+                <Copy className="h-4 w-4" />
+                {copied ? "Copied!" : "Copy link"}
+              </Button>
             </div>
 
             <Button
@@ -152,15 +121,6 @@ export function ShareFiles({ fileId, fileName }: { fileId: string; fileName: str
           </div>
         ) : (
           <div className="space-y-4">
-            {!ngrokStatus?.isRunning && (
-              <Alert className="bg-amber-50 border-amber-200">
-                <AlertCircle className="h-4 w-4 text-amber-600" />
-                <AlertDescription className="text-amber-800">
-                  ngrok tunnel is not running. Start it to generate public share links.
-                </AlertDescription>
-              </Alert>
-            )}
-
             <div className="space-y-2">
               <Label htmlFor="duration">Expiration Time (minutes)</Label>
               <Input
