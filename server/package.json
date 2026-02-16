@@ -1,6 +1,6 @@
 {
   "name": "joincloud-backend",
-  "version": "0.3.1",
+  "version": "0.3.3",
   "private": true,
   "type": "commonjs",
   "main": "index.js",

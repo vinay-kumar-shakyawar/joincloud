@@ -31,11 +31,14 @@ function requestJson(url) {
 }
 
 async function run() {
+  const childEnv = {
+    ...process.env,
+    ELECTRON_DISABLE_SECURITY_WARNINGS: "1",
+  };
+  delete childEnv.ELECTRON_RUN_AS_NODE;
+
   const proc = spawn(electronBinary, [appRoot], {
-    env: {
-      ...process.env,
-      ELECTRON_DISABLE_SECURITY_WARNINGS: "1",
-    },
+    env: childEnv,
     stdio: "ignore",
   });
 

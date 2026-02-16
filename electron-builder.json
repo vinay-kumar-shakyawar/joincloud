@@ -5,8 +5,15 @@
     "target": [
       "dmg"
     ],
-    "icon": "assets/icon/icon.icns"
+    "icon": "build/icon.icns"
   },
+  "win": {
+    "target": [
+      "nsis"
+    ],
+    "icon": "build/icon.ico"
+  },
+  "npmRebuild": false,
   "asar": false,
   "extraResources": [
     {
@@ -16,10 +23,6 @@
     {
       "from": "server/bin",
       "to": "bin"
-    },
-    {
-      "from": "client/dist",
-      "to": "renderer"
     }
   ]
 }

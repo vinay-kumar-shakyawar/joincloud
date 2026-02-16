@@ -1,36 +1,34 @@
 {
   "name": "joincloud",
-  "version": "0.3.1",
+  "version": "0.3.3",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
-    "ui:dev": "vite --config vite.config.ts",
-    "ui:build": "vite build --config vite.config.ts",
-    "electron:dev": "ELECTRON_RUN_AS_NODE= electron .",
+    "dev": "npm run electron:dev",
+    "backend:dev": "node server/index.js",
+    "electron:dev": "node scripts/run-electron.cjs .",
     "test:electron": "ELECTRON_RUN_AS_NODE= node electron/tests/smoke.test.js",
-    "build:mac": "npm run ui:build && electron-builder --mac",
-    "rebuild:server": "electron-rebuild -w sqlite3 --module-dir server",
+    "build:mac": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\" && USE_HARD_LINKS=false electron-builder --mac --publish never",
+    "build:win": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\" && USE_HARD_LINKS=false electron-builder --win --publish never",
+    "rebuild:server": "electron-rebuild -w sqlite3",
     "postinstall": "npm run rebuild:server",
-    "prebuild:mac": "npm run rebuild:server"
+    "prebuild:mac": "npm run rebuild:server",
+    "prebuild:win": "npm run rebuild:server"
   },
   "dependencies": {
+    "bonjour": "^3.5.1",
+    "express": "^5.2.1",
     "joincloud-ui-kit": "github:vinay-kumar-shakyawar/joincloud-ui-kit#main",
+    "mime-types": "^3.0.2",
+    "multer": "^2.0.2",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "sqlite3": "^5.1.7",
+    "webdav-server": "^2.6.2"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.1.18",
-    "@tailwindcss/typography": "^0.5.15",
-    "@vitejs/plugin-react": "^4.7.0",
-    "autoprefixer": "^10.4.23",
-    "concurrently": "^8.2.2",
     "electron": "^31.2.0",
     "electron-builder": "^24.13.3",
-    "electron-rebuild": "^3.2.9",
-    "postcss": "^8.5.6",
-    "tailwindcss": "^4.1.18",
-    "tailwindcss-animate": "^1.0.7",
-    "vite": "^7.3.0",
-    "wait-on": "^7.2.0"
+    "electron-rebuild": "^3.2.9"
   }
 }

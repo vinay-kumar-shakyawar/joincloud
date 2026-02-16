@@ -11,8 +11,10 @@
       <div class="brand">
         <img class="brand-logo" src="/logo.png" alt="JoinCloud" />
         <span>JoinCloud</span>
+        <span class="brand-separator">|</span>
+        <span class="brand-user" id="header-display-name">User</span>
       </div>
-      <div class="status" id="node-status">Status: --</div>
+      <div class="status" id="node-status">Status: Running</div>
     </header>
 
     <main class="layout">
@@ -44,14 +46,8 @@
         <div class="row space-between" style="margin-top:16px">
           <div>
             <div class="label">Public Access</div>
-            <div class="value" id="public-status">Unavailable</div>
-            <div class="value mono" id="public-url">--</div>
-            <div class="value" id="public-reason"></div>
-          </div>
-          <div class="row">
-            <button class="button" id="toggle-public">Enable Public Sharing</button>
-            <button class="button secondary" id="retry-public">Retry</button>
-            <button class="button secondary" id="switch-lan">Switch to LAN-only</button>
+            <div class="value" id="public-status">Coming Soon</div>
+            <div class="value" id="public-reason">Public access is coming soon.</div>
           </div>
         </div>
       </section>
@@ -99,8 +95,13 @@
             <span>Enabled</span>
           </label>
         </div>
-        <div class="row" style="margin-top:12px">
-          <a class="link" href="/privacy" target="_blank" rel="noreferrer">View Privacy Policy</a>
+        <div class="row" style="margin-top:18px">
+          <div style="flex:1">
+            <div class="label">Privacy Policy</div>
+            <div class="value">Coming Soon</div>
+            <div class="value value-muted">Privacy policy link will be available soon.</div>
+            <button class="button secondary" style="margin-top:8px" disabled>Open Privacy Policy (Coming Soon)</button>
+          </div>
         </div>
         <div class="row" style="margin-top:24px">
           <div style="flex:1">
@@ -112,11 +113,12 @@
         <div class="row space-between" style="margin-top:16px">
           <div>
             <div class="label">Network Visibility</div>
-            <div class="value">Allow other JoinCloud users on this network to see you</div>
+            <div class="value">Coming Soon</div>
+            <div class="value value-muted">Network visibility is coming soon.</div>
           </div>
           <label class="toggle">
-            <input type="checkbox" id="network-visibility" />
-            <span>Enabled</span>
+            <input type="checkbox" id="network-visibility" disabled />
+            <span>Coming Soon</span>
           </label>
         </div>
         <div class="row" style="margin-top:8px">
@@ -129,7 +131,17 @@
       <section class="card section" data-section="network">
         <div class="row space-between">
           <h2>Network</h2>
-          <button class="button secondary" id="refresh-network">Refresh</button>
+        </div>
+        <div class="value">Coming Soon</div>
+        <div class="row space-between" style="margin-top:16px">
+          <div>
+            <div class="label">Network Visibility</div>
+            <div class="value">Coming Soon</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="network-visibility-network" disabled />
+            <span>Coming Soon</span>
+          </label>
         </div>
         <div class="network-list" id="network-list"></div>
       </section>
@@ -149,7 +161,7 @@
           <label class="label">Share Scope</label>
           <div class="radio-group">
             <label><input type="radio" name="share-scope" value="local" checked /> Local</label>
-            <label><input type="radio" name="share-scope" value="public" /> Public</label>
+            <label><input type="radio" name="share-scope" value="public" disabled /> Public (Coming Soon)</label>
           </div>
 
           <label class="label">Permission</label>

@@ -44,7 +44,7 @@ async function ensureUserConfig(configPath) {
       parsed.display_name = generateDisplayName();
     }
     if (typeof parsed.network_visibility !== "boolean") {
-      parsed.network_visibility = true;
+      parsed.network_visibility = false;
     }
     return parsed;
   } catch (error) {
@@ -55,7 +55,7 @@ async function ensureUserConfig(configPath) {
       telemetry_enabled: true,
       telemetry_last_sync: null,
       display_name: generateDisplayName(),
-      network_visibility: true,
+      network_visibility: false,
     };
     await fs.writeFile(configPath, JSON.stringify(payload, null, 2));
     return payload;
@@ -169,6 +169,16 @@ function getLanAddress() {
     }
   }
   return "127.0.0.1";
+}
+
+function resolveUiRoot() {
+  if (process.env.JOINCLOUD_UI_ROOT) {
+    return process.env.JOINCLOUD_UI_ROOT;
+  }
+  if (process.env.JOINCLOUD_RESOURCES_PATH) {
+    return path.join(process.env.JOINCLOUD_RESOURCES_PATH, "server", "ui");
+  }
+  return path.join(__dirname, "ui");
 }
 
 async function listDirectory(ownerRoot, requestedPath) {
@@ -308,7 +318,13 @@ async function bootstrap() {
   const app = express();
   app.use(express.json());
   const upload = multer({ storage: multer.memoryStorage() });
-  app.use("/", express.static(path.join(__dirname, "ui")));
+  const uiRoot = resolveUiRoot();
+  if (require("fs").existsSync(uiRoot)) {
+    logger.info("ui root resolved", { uiRoot });
+    app.use("/", express.static(uiRoot));
+  } else {
+    logger.warn("ui root missing, static UI not mounted", { uiRoot });
+  }
   app.get("/privacy", (_req, res) => {
     res.sendFile(path.join(__dirname, "..", "docs", "privacy.md"));
   });
@@ -605,6 +621,31 @@ async function bootstrap() {
     res.statusCode = 404;
     res.end();
   });
+
+  function handleListenError(name, host, port, error) {
+    if (error && error.code === "EADDRINUSE") {
+      logger.error(`${name} port is already in use`, { host, port });
+      console.error(
+        `[joincloud] ${name} failed to start: ${host}:${port} is already in use. ` +
+          "Stop the existing JoinCloud process or change JOINCLOUD_PORT/JOINCLOUD_SHARE_PORT."
+      );
+    } else {
+      logger.error(`${name} failed to start`, {
+        host,
+        port,
+        error: error?.message || String(error),
+      });
+    }
+    process.exit(1);
+  }
+
+  shareOnlyServer.on("error", (error) =>
+    handleListenError("Share server", "127.0.0.1", config.server.sharePort, error)
+  );
+  server.on("error", (error) =>
+    handleListenError("Main server", config.server.host, config.server.port, error)
+  );
+
   shareOnlyServer.listen(config.server.sharePort, "127.0.0.1");
   server.listen(config.server.port, config.server.host, () => {
     const publicHost = config.server.host === "0.0.0.0" ? "127.0.0.1" : config.server.host;

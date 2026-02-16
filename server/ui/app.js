@@ -6,14 +6,11 @@ const state = {
 
 const els = {
   status: document.getElementById("node-status"),
+  headerDisplayName: document.getElementById("header-display-name"),
   storageLabel: document.getElementById("storage-label"),
   ownerMount: document.getElementById("owner-mount"),
   publicStatus: document.getElementById("public-status"),
-  publicUrl: document.getElementById("public-url"),
   publicReason: document.getElementById("public-reason"),
-  togglePublic: document.getElementById("toggle-public"),
-  retryPublic: document.getElementById("retry-public"),
-  switchLan: document.getElementById("switch-lan"),
   openStorage: document.getElementById("open-storage"),
   fileList: document.getElementById("file-list"),
   shareList: document.getElementById("share-list"),
@@ -22,12 +19,12 @@ const els = {
   refreshShares: document.getElementById("refresh-shares"),
   refreshLogs: document.getElementById("refresh-logs"),
   logList: document.getElementById("log-list"),
-  refreshNetwork: document.getElementById("refresh-network"),
   networkList: document.getElementById("network-list"),
   telemetryToggle: document.getElementById("telemetry-toggle"),
   networkName: document.getElementById("network-name"),
   saveNetworkName: document.getElementById("save-network-name"),
   networkVisibility: document.getElementById("network-visibility"),
+  networkVisibilityNetwork: document.getElementById("network-visibility-network"),
   navButtons: document.querySelectorAll(".nav-button"),
   sections: document.querySelectorAll(".section"),
   backButton: document.getElementById("back-button"),
@@ -48,14 +45,17 @@ const els = {
 
 const stateMeta = {
   lanBaseUrl: window.location.origin,
-  publicUrl: null,
-  publicActive: false,
 };
+
+function setHeaderDisplayName(value) {
+  const displayName = value && value.trim() ? value.trim() : "User";
+  els.headerDisplayName.textContent = displayName;
+}
 
 async function fetchStatus() {
   const res = await fetch("/api/status");
   const data = await res.json();
-  els.status.textContent = `Status: ${data.status}`;
+  els.status.textContent = `Status: ${data.status === "running" ? "Running" : data.status || "--"}`;
   els.storageLabel.textContent = data.storageLabel || "Local storage";
   els.ownerMount.textContent = data.ownerBasePath;
   if (data.lanBaseUrl) {
@@ -253,18 +253,7 @@ function closeShareModal() {
 
 async function createShare() {
   const pathValue = els.sharePath.value;
-  const selectedScope = Array.from(els.shareScope).find((el) => el.checked)?.value || "local";
-  if (selectedScope === "public" && !stateMeta.publicActive) {
-    const confirmEnable = confirm("Public access is required. Enable now?");
-    if (!confirmEnable) return;
-    els.shareResult.textContent = "Enabling public access. This may take a few seconds.";
-    await togglePublicAccess();
-    const ready = await waitForPublicAccess(10000);
-    if (!ready) {
-      els.shareResult.textContent = "Public sharing is unavailable on this system";
-      return;
-    }
-  }
+  const selectedScope = "local";
   const permission = els.sharePermission.value;
   const ttlSelection = els.shareTtl.value;
   if (ttlSelection === "custom" && !els.shareTtlCustom.value) {
@@ -286,10 +275,7 @@ async function createShare() {
     els.shareResult.textContent = data.error || "Failed to create share";
     return;
   }
-  const baseUrl =
-    selectedScope === "public" && stateMeta.publicActive
-      ? stateMeta.publicUrl
-      : stateMeta.lanBaseUrl;
+  const baseUrl = stateMeta.lanBaseUrl;
   const shareUrl = `${baseUrl}/share/${data.shareId}`;
   els.shareResult.textContent = `Share created: ${shareUrl}`;
   els.copyShare.style.display = "inline-flex";
@@ -310,71 +296,8 @@ async function revokeShare(shareId) {
   await loadLogs();
 }
 
-async function waitForPublicAccess(timeoutMs) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    await refreshPublicAccess();
-    if (stateMeta.publicActive) return true;
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  return false;
-}
-
-async function refreshPublicAccess() {
-  const res = await fetch("/api/public-access/status");
-  const data = await res.json();
-  stateMeta.publicActive = data.status === "active";
-  stateMeta.publicUrl = data.publicUrl || null;
-  if (data.status === "active") {
-    els.publicStatus.textContent = "Public access enabled";
-    els.publicUrl.textContent = data.publicUrl;
-    els.publicReason.textContent = "";
-    els.togglePublic.textContent = "Disable Public Sharing";
-    els.togglePublic.disabled = false;
-  } else if (data.status === "starting" || data.status === "restarting") {
-    els.publicStatus.textContent = "Starting public access…";
-    els.publicUrl.textContent = "--";
-    els.publicReason.textContent = "";
-    els.togglePublic.textContent = "Starting…";
-    els.togglePublic.disabled = true;
-  } else if (data.status === "stopping") {
-    els.publicStatus.textContent = "Stopping public access…";
-    els.publicUrl.textContent = "--";
-    els.publicReason.textContent = "";
-    els.togglePublic.textContent = "Stopping…";
-    els.togglePublic.disabled = true;
-  } else {
-    els.publicStatus.textContent =
-      data.status === "failed" || data.status === "error"
-        ? "Public access unavailable"
-        : "Public access disabled";
-    els.publicUrl.textContent = "--";
-    els.publicReason.textContent = data.reason ? `Reason: ${data.reason}` : "";
-    els.togglePublic.textContent = "Enable Public Sharing";
-    els.togglePublic.disabled = false;
-  }
-}
-
-async function togglePublicAccess() {
-  if (stateMeta.publicActive) {
-    els.togglePublic.disabled = true;
-    await fetch("/api/public-access/stop", { method: "POST" });
-  } else {
-    els.togglePublic.disabled = true;
-    const response = await fetch("/api/public-access/start", { method: "POST" });
-    const data = await response.json();
-    if (data.status === "failed" || data.status === "error") {
-      alert(data.message || "Public sharing is unavailable on this system");
-    }
-  }
-  await refreshPublicAccess();
-  await loadShares();
-  els.togglePublic.disabled = false;
-}
-
 els.refreshFiles.onclick = () => loadFiles(state.path);
 els.refreshShares.onclick = () => loadShares();
-els.refreshNetwork.onclick = () => loadNetwork();
 els.closeModal.onclick = closeShareModal;
 els.cancelShare.onclick = closeShareModal;
 els.createShare.onclick = createShare;
@@ -392,12 +315,6 @@ els.shareTtl.onchange = () => {
   } else {
     els.shareTtlCustom.style.display = "none";
   }
-};
-els.togglePublic.onclick = togglePublicAccess;
-els.retryPublic.onclick = () => togglePublicAccess();
-els.switchLan.onclick = async () => {
-  await fetch("/api/public-access/stop", { method: "POST" });
-  await refreshPublicAccess();
 };
 els.openStorage.onclick = async () => {
   if (window.joincloud && window.joincloud.openStorageFolder) {
@@ -499,40 +416,19 @@ async function loadLogs() {
   els.refreshLogs.disabled = false;
 }
 
-function renderNetwork(entries) {
+function renderNetwork() {
   els.networkList.innerHTML = "";
-  if (!entries.length) {
-    const emptyState = document.createElement("div");
-    emptyState.className = "empty-state";
-    emptyState.innerHTML = `
-      <div class="empty-state-title">No devices found</div>
-      <div class="empty-state-sub">When there's no content</div>
-    `;
-    els.networkList.appendChild(emptyState);
-    return;
-  }
-  entries.forEach((entry) => {
-    const row = document.createElement("div");
-    row.className = "item network-item";
-    const info = document.createElement("div");
-    info.innerHTML = `<div class="item-title">${entry.display_name}</div>`;
-    row.appendChild(info);
-    const statusBadge = document.createElement("span");
-    statusBadge.className = `badge ${entry.status === "online" ? "badge-public" : "badge-private"}`;
-    statusBadge.textContent = entry.status === "online" ? "Public" : "Private";
-    row.appendChild(statusBadge);
-    els.networkList.appendChild(row);
-  });
+  const emptyState = document.createElement("div");
+  emptyState.className = "empty-state";
+  emptyState.innerHTML = `
+    <div class="empty-state-title">Coming Soon</div>
+    <div class="empty-state-sub">Network discovery will be available in a future release.</div>
+  `;
+  els.networkList.appendChild(emptyState);
 }
 
 async function loadNetwork() {
-  els.refreshNetwork.textContent = "Loading...";
-  els.refreshNetwork.disabled = true;
-  const res = await fetch("/api/v1/network");
-  const data = await res.json();
-  renderNetwork(data);
-  els.refreshNetwork.textContent = "Refresh";
-  els.refreshNetwork.disabled = false;
+  renderNetwork();
 }
 
 async function loadTelemetrySettings() {
@@ -552,8 +448,25 @@ async function updateTelemetrySettings(enabled) {
 async function loadNetworkSettings() {
   const res = await fetch("/api/v1/network/settings");
   const data = await res.json();
-  els.networkName.value = data.display_name || "";
-  els.networkVisibility.checked = !!data.network_visibility;
+  const displayName = data.display_name || "";
+  els.networkName.value = displayName;
+  setHeaderDisplayName(displayName);
+
+  // Launch build: keep network visibility disabled and non-interactive.
+  if (data.network_visibility) {
+    await fetch("/api/v1/network/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ network_visibility: false }),
+    });
+  }
+
+  els.networkVisibility.checked = false;
+  els.networkVisibility.disabled = true;
+  if (els.networkVisibilityNetwork) {
+    els.networkVisibilityNetwork.checked = false;
+    els.networkVisibilityNetwork.disabled = true;
+  }
 }
 
 async function saveNetworkName() {
@@ -564,17 +477,9 @@ async function saveNetworkName() {
     body: JSON.stringify({ display_name: value }),
   });
   const data = await res.json();
-  els.networkName.value = data.display_name || "";
-  await loadNetwork();
-}
-
-async function updateNetworkVisibility(enabled) {
-  await fetch("/api/v1/network/settings", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ network_visibility: enabled }),
-  });
-  await loadNetwork();
+  const displayName = data.display_name || "";
+  els.networkName.value = displayName;
+  setHeaderDisplayName(displayName);
 }
 
 function setActiveSection(sectionId) {
@@ -605,7 +510,6 @@ window.addEventListener("hashchange", () => {
 fetchStatus();
 loadFiles("/");
 loadShares();
-refreshPublicAccess();
 loadLogs();
 loadNetwork();
 loadTelemetrySettings();
@@ -623,8 +527,4 @@ els.telemetryToggle.addEventListener("change", async (event) => {
 
 els.saveNetworkName.addEventListener("click", async () => {
   await saveNetworkName();
-});
-
-els.networkVisibility.addEventListener("change", async (event) => {
-  await updateNetworkVisibility(event.target.checked);
 });

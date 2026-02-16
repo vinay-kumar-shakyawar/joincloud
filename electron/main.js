@@ -28,6 +28,7 @@ let backendState = "healthy";
 let isStopping = false;
 
 const HEALTH_URL = "http://127.0.0.1:8787/api/v1/health";
+const BACKEND_URL = "http://127.0.0.1:8787";
 const HEALTH_INTERVAL_MS = 12000;
 const HEALTH_FAILURE_THRESHOLD = 2;
 const RESTART_WINDOW_MS = 10 * 60 * 1000;
@@ -41,11 +42,28 @@ function initLogging() {
   }
   logPath = path.join(dir, "startup.log");
   fs.appendFileSync(logPath, `${new Date().toISOString()} App start\n`);
+  console.log(`[joincloud-electron] log file: ${logPath}`);
 }
 
 function logLine(message) {
+  const line = `${new Date().toISOString()} ${message}`;
+  console.log(`[joincloud-electron] ${message}`);
   if (!logPath) return;
-  fs.appendFileSync(logPath, `${new Date().toISOString()} ${message}\n`);
+  fs.appendFileSync(logPath, `${line}\n`);
+}
+
+function formatError(error) {
+  if (!error) return "unknown error";
+  if (typeof error === "string") return error;
+  return error.stack || error.message || JSON.stringify(error);
+}
+
+function showInitFailure(reason, error) {
+  const details = error ? `\n${formatError(error)}` : "";
+  const logHint = logPath ? `\n\nSee log:\n${logPath}` : "";
+  const message = `App failed to initialize.\n\nReason: ${reason}${details}${logHint}`;
+  logLine(`Initialization failure: ${reason}${details ? ` | ${details}` : ""}`);
+  showBackendError(message);
 }
 
 function getBackendScriptPath() {
@@ -72,6 +90,9 @@ function startBackend() {
   // Native modules used by backend that require Electron rebuilds: sqlite3.
   const backendScript = getBackendScriptPath();
   const backendCwd = getBackendCwd();
+  if (!fs.existsSync(backendScript)) {
+    throw new Error(`Backend script not found: ${backendScript}`);
+  }
   logLine(`Backend start ${backendScript}`);
   const env = {
     ...process.env,
@@ -79,9 +100,13 @@ function startBackend() {
     ELECTRON_RUN_AS_NODE: "1",
     JOINCLOUD_HOST: "0.0.0.0",
     JOINCLOUD_STORAGE_ROOT: getStoragePath(),
-    JOINCLOUD_RESOURCES_PATH: process.resourcesPath || "",
     PATH: process.env.PATH || "",
   };
+  if (app.isPackaged && process.resourcesPath) {
+    env.JOINCLOUD_RESOURCES_PATH = process.resourcesPath;
+  } else {
+    delete env.JOINCLOUD_RESOURCES_PATH;
+  }
 
   backendProcess = spawn(process.execPath, [backendScript], {
     env,
@@ -96,6 +121,9 @@ function startBackend() {
 
   backendProcess.stderr.on("data", (chunk) => {
     logLine(chunk.toString().trim());
+  });
+  backendProcess.on("error", (error) => {
+    logLine(`Backend process error: ${formatError(error)}`);
   });
 
   const startTime = Date.now();
@@ -277,22 +305,32 @@ async function ensureBackend() {
   const portFree = await checkPortFree();
   if (!portFree) {
     logLine("Port 8787 in use");
-    showBackendError("App failed to initialize.");
+    showInitFailure("Backend port 8787 is already in use");
     setBackendState("degraded", "port in use");
     return false;
   }
 
-  startBackend();
+  try {
+    startBackend();
+  } catch (error) {
+    showInitFailure("Failed to spawn backend", error);
+    return false;
+  }
   const ok = await waitForBackend(15000);
   if (!ok) {
     logLine("Backend did not respond");
-    showBackendError("App failed to initialize.");
+    showInitFailure("Backend health check failed at /api/v1/health");
     stopBackend();
     setBackendState("degraded", "init failed");
     return false;
   }
   setBackendState("healthy", "init ok");
   return true;
+}
+
+async function loadRenderer(window) {
+  logLine(`Loading backend renderer at ${BACKEND_URL}`);
+  await window.loadURL(BACKEND_URL);
 }
 
 function startHealthMonitor() {
@@ -329,7 +367,7 @@ async function createWindow() {
     resolver.resolveTunnelBinaryPath();
     logLine("Tunnel binary resolved");
   } catch (error) {
-    logLine("Tunnel binary unavailable");
+    logLine(`Tunnel binary unavailable: ${formatError(error)}`);
   }
 
   const ok = await ensureBackend();
@@ -343,18 +381,22 @@ async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
+    icon: path.join(__dirname, "..", "assets", "icons.png"),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, "preload.js"),
     },
   });
+  mainWindow.webContents.on("did-fail-load", (_event, code, description, url) => {
+    logLine(`Renderer failed to load code=${code} url=${url} reason=${description}`);
+  });
 
   try {
-    await mainWindow.loadURL("http://127.0.0.1:8787");
+    await loadRenderer(mainWindow);
   } catch (error) {
-    logLine("UI load failed");
-    showBackendError("App failed to initialize.");
+    logLine(`UI load failed: ${formatError(error)}`);
+    showInitFailure("Renderer URL could not be loaded", error);
     stopBackend();
     app.quit();
     return;

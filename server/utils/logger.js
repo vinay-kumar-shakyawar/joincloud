@@ -22,10 +22,17 @@ function createLogger(logDir) {
     }
     const line = `${JSON.stringify(payload)}\n`;
     fs.appendFileSync(logPath, line);
+    const logLine = `[joincloud-server] ${message}${meta ? ` ${JSON.stringify(meta)}` : ""}`;
+    if (level === "error") {
+      console.error(logLine);
+    } else {
+      console.log(logLine);
+    }
   }
 
   return {
     info: (message, meta) => write("info", message, meta),
+    warn: (message, meta) => write("warn", message, meta),
     error: (message, meta) => write("error", message, meta),
     getBuffer: () => buffer.slice(),
   };
