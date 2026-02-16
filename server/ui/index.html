@@ -2,28 +2,57 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>JoinCloud</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <header class="topbar">
       <div class="brand">
+        <button class="button secondary menu-toggle" id="menu-toggle" aria-label="Toggle navigation">☰</button>
         <img class="brand-logo" src="/logo.png" alt="JoinCloud" />
         <span>JoinCloud</span>
         <span class="brand-separator">|</span>
-        <span class="brand-user" id="header-display-name">User</span>
+        <span class="brand-user" id="header-display-name">Join</span>
       </div>
-      <div class="status" id="node-status">Status: Running</div>
+      <div class="header-actions">
+        <button class="button secondary" id="add-file-header">Add File</button>
+        <button class="button secondary" id="toggle-sharing">Stop</button>
+        <div class="status" id="node-status"><span class="status-dot running" id="status-dot"></span> Status: Running</div>
+      </div>
     </header>
 
-    <main class="layout">
+    <section class="layout" id="access-gate" style="display:none;">
+      <div class="content">
+        <section class="card access-card">
+          <h2>Request Access</h2>
+          <div class="value">This device needs admin approval before it can access JoinCloud.</div>
+          <div class="row" style="margin-top:12px">
+            <div style="flex:1">
+              <div class="label">Device</div>
+              <div class="value mono" id="access-device-name">Unknown device</div>
+            </div>
+            <div style="flex:1">
+              <div class="label">Fingerprint</div>
+              <div class="value mono" id="access-fingerprint">--</div>
+            </div>
+          </div>
+          <div class="row" style="margin-top:16px">
+            <button class="button" id="request-approval">Request Approval</button>
+          </div>
+          <div class="value value-muted" id="access-status" style="margin-top:12px">Waiting to request access.</div>
+        </section>
+      </div>
+    </section>
+
+    <main class="layout" id="app-layout" style="display:none;">
       <aside class="sidebar">
         <button class="nav-button active" data-section="home">Home</button>
         <button class="nav-button" data-section="files">Files</button>
         <button class="nav-button" data-section="shares">Shares</button>
         <button class="nav-button" data-section="logs">Logs</button>
         <button class="nav-button" data-section="settings">Settings</button>
+        <button class="nav-button" data-section="devices">Devices</button>
         <button class="nav-button" data-section="network">Network</button>
       </aside>
 
@@ -50,6 +79,31 @@
             <div class="value" id="public-reason">Public access is coming soon.</div>
           </div>
         </div>
+        <div class="row cloud-url-section" style="margin-top:18px">
+          <div style="flex:1">
+            <div class="label">Cloud URL</div>
+            <input class="input mono" id="cloud-url-input" readonly />
+            <div class="row" style="margin-top:10px">
+              <button class="button secondary" id="copy-cloud-url">Copy</button>
+            </div>
+            <div class="qr-wrap">
+              <canvas id="cloud-url-qr" width="220" height="220"></canvas>
+            </div>
+          </div>
+        </div>
+        <div class="row" style="margin-top:18px">
+          <div style="width:100%">
+            <div class="label">Pending Access Requests <span class="badge" id="pending-access-count">0</span></div>
+            <div class="pending-list" id="pending-access-list"></div>
+          </div>
+        </div>
+        <div class="row" style="margin-top:18px">
+          <div style="width:100%">
+            <div class="label">Share Page Visits</div>
+            <div class="value" id="share-visit-total">Total: 0</div>
+            <div class="value value-muted" id="share-visit-today">Today: 0</div>
+          </div>
+        </div>
       </section>
 
       <section class="card section" data-section="files">
@@ -62,15 +116,38 @@
             <button class="button secondary" id="refresh-files">Refresh</button>
           </div>
         </div>
+        <div class="file-controls">
+          <input class="input" id="file-search" placeholder="Search in current folder" />
+          <select class="input" id="file-sort">
+            <option value="name_asc">Name (A-Z)</option>
+            <option value="name_desc">Name (Z-A)</option>
+            <option value="modified_desc">Date Modified (Newest)</option>
+            <option value="modified_asc">Date Modified (Oldest)</option>
+            <option value="ext_asc">Extension (A-Z)</option>
+            <option value="ext_desc">Extension (Z-A)</option>
+          </select>
+          <label class="toggle">
+            <input type="checkbox" id="folders-only" />
+            <span>Folders only</span>
+          </label>
+          <div class="view-toggle" role="group" aria-label="File view mode">
+            <button class="button secondary active" id="view-list">List</button>
+            <button class="button secondary" id="view-thumb">Thumbnails</button>
+          </div>
+        </div>
         <div class="drop-zone" id="drop-zone">Drag & drop files here</div>
         <div class="breadcrumbs" id="breadcrumbs"></div>
-        <div class="file-list" id="file-list"></div>
+        <div class="file-list" id="file-list" data-view="list"></div>
       </section>
 
       <section class="card section" data-section="shares">
         <div class="row space-between">
           <h2>Active Shares</h2>
-          <button class="button secondary" id="refresh-shares">Refresh</button>
+          <div class="row">
+            <button class="button secondary" id="revoke-selected" disabled>Revoke Selected</button>
+            <button class="button danger" id="revoke-all">Revoke All</button>
+            <button class="button secondary" id="refresh-shares">Refresh</button>
+          </div>
         </div>
         <div class="share-list" id="share-list"></div>
       </section>
@@ -98,15 +175,20 @@
         <div class="row" style="margin-top:18px">
           <div style="flex:1">
             <div class="label">Privacy Policy</div>
-            <div class="value">Coming Soon</div>
-            <div class="value value-muted">Privacy policy link will be available soon.</div>
-            <button class="button secondary" style="margin-top:8px" disabled>Open Privacy Policy (Coming Soon)</button>
+            <div class="row" style="margin-top:8px">
+              <button class="button secondary" id="copy-privacy-policy">Copy</button>
+              <button class="button secondary" id="download-privacy-policy">Download</button>
+            </div>
+            <div class="privacy-policy-content" id="privacy-policy-content"></div>
           </div>
         </div>
         <div class="row" style="margin-top:24px">
           <div style="flex:1">
-            <div class="label">Display Name</div>
-            <input class="input" id="network-name" maxlength="32" />
+            <div class="label">Name</div>
+            <div class="name-input-group">
+              <input class="input name-prefix" value="Join" disabled />
+              <input class="input name-suffix" id="network-name-suffix" maxlength="32" placeholder="Your name" />
+            </div>
           </div>
           <button class="button secondary" id="save-network-name">Save</button>
         </div>
@@ -144,6 +226,15 @@
           </label>
         </div>
         <div class="network-list" id="network-list"></div>
+      </section>
+
+      <section class="card section" data-section="devices">
+        <div class="row space-between">
+          <h2>Devices</h2>
+          <button class="button secondary" id="refresh-devices">Refresh</button>
+        </div>
+        <div class="value value-muted">Approved devices can access JoinCloud after admin approval.</div>
+        <div class="pending-list" id="approved-devices-list" style="margin-top:12px"></div>
       </section>
       </div>
     </main>
@@ -189,6 +280,25 @@
       </div>
     </div>
 
+    <div class="modal" id="sharing-stop-modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Stop JoinCloud</h3>
+          <button class="button ghost" id="close-stop-modal">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="value">Choose what you want to do:</div>
+          <div class="value value-muted">Stopping sharing keeps the app open for local control.</div>
+        </div>
+        <div class="modal-actions">
+          <button class="button secondary" id="cancel-stop-modal">Cancel</button>
+          <button class="button secondary" id="stop-sharing-only">Stop Sharing</button>
+          <button class="button danger" id="close-application">Close Application</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/vendor/qrious.min.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>

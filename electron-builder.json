@@ -9,9 +9,20 @@
   },
   "win": {
     "target": [
-      "nsis"
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      },
+      {
+        "target": "zip",
+        "arch": [
+          "x64"
+        ]
+      }
     ],
-    "icon": "build/icon.ico"
+    "icon": "assets/icon.ico"
   },
   "npmRebuild": false,
   "asar": false,

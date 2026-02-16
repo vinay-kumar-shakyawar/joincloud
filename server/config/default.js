@@ -8,10 +8,10 @@ const APP_SUPPORT_DIR = path.join(HOME_DIR, "Library", "Application Support", "J
 module.exports = {
   server: {
     host: process.env.JOINCLOUD_HOST || "0.0.0.0",
-    port: Number(process.env.JOINCLOUD_PORT || 8787),
+    port: Number(process.env.JOINCLOUD_PORT || process.env.PORT || 8787),
     ownerBasePath: "/dav",
     shareBasePath: "/share",
-    sharePort: Number(process.env.JOINCLOUD_SHARE_PORT || 8788),
+    sharePort: Number(process.env.JOINCLOUD_SHARE_PORT || process.env.SHARE_PORT || 8788),
     publicBaseUrl: process.env.JOINCLOUD_PUBLIC_BASE_URL || null,
   },
   auth: {
@@ -35,6 +35,15 @@ module.exports = {
     telemetryPath:
       process.env.JOINCLOUD_TELEMETRY_DB ||
       path.join(APP_SUPPORT_DIR, "telemetry", "telemetry.db"),
+    shareTelemetryPath:
+      process.env.JOINCLOUD_SHARE_TELEMETRY_PATH ||
+      path.join(APP_SUPPORT_DIR, "telemetry", "share-visits.json"),
+    runtimeTelemetryPath:
+      process.env.JOINCLOUD_RUNTIME_TELEMETRY_PATH ||
+      path.join(APP_SUPPORT_DIR, "data", "telemetry.json"),
+    accessControlPath:
+      process.env.JOINCLOUD_ACCESS_CONTROL_PATH ||
+      path.join(APP_SUPPORT_DIR, "data", "access-control.json"),
   },
   share: {
     defaultPermission: "read-only",

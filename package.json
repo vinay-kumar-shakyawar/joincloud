@@ -9,11 +9,12 @@
     "electron:dev": "node scripts/run-electron.cjs .",
     "test:electron": "ELECTRON_RUN_AS_NODE= node electron/tests/smoke.test.js",
     "build:mac": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\" && USE_HARD_LINKS=false electron-builder --mac --publish never",
-    "build:win": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\" && USE_HARD_LINKS=false electron-builder --win --publish never",
+    "build:win": "npm run rebuild:server && npm run build:icon:win && node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\" && USE_HARD_LINKS=false electron-builder --win --x64 --publish never",
+    "build:icon:win": "node scripts/prepare-win-icon.cjs",
     "rebuild:server": "electron-rebuild -w sqlite3",
     "postinstall": "npm run rebuild:server",
     "prebuild:mac": "npm run rebuild:server",
-    "prebuild:win": "npm run rebuild:server"
+    "prebuild:win": "npm run rebuild:server && npm run build:icon:win"
   },
   "dependencies": {
     "bonjour": "^3.5.1",
@@ -21,6 +22,7 @@
     "joincloud-ui-kit": "github:vinay-kumar-shakyawar/joincloud-ui-kit#main",
     "mime-types": "^3.0.2",
     "multer": "^2.0.2",
+    "qrious": "^4.0.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "sqlite3": "^5.1.7",
@@ -29,6 +31,7 @@
   "devDependencies": {
     "electron": "^31.2.0",
     "electron-builder": "^24.13.3",
-    "electron-rebuild": "^3.2.9"
+    "electron-rebuild": "^3.2.9",
+    "png-to-ico": "^2.1.8"
   }
 }

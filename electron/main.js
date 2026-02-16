@@ -29,10 +29,17 @@ let isStopping = false;
 
 const HEALTH_URL = "http://127.0.0.1:8787/api/v1/health";
 const BACKEND_URL = "http://127.0.0.1:8787";
+const BACKEND_PORT = "8787";
+const SHARE_PORT = "8788";
 const HEALTH_INTERVAL_MS = 12000;
 const HEALTH_FAILURE_THRESHOLD = 2;
 const RESTART_WINDOW_MS = 10 * 60 * 1000;
 const MAX_RESTARTS_IN_WINDOW = 3;
+
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+}
 
 function initLogging() {
   const userData = app.getPath("userData");
@@ -99,6 +106,10 @@ function startBackend() {
     NODE_ENV: app.isPackaged ? "production" : "development",
     ELECTRON_RUN_AS_NODE: "1",
     JOINCLOUD_HOST: "0.0.0.0",
+    JOINCLOUD_PORT: BACKEND_PORT,
+    JOINCLOUD_SHARE_PORT: SHARE_PORT,
+    PORT: BACKEND_PORT,
+    SHARE_PORT,
     JOINCLOUD_STORAGE_ROOT: getStoragePath(),
     PATH: process.env.PATH || "",
   };
@@ -135,7 +146,14 @@ function startBackend() {
     }
     backendProcess = null;
     if (!isStopping) {
-      scheduleBackendRestart("backend exit");
+      checkBackend().then((healthy) => {
+        if (healthy) {
+          logLine("Backend process exited, but another backend instance is healthy");
+          setBackendState("healthy", "existing instance");
+          return;
+        }
+        scheduleBackendRestart("backend exit");
+      });
     }
   });
 }
@@ -304,9 +322,15 @@ async function ensureBackend() {
 
   const portFree = await checkPortFree();
   if (!portFree) {
-    logLine("Port 8787 in use");
-    showInitFailure("Backend port 8787 is already in use");
-    setBackendState("degraded", "port in use");
+    logLine("Port 8787 in use, checking existing backend health");
+    const existingOnBusyPort = await waitForBackend(10000);
+    if (existingOnBusyPort) {
+      logLine("Reusing existing backend on 8787");
+      setBackendState("healthy", "existing on occupied port");
+      return true;
+    }
+    showInitFailure("Backend port 8787 is already in use and no healthy backend responded");
+    setBackendState("degraded", "port in use no healthy backend");
     return false;
   }
 
@@ -411,11 +435,35 @@ if (!app || !BrowserWindow) {
   process.exit(1);
 }
 
-app.whenReady().then(createWindow);
+app.on("second-instance", () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  mainWindow.focus();
+});
+
+if (gotLock) {
+  app.whenReady().then(createWindow);
+}
 
 ipcMain.handle("joincloud-open-storage", async () => {
   const storagePath = getStoragePath();
   await shell.openPath(storagePath);
+});
+
+ipcMain.handle("joincloud-select-files", async () => {
+  if (!mainWindow) return [];
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ["openFile", "multiSelections"],
+  });
+  if (result.canceled) return [];
+  return result.filePaths || [];
+});
+
+ipcMain.handle("joincloud-quit-app", async () => {
+  app.quit();
+  return { ok: true };
 });
 
 app.on("window-all-closed", () => {

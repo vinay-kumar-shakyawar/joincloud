@@ -11,3 +11,4 @@ npm-debug.log*
 build/*
 !build/icon.icns
 !build/icon.ico
+release-artifacts/

@@ -1,9 +1,11 @@
 const http = require("http");
 const fs = require("fs/promises");
+const fsSync = require("fs");
 const path = require("path");
 const os = require("os");
 const express = require("express");
 const multer = require("multer");
+const mime = require("mime-types");
 const bonjour = require("bonjour")();
 
 const config = require("./config/default");
@@ -17,6 +19,8 @@ const { TunnelManager } = require("./tunnel/TunnelManager");
 const { createLogger } = require("./utils/logger");
 const { createTelemetryStore } = require("./telemetry/store");
 const { createTelemetrySync } = require("./telemetry/sync");
+const { AccessControlStore } = require("./accessControl");
+const { RuntimeTelemetryStore } = require("./runtimeTelemetry");
 const crypto = require("crypto");
 
 async function ensureOwnerStorage(rootPath) {
@@ -37,14 +41,22 @@ async function ensureUserConfig(configPath) {
   try {
     const raw = await fs.readFile(configPath, "utf8");
     const parsed = JSON.parse(raw);
+    let changed = false;
     if (typeof parsed.telemetry_enabled !== "boolean") {
       parsed.telemetry_enabled = true;
+      changed = true;
     }
-    if (!parsed.display_name) {
-      parsed.display_name = generateDisplayName();
+    const normalizedDisplayName = normalizeDisplayName(parsed.display_name);
+    if (normalizedDisplayName !== parsed.display_name) {
+      parsed.display_name = normalizedDisplayName;
+      changed = true;
     }
     if (typeof parsed.network_visibility !== "boolean") {
       parsed.network_visibility = false;
+      changed = true;
+    }
+    if (changed) {
+      await fs.writeFile(configPath, JSON.stringify(parsed, null, 2));
     }
     return parsed;
   } catch (error) {
@@ -54,7 +66,7 @@ async function ensureUserConfig(configPath) {
       created_at: new Date().toISOString(),
       telemetry_enabled: true,
       telemetry_last_sync: null,
-      display_name: generateDisplayName(),
+      display_name: normalizeDisplayName(generateDisplayName()),
       network_visibility: false,
     };
     await fs.writeFile(configPath, JSON.stringify(payload, null, 2));
@@ -82,20 +94,16 @@ function getAppVersion() {
 }
 
 function generateDisplayName() {
-  const names = [
-    "Orion",
-    "Nebula",
-    "Andromeda",
-    "Aquila",
-    "Cosmos",
-    "Lyra",
-    "Phoenix",
-    "Nova",
-    "Pulsar",
-    "Vega",
-  ];
-  const pick = names[Math.floor(Math.random() * names.length)];
-  return `join_${pick}`;
+  return "Join";
+}
+
+function normalizeDisplayName(value) {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) return "Join";
+  if (raw.toLowerCase() === "join") return "Join";
+  if (!raw.toLowerCase().startsWith("join")) return `Join ${raw}`.trim();
+  const suffix = raw.slice(4).trim();
+  return suffix ? `Join ${suffix}` : "Join";
 }
 
 
@@ -139,8 +147,9 @@ function startPresenceBrowser(onUpdate) {
 
 function isValidDisplayName(value) {
   if (!value || typeof value !== "string") return false;
-  if (value.length > 32) return false;
-  return /^[A-Za-z0-9_]+$/.test(value);
+  if (!value.startsWith("Join")) return false;
+  if (value.length > 48) return false;
+  return /^Join(?:[A-Za-z0-9 _-]*)$/.test(value);
 }
 
 function startUptimeTracker(telemetry) {
@@ -171,12 +180,61 @@ function getLanAddress() {
   return "127.0.0.1";
 }
 
+function getCloudUrl() {
+  return `http://${getLanAddress()}:${config.server.port}/`;
+}
+
+function hashDeviceId(value) {
+  return crypto.createHash("sha256").update(String(value || "joincloud")).digest("hex");
+}
+
+function getClientIp(req) {
+  const raw = req.ip || req.socket?.remoteAddress || "";
+  if (!raw) return "";
+  return raw.startsWith("::ffff:") ? raw.slice(7) : raw;
+}
+
+function isLocalhostRequest(req) {
+  const ip = getClientIp(req);
+  return ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1" || ip === "";
+}
+
+function getRequestFingerprint(req) {
+  const headerValue = req.headers["x-joincloud-fingerprint"];
+  if (Array.isArray(headerValue)) {
+    return String(headerValue[0] || "").trim();
+  }
+  return String(headerValue || "").trim();
+}
+
+function getRequestToken(req) {
+  const authHeader = req.headers.authorization || "";
+  if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
+    return authHeader.slice("Bearer ".length).trim();
+  }
+  const tokenHeader = req.headers["x-joincloud-token"];
+  if (Array.isArray(tokenHeader)) {
+    return String(tokenHeader[0] || "").trim();
+  }
+  return String(tokenHeader || "").trim();
+}
+
 function resolveUiRoot() {
   if (process.env.JOINCLOUD_UI_ROOT) {
     return process.env.JOINCLOUD_UI_ROOT;
   }
-  if (process.env.JOINCLOUD_RESOURCES_PATH) {
-    return path.join(process.env.JOINCLOUD_RESOURCES_PATH, "server", "ui");
+  const resourcesPath = process.env.JOINCLOUD_RESOURCES_PATH || process.resourcesPath;
+  if (resourcesPath) {
+    const candidates = [
+      path.join(resourcesPath, "app.asar", "server", "ui"),
+      path.join(resourcesPath, "server", "ui"),
+    ];
+    for (const candidate of candidates) {
+      if (fsSync.existsSync(candidate)) {
+        return candidate;
+      }
+    }
+    return candidates[1];
   }
   return path.join(__dirname, "ui");
 }
@@ -256,6 +314,87 @@ function formatSharePath(ownerRoot, targetPath) {
   return posixRel.startsWith("/") ? posixRel : `/${posixRel}`;
 }
 
+function toSafeRelative(inputPath) {
+  const value = String(inputPath || "").replace(/\\/g, "/").replace(/^\/+/, "");
+  if (!value || value === ".") return "";
+  if (value.includes("..")) {
+    throw new Error("Invalid shared path");
+  }
+  return value;
+}
+
+function ensureWithinShareRoot(shareRoot, candidatePath) {
+  const root = path.resolve(shareRoot);
+  const candidate = path.resolve(candidatePath);
+  const normalizedRoot = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
+  if (candidate !== root && !candidate.startsWith(normalizedRoot)) {
+    throw new Error("Requested path escapes shared root");
+  }
+  return candidate;
+}
+
+function sanitizeDownloadFileName(input) {
+  const raw = String(input || "download");
+  const normalized = raw.replace(/[\\/:*?"<>|]/g, "_").replace(/[\r\n\t]/g, " ").trim();
+  return normalized || "download";
+}
+
+function renderMessagePage({ title, message }) {
+  const safeTitle = String(title || "JoinCloud");
+  const safeMessage = String(message || "");
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${safeTitle}</title>
+    <style>
+      body { margin:0; background:#0A0A0F; color:#fff; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+      .wrap { min-height:100vh; display:grid; place-items:center; padding:20px; }
+      .card { width:min(680px,100%); border:1px solid #2A2A35; background:#12121A; border-radius:12px; padding:20px; }
+      .brand { color:#2FB7FF; font-weight:700; margin-bottom:10px; }
+      h1 { margin:0 0 8px; font-size:24px; }
+      p { margin:0; color:#A1A1AA; }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <section class="card">
+        <div class="brand">JoinCloud</div>
+        <h1>${safeTitle}</h1>
+        <p>${safeMessage}</p>
+      </section>
+    </main>
+  </body>
+</html>`;
+}
+
+async function listSharedFolderFiles(shareRoot, subPath = "") {
+  const safeSubPath = toSafeRelative(subPath);
+  const basePath = ensureWithinShareRoot(shareRoot, path.join(shareRoot, safeSubPath));
+  const entries = await fs.readdir(basePath, { withFileTypes: true });
+  const items = [];
+  for (const entry of entries) {
+    if (entry.name.startsWith(".") || entry.name.startsWith("._") || entry.isSymbolicLink()) {
+      continue;
+    }
+    const fullPath = path.join(basePath, entry.name);
+    const stats = await fs.stat(fullPath);
+    items.push({
+      name: entry.name,
+      type: entry.isDirectory() ? "folder" : "file",
+      size: entry.isDirectory() ? 0 : stats.size,
+      modifiedAt: stats.mtime.toISOString(),
+      relativePath: path.posix.join(safeSubPath, entry.name).replace(/\\/g, "/"),
+    });
+  }
+  items.sort((a, b) => {
+    if (a.type !== b.type) return a.type === "folder" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  return { folderPath: safeSubPath, items };
+}
+
 async function bootstrap() {
   await ensureOwnerStorage(config.storage.ownerRoot);
   await ensureShareStore(config.storage.shareStorePath);
@@ -318,13 +457,392 @@ async function bootstrap() {
   const app = express();
   app.use(express.json());
   const upload = multer({ storage: multer.memoryStorage() });
+  const accessControl = new AccessControlStore({
+    storagePath: config.storage.accessControlPath,
+    logger,
+  });
+  await accessControl.init();
+  const runtimeTelemetry = new RuntimeTelemetryStore({
+    storagePath: config.storage.runtimeTelemetryPath,
+  });
+  await runtimeTelemetry.init();
+  runtimeTelemetry.increment("total_app_starts");
+  let sharingEnabled = true;
   const uiRoot = resolveUiRoot();
-  if (require("fs").existsSync(uiRoot)) {
+  const hasUiRoot = fsSync.existsSync(uiRoot);
+  if (hasUiRoot) {
     logger.info("ui root resolved", { uiRoot });
     app.use("/", express.static(uiRoot));
   } else {
-    logger.warn("ui root missing, static UI not mounted", { uiRoot });
+    logger.error("ui root missing, static UI not mounted", { uiRoot });
+    app.get("/", (_req, res) => {
+      res
+        .status(503)
+        .send(
+          renderMessagePage({
+            title: "UI Unavailable",
+            message: "JoinCloud UI assets were not found. API is running; reinstall the app package.",
+          })
+        );
+    });
   }
+  app.get("/api/v1/cloud/url", (_req, res) => {
+    res.json({ url: getCloudUrl() });
+  });
+
+  app.get("/api/v1/status", (_req, res) => {
+    res.json({ running: !!sharingEnabled, sharing_enabled: !!sharingEnabled });
+  });
+
+  app.get("/api/v1/access/session", async (req, res) => {
+    if (isLocalhostRequest(req)) {
+      res.json({ authorized: true, role: "admin", cloud_url: getCloudUrl() });
+      return;
+    }
+    if (!sharingEnabled) {
+      res.status(423).json({
+        authorized: false,
+        reason: "sharing_stopped",
+        message: "Sharing is currently stopped by the admin.",
+      });
+      return;
+    }
+    const fingerprint = getRequestFingerprint(req);
+    const token = getRequestToken(req);
+    const validation = await accessControl.validateSession({ token, fingerprint });
+    if (!validation.authorized) {
+      res.status(401).json({ authorized: false, reason: validation.reason });
+      return;
+    }
+    res.json({ authorized: true, role: "remote", cloud_url: getCloudUrl() });
+  });
+
+  app.post("/api/v1/access/request", async (req, res) => {
+    if (!sharingEnabled && !isLocalhostRequest(req)) {
+      res.status(423).json({ error: "sharing_stopped", message: "Sharing is currently stopped by the admin." });
+      return;
+    }
+    const body = req.body || {};
+    const fingerprint = String(body.fingerprint || getRequestFingerprint(req) || "").trim();
+    if (!fingerprint) {
+      res.status(400).json({ error: "fingerprint is required" });
+      return;
+    }
+    const created = await accessControl.createRequest({
+      device_name: String(body.device_name || "").trim(),
+      fingerprint,
+      user_agent: String(body.user_agent || req.headers["user-agent"] || ""),
+      ip: getClientIp(req),
+    });
+    logger.info("device access request created");
+    runtimeTelemetry.increment("device_requests");
+    res.json({ request_id: created.request_id, status: created.status });
+  });
+
+  app.get("/api/v1/access/status", async (req, res) => {
+    const requestId = String(req.query.request_id || "").trim();
+    if (!requestId) {
+      res.status(400).json({ error: "request_id is required" });
+      return;
+    }
+    const request = await accessControl.getRequest(requestId);
+    if (!request) {
+      res.status(404).json({ status: "expired" });
+      return;
+    }
+    const fingerprint = getRequestFingerprint(req);
+    if (!fingerprint || request.fingerprint !== fingerprint) {
+      res.status(403).json({ status: "denied" });
+      return;
+    }
+    if (request.status === "approved" && request.session_token) {
+      res.json({
+        status: "approved",
+        session_token: request.session_token,
+      });
+      return;
+    }
+    res.json({ status: request.status });
+  });
+
+  function ensureAdmin(req, res, next) {
+    if (!isLocalhostRequest(req)) {
+      res.status(403).json({ error: "admin access required" });
+      return;
+    }
+    next();
+  }
+
+  app.post("/api/v1/sharing/stop", ensureAdmin, (_req, res) => {
+    sharingEnabled = false;
+    logger.info("sharing stopped by admin");
+    runtimeTelemetry.increment("sharing_stop_count");
+    res.json({ running: false, sharing_enabled: false });
+  });
+
+  app.post("/api/v1/sharing/start", ensureAdmin, (_req, res) => {
+    sharingEnabled = true;
+    logger.info("sharing started by admin");
+    runtimeTelemetry.increment("sharing_start_count");
+    res.json({ running: true, sharing_enabled: true });
+  });
+
+  app.post("/api/v1/app/quit", ensureAdmin, (_req, res) => {
+    logger.info("app quit requested");
+    res.json({ ok: true });
+    setTimeout(() => process.kill(process.pid, "SIGTERM"), 20);
+  });
+
+  app.get("/api/v1/access/pending", ensureAdmin, async (_req, res) => {
+    const pending = await accessControl.getPending();
+    res.json(pending);
+  });
+
+  app.get("/api/v1/access/devices", ensureAdmin, async (_req, res) => {
+    const devices = await accessControl.listApprovedDevices();
+    res.json(devices);
+  });
+
+  app.post("/api/v1/access/approve", ensureAdmin, async (req, res) => {
+    const requestId = String(req.body?.request_id || "").trim();
+    if (!requestId) {
+      res.status(400).json({ error: "request_id is required" });
+      return;
+    }
+    const approved = await accessControl.approveRequest(requestId);
+    if (!approved) {
+      res.status(404).json({ error: "pending request not found" });
+      return;
+    }
+    logger.info("device request approved");
+    runtimeTelemetry.increment("devices_approved");
+    res.json({ status: "approved", request_id: requestId });
+  });
+
+  app.post("/api/v1/access/deny", ensureAdmin, async (req, res) => {
+    const requestId = String(req.body?.request_id || "").trim();
+    if (!requestId) {
+      res.status(400).json({ error: "request_id is required" });
+      return;
+    }
+    const denied = await accessControl.denyRequest(requestId);
+    if (!denied) {
+      res.status(404).json({ error: "pending request not found" });
+      return;
+    }
+    logger.info("device request denied");
+    runtimeTelemetry.increment("devices_denied");
+    res.json({ status: "denied", request_id: requestId });
+  });
+
+  app.post("/api/v1/access/devices/remove", ensureAdmin, async (req, res) => {
+    const fingerprint = String(req.body?.fingerprint || "").trim();
+    if (!fingerprint) {
+      res.status(400).json({ error: "fingerprint is required" });
+      return;
+    }
+    const result = await accessControl.removeApprovedDevice(fingerprint);
+    logger.info("approved device removed");
+    runtimeTelemetry.increment("devices_removed");
+    res.json({ status: "removed", fingerprint, ...result });
+  });
+
+  app.get("/api/v1/telemetry/summary", ensureAdmin, (_req, res) => {
+    res.json(runtimeTelemetry.getSummary());
+  });
+
+  app.get("/share/:shareId", (req, res) => {
+    if (!sharingEnabled) {
+      res
+        .status(423)
+        .send(
+          renderMessagePage({
+            title: "Sharing Stopped",
+            message: "Sharing is currently stopped by the admin. Please try again later.",
+          })
+        );
+      return;
+    }
+    const share = shareService.getShare(req.params.shareId);
+    if (!share) {
+      const record = shareService.getShareRecord(req.params.shareId);
+      if (record && record.revoked) {
+        res
+          .status(410)
+          .send(
+            renderMessagePage({
+              title: "Share Revoked",
+              message: "This share link has been revoked.",
+            })
+          );
+        return;
+      }
+      res.status(404).send(renderMessagePage({ title: "Share Not Found", message: "This share link is invalid or expired." }));
+      return;
+    }
+    runtimeTelemetry.increment("share_page_visits");
+    logger.info("share page visited");
+    res.sendFile(path.join(uiRoot, "share.html"));
+  });
+
+  app.get("/share/:shareId/meta", (req, res) => {
+    if (!sharingEnabled) {
+      res.status(423).json({ error: "sharing_stopped", message: "Sharing is currently stopped by the admin." });
+      return;
+    }
+    const share = shareService.getShare(req.params.shareId);
+    if (!share) {
+      res.status(404).json({ error: "share_not_found" });
+      return;
+    }
+    const name = path.basename(share.targetPath) || "Shared Item";
+    const isFile = (share.targetType || "file") === "file";
+    let size = null;
+    try {
+      const stats = fsSync.statSync(share.targetPath);
+      size = stats.isFile() ? stats.size : null;
+    } catch (_error) {
+      size = null;
+    }
+    const deviceHash = hashDeviceId(userConfig.user_id);
+    const marketingUrl = `https://joincloud.in/?utm_source=share&utm_medium=link&utm_content=${deviceHash}`;
+    res.json({
+      shareId: share.shareId,
+      targetType: share.targetType || "file",
+      name,
+      size,
+      downloadUrl: isFile
+        ? `/share/${encodeURIComponent(share.shareId)}/download`
+        : null,
+      marketingUrl,
+      expiresAt: share.expiryTime,
+    });
+  });
+
+  app.get("/share/:shareId/files", async (req, res) => {
+    if (!sharingEnabled) {
+      res.status(423).json({ error: "sharing_stopped", message: "Sharing is currently stopped by the admin." });
+      return;
+    }
+    const share = shareService.getShare(req.params.shareId);
+    if (!share) {
+      res.status(404).json({ error: "share_not_found" });
+      return;
+    }
+    if ((share.targetType || "file") !== "folder") {
+      res.status(400).json({ error: "share_is_not_folder" });
+      return;
+    }
+    try {
+      const listing = await listSharedFolderFiles(share.targetPath, req.query.path || "");
+      res.json(listing);
+    } catch (error) {
+      logger.error("folder share listing failed", { error: error.message });
+      res.status(400).json({ error: error.message || "failed_to_list_folder" });
+    }
+  });
+
+  app.get("/share/:shareId/download", async (req, res) => {
+    if (!sharingEnabled) {
+      res
+        .status(423)
+        .send(
+          renderMessagePage({
+            title: "Sharing Stopped",
+            message: "Sharing is currently stopped by the admin. Please try again later.",
+          })
+        );
+      return;
+    }
+    const share = shareService.getShare(req.params.shareId);
+    if (!share) {
+      const record = shareService.getShareRecord(req.params.shareId);
+      if (record && record.revoked) {
+        res
+          .status(410)
+          .send(
+            renderMessagePage({
+              title: "Share Revoked",
+              message: "This share link has been revoked.",
+            })
+          );
+        return;
+      }
+      res.status(404).send(renderMessagePage({ title: "Share Not Found", message: "This share link is invalid or expired." }));
+      return;
+    }
+    try {
+      let filePath = share.targetPath;
+      if ((share.targetType || "file") === "folder") {
+        const relativePath = toSafeRelative(req.query.path || "");
+        if (!relativePath) {
+          res.status(400).send("file path is required");
+          return;
+        }
+        filePath = ensureWithinShareRoot(share.targetPath, path.join(share.targetPath, relativePath));
+      }
+      const stats = await fs.stat(filePath);
+      if (!stats.isFile()) {
+        res.status(400).send("not a file");
+        return;
+      }
+      const fileName = sanitizeDownloadFileName(path.basename(filePath));
+      const contentType = mime.lookup(fileName) || "application/octet-stream";
+      res.setHeader("Content-Type", contentType);
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+      );
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "no-store");
+
+      const stream = fsSync.createReadStream(filePath);
+      stream.on("error", () => {
+        if (!res.headersSent) {
+          res.status(500).send("download_failed");
+          return;
+        }
+        res.destroy();
+      });
+      stream.pipe(res);
+      logger.info("share download served");
+      runtimeTelemetry.increment("total_downloads");
+    } catch (error) {
+      res.status(400).send(error.message || "download_failed");
+    }
+  });
+
+  app.use("/api", async (req, res, next) => {
+    const publicApiPaths = new Set([
+      "/v1/health",
+      "/v1/status",
+      "/v1/cloud/url",
+      "/v1/access/session",
+      "/v1/access/request",
+      "/v1/access/status",
+    ]);
+    if (publicApiPaths.has(req.path)) {
+      next();
+      return;
+    }
+    if (isLocalhostRequest(req)) {
+      next();
+      return;
+    }
+    if (!sharingEnabled) {
+      res.status(423).json({ error: "sharing_stopped", message: "Sharing is currently stopped by the admin." });
+      return;
+    }
+    const fingerprint = getRequestFingerprint(req);
+    const token = getRequestToken(req);
+    const validation = await accessControl.validateSession({ token, fingerprint });
+    if (!validation.authorized) {
+      res.status(401).json({ error: "approval_required", reason: validation.reason });
+      return;
+    }
+    next();
+  });
+
   app.get("/privacy", (_req, res) => {
     res.sendFile(path.join(__dirname, "..", "docs", "privacy.md"));
   });
@@ -332,7 +850,8 @@ async function bootstrap() {
   app.get("/api/status", (_req, res) => {
     const lanIp = getLanAddress();
     res.json({
-      status: "running",
+      status: sharingEnabled ? "running" : "stopped",
+      sharing_enabled: !!sharingEnabled,
       ownerBasePath: config.server.ownerBasePath,
       shareBasePath: config.server.shareBasePath,
       lanBaseUrl: `http://${lanIp}:${config.server.port}`,
@@ -374,6 +893,7 @@ async function bootstrap() {
       const share = await shareService.createShare({ targetPath, permission, ttlMs, scope });
       const host = req.headers.host || `127.0.0.1:${config.server.port}`;
       logger.info("share link generated", { scope: share.scope });
+      runtimeTelemetry.increment("total_shares_created");
       res.json({
         shareId: share.shareId,
         url: `http://${host}${config.server.shareBasePath}/${share.shareId}`,
@@ -399,6 +919,7 @@ async function bootstrap() {
         path: relativePath,
         fileName,
         permission: share.permission,
+        targetType: share.targetType || "file",
         expiresAt: share.expiryTime,
         createdAt: share.createdAt,
         status: share.status,
@@ -416,7 +937,34 @@ async function bootstrap() {
 
   app.delete("/api/share/:shareId", async (req, res) => {
     const ok = await shareService.revokeShare(req.params.shareId);
+    if (ok) {
+      logger.info("share revoked");
+      runtimeTelemetry.increment("total_shares_revoked");
+    }
     res.json({ revoked: ok });
+  });
+
+  app.post("/api/v1/shares/revoke", ensureAdmin, async (req, res) => {
+    const tokens = Array.isArray(req.body?.tokens) ? req.body.tokens.map((value) => String(value || "").trim()).filter(Boolean) : [];
+    if (!tokens.length) {
+      res.status(400).json({ error: "tokens array is required" });
+      return;
+    }
+    const revoked = await shareService.revokeMany(tokens);
+    if (revoked > 0) {
+      logger.info("shares revoked by selection", { count: revoked });
+      runtimeTelemetry.increment("total_shares_revoked", revoked);
+    }
+    res.json({ revoked });
+  });
+
+  app.post("/api/v1/shares/revoke_all", ensureAdmin, async (_req, res) => {
+    const revoked = await shareService.revokeAll();
+    if (revoked > 0) {
+      logger.info("all shares revoked", { count: revoked });
+      runtimeTelemetry.increment("total_shares_revoked", revoked);
+    }
+    res.json({ revoked });
   });
 
   app.post("/api/upload", upload.array("files"), async (req, res) => {
@@ -447,6 +995,36 @@ async function bootstrap() {
     } catch (error) {
       logger.error("upload failed", { error: error.message });
       res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/v1/files/import", ensureAdmin, async (req, res) => {
+    try {
+      const target = req.body?.path || "/";
+      const sourcePaths = Array.isArray(req.body?.sourcePaths) ? req.body.sourcePaths : [];
+      if (!sourcePaths.length) {
+        res.status(400).json({ error: "sourcePaths is required" });
+        return;
+      }
+      const targetPath = resolveOwnerPath(config.storage.ownerRoot, toPosixPath(target));
+      await fs.mkdir(targetPath, { recursive: true });
+      const imported = [];
+      for (const sourcePath of sourcePaths) {
+        const source = path.resolve(String(sourcePath || ""));
+        const sourceStats = await fs.stat(source);
+        if (!sourceStats.isFile()) {
+          continue;
+        }
+        const fileName = path.basename(source);
+        const destination = path.join(targetPath, fileName);
+        await fs.copyFile(source, destination);
+        imported.push(fileName);
+      }
+      logger.info("file(s) added via native picker", { count: imported.length });
+      res.json({ imported });
+    } catch (error) {
+      logger.error("native file import failed", { error: error.message });
+      res.status(400).json({ error: error.message || "import_failed" });
     }
   });
 
@@ -527,8 +1105,9 @@ async function bootstrap() {
   }
 
   function updateDisplayName(newName) {
-    if (!isValidDisplayName(newName)) return false;
-    userConfig.display_name = newName;
+    const normalized = normalizeDisplayName(newName);
+    if (!isValidDisplayName(normalized)) return false;
+    userConfig.display_name = normalized;
     stopBroadcast();
     if (userConfig.network_visibility) {
       startBroadcast();
@@ -598,8 +1177,17 @@ async function bootstrap() {
     res.json({ enabled });
   });
 
-  const server = http.createServer((req, res) => {
+  let server = null;
+  let shareOnlyServer = null;
+
+  server = http.createServer((req, res) => {
     const url = req.url || "/";
+    const pathname = url.split("?")[0];
+    const shareViewPath = new RegExp(`^${config.server.shareBasePath}/[^/]+(?:/(meta|files|download))?$`);
+    if (req.method === "GET" && shareViewPath.test(pathname)) {
+      app(req, res);
+      return;
+    }
     if (
       url === config.server.ownerBasePath ||
       url.startsWith(`${config.server.ownerBasePath}/`) ||
@@ -612,7 +1200,7 @@ async function bootstrap() {
     app(req, res);
   });
 
-  const shareOnlyServer = http.createServer((req, res) => {
+  shareOnlyServer = http.createServer((req, res) => {
     const url = req.url || "/";
     if (url === config.server.shareBasePath || url.startsWith(`${config.server.shareBasePath}/`)) {
       handler(req, res);
@@ -639,12 +1227,16 @@ async function bootstrap() {
     process.exit(1);
   }
 
-  shareOnlyServer.on("error", (error) =>
-    handleListenError("Share server", "127.0.0.1", config.server.sharePort, error)
-  );
-  server.on("error", (error) =>
-    handleListenError("Main server", config.server.host, config.server.port, error)
-  );
+  if (shareOnlyServer) {
+    shareOnlyServer.on("error", (error) =>
+      handleListenError("Share server", "127.0.0.1", config.server.sharePort, error)
+    );
+  }
+  if (server) {
+    server.on("error", (error) =>
+      handleListenError("Main server", config.server.host, config.server.port, error)
+    );
+  }
 
   shareOnlyServer.listen(config.server.sharePort, "127.0.0.1");
   server.listen(config.server.port, config.server.host, () => {
@@ -694,9 +1286,13 @@ async function bootstrap() {
     stopBroadcast();
     bonjour.destroy();
     clearInterval(uptimeTimer);
-    shareOnlyServer.close(() => {
-      server.close(() => process.exit(0));
-    });
+    if (shareOnlyServer && server) {
+      shareOnlyServer.close(() => {
+        server.close(() => process.exit(0));
+      });
+      return;
+    }
+    process.exit(0);
   };
 
   process.on("SIGINT", shutdown);
