@@ -19,7 +19,6 @@
   "dependencies": {
     "bonjour": "^3.5.1",
     "express": "^5.2.1",
-    "joincloud-ui-kit": "github:vinay-kumar-shakyawar/joincloud-ui-kit#main",
     "mime-types": "^3.0.2",
     "multer": "^2.0.2",
     "qrious": "^4.0.2",
