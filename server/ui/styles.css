@@ -648,6 +648,21 @@ body {
   background: rgba(47, 183, 255, 0.05);
 }
 
+.drop-zone.disabled {
+  opacity: 0.6;
+  border-style: dashed;
+  cursor: not-allowed;
+}
+
+#upload-button-label.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+#upload-scope-hint {
+  margin-top: 10px;
+}
+
 .toggle {
   display: inline-flex;
   align-items: center;

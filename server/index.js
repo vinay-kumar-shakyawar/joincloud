@@ -339,6 +339,23 @@ function sanitizeDownloadFileName(input) {
   return normalized || "download";
 }
 
+function sanitizePathSegment(input) {
+  const value = String(input || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-_]+|[-_]+$/g, "");
+  return value || "device";
+}
+
+function isPathWithin(rootPath, candidatePath) {
+  const root = path.resolve(rootPath);
+  const candidate = path.resolve(candidatePath);
+  if (candidate === root) return true;
+  const normalizedRoot = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
+  return candidate.startsWith(normalizedRoot);
+}
+
 function renderMessagePage({ title, message }) {
   const safeTitle = String(title || "JoinCloud");
   const safeMessage = String(message || "");
@@ -468,6 +485,45 @@ async function bootstrap() {
   await runtimeTelemetry.init();
   runtimeTelemetry.increment("total_app_starts");
   let sharingEnabled = true;
+  const deviceRootRel = "/_devices";
+  const deviceRootAbs = resolveOwnerPath(config.storage.ownerRoot, deviceRootRel);
+  await fs.mkdir(deviceRootAbs, { recursive: true });
+
+  async function ensureDeviceFolderForSession(session) {
+    if (!session || !session.device_folder_rel) return null;
+    const safeFolderRel = toPosixPath(session.device_folder_rel);
+    const resolved = resolveOwnerPath(config.storage.ownerRoot, safeFolderRel);
+    await fs.mkdir(resolved, { recursive: true });
+    return { rel: safeFolderRel, abs: resolved };
+  }
+
+  function getRequestContext(req) {
+    if (req.joincloudAccess) return req.joincloudAccess;
+    if (isLocalhostRequest(req)) {
+      return {
+        role: "host",
+        can_upload: true,
+        is_admin: true,
+      };
+    }
+    return {
+      role: "remote",
+      can_upload: false,
+      is_admin: false,
+    };
+  }
+
+  function canWritePathForContext(context, requestedPath) {
+    if (!context || context.role === "host") return true;
+    if (!context.device_folder_rel) return false;
+    try {
+      const targetAbs = resolveOwnerPath(config.storage.ownerRoot, toPosixPath(requestedPath || "/"));
+      const deviceAbs = resolveOwnerPath(config.storage.ownerRoot, toPosixPath(context.device_folder_rel));
+      return isPathWithin(deviceAbs, targetAbs);
+    } catch (_error) {
+      return false;
+    }
+  }
   const uiRoot = resolveUiRoot();
   const hasUiRoot = fsSync.existsSync(uiRoot);
   if (hasUiRoot) {
@@ -514,7 +570,43 @@ async function bootstrap() {
       res.status(401).json({ authorized: false, reason: validation.reason });
       return;
     }
-    res.json({ authorized: true, role: "remote", cloud_url: getCloudUrl() });
+    await ensureDeviceFolderForSession(validation.session);
+    res.json({
+      authorized: true,
+      role: "remote",
+      cloud_url: getCloudUrl(),
+      device_id: validation.session.device_id,
+      device_name: validation.session.device_name,
+      device_folder_rel: validation.session.device_folder_rel,
+    });
+  });
+
+  app.get("/api/v1/access/me", async (req, res) => {
+    if (isLocalhostRequest(req)) {
+      res.json({
+        role: "host",
+        device_id: "host",
+        device_name: "Host",
+        device_folder_rel: null,
+        can_upload: true,
+      });
+      return;
+    }
+    const fingerprint = getRequestFingerprint(req);
+    const token = getRequestToken(req);
+    const validation = await accessControl.validateSession({ token, fingerprint });
+    if (!validation.authorized) {
+      res.status(401).json({ error: "approval_required", reason: validation.reason });
+      return;
+    }
+    await ensureDeviceFolderForSession(validation.session);
+    res.json({
+      role: "remote",
+      device_id: validation.session.device_id || sanitizePathSegment(validation.session.fingerprint),
+      device_name: validation.session.device_name || "Unknown Device",
+      device_folder_rel: toPosixPath(validation.session.device_folder_rel || `${deviceRootRel}/unknown-device`),
+      can_upload: true,
+    });
   });
 
   app.post("/api/v1/access/request", async (req, res) => {
@@ -614,9 +706,15 @@ async function bootstrap() {
       res.status(404).json({ error: "pending request not found" });
       return;
     }
+    await ensureDeviceFolderForSession(approved.request);
     logger.info("device request approved");
     runtimeTelemetry.increment("devices_approved");
-    res.json({ status: "approved", request_id: requestId });
+    res.json({
+      status: "approved",
+      request_id: requestId,
+      device_id: approved.request.device_id,
+      device_folder_rel: approved.request.device_folder_rel,
+    });
   });
 
   app.post("/api/v1/access/deny", ensureAdmin, async (req, res) => {
@@ -818,6 +916,7 @@ async function bootstrap() {
       "/v1/status",
       "/v1/cloud/url",
       "/v1/access/session",
+      "/v1/access/me",
       "/v1/access/request",
       "/v1/access/status",
     ]);
@@ -826,6 +925,11 @@ async function bootstrap() {
       return;
     }
     if (isLocalhostRequest(req)) {
+      req.joincloudAccess = {
+        role: "host",
+        can_upload: true,
+        is_admin: true,
+      };
       next();
       return;
     }
@@ -840,6 +944,17 @@ async function bootstrap() {
       res.status(401).json({ error: "approval_required", reason: validation.reason });
       return;
     }
+    await ensureDeviceFolderForSession(validation.session);
+    req.joincloudAccess = {
+      role: "remote",
+      can_upload: true,
+      is_admin: false,
+      token,
+      fingerprint,
+      device_id: validation.session.device_id,
+      device_name: validation.session.device_name,
+      device_folder_rel: toPosixPath(validation.session.device_folder_rel || `${deviceRootRel}/unknown-device`),
+    };
     next();
   });
 
@@ -884,6 +999,11 @@ async function bootstrap() {
 
   app.post("/api/share", async (req, res) => {
     try {
+      const access = getRequestContext(req);
+      if (access.role !== "host") {
+        res.status(403).json({ error: "remote_devices_are_read_only_for_sharing" });
+        return;
+      }
       const { path: sharePath, permission, ttlMs, scope } = req.body || {};
       if (!sharePath) {
         res.status(400).json({ error: "path is required" });
@@ -936,6 +1056,11 @@ async function bootstrap() {
   });
 
   app.delete("/api/share/:shareId", async (req, res) => {
+    const access = getRequestContext(req);
+    if (access.role !== "host") {
+      res.status(403).json({ error: "remote_devices_are_read_only_for_sharing" });
+      return;
+    }
     const ok = await shareService.revokeShare(req.params.shareId);
     if (ok) {
       logger.info("share revoked");
@@ -969,11 +1094,23 @@ async function bootstrap() {
 
   app.post("/api/upload", upload.array("files"), async (req, res) => {
     try {
-      const target = req.body?.path || req.body?.parentPath || "/";
+      const access = getRequestContext(req);
+      const hostRequestedTarget = req.body?.path || req.body?.parentPath || "/";
+      const forcedRemoteTarget = access.role === "remote" ? access.device_folder_rel : null;
+      const target = forcedRemoteTarget || hostRequestedTarget;
       const targetPath = resolveOwnerPath(config.storage.ownerRoot, toPosixPath(target));
+      if (!canWritePathForContext(access, target)) {
+        res.status(403).json({ error: "write_outside_device_folder_denied" });
+        return;
+      }
+      if (access.role === "remote") {
+        await fs.mkdir(targetPath, { recursive: true });
+      }
       logger.info("upload started", {
         count: (req.files || []).length,
         target: toPosixPath(target),
+        role: access.role,
+        device_id: access.device_id || null,
       });
       await fs.mkdir(targetPath, { recursive: true });
       const stored = [];
@@ -985,7 +1122,16 @@ async function bootstrap() {
         stored.push(cleanName);
         totalBytes += file.buffer.length;
       }
-      logger.info("upload completed", { count: stored.length });
+      if (access.role === "remote") {
+        logger.info("remote upload completed", {
+          device_id: access.device_id,
+          count: stored.length,
+          bytes: totalBytes,
+          target: toPosixPath(target),
+        });
+      } else {
+        logger.info("upload completed", { count: stored.length });
+      }
       telemetry.trackEvent("file_uploaded", {
         user_id: userConfig.user_id,
         count: stored.length,
@@ -1032,7 +1178,7 @@ async function bootstrap() {
     res.json(tunnelManager.getStatus());
   });
 
-  app.post("/api/public-access/start", async (_req, res) => {
+  app.post("/api/public-access/start", ensureAdmin, async (_req, res) => {
     try {
       const status = await tunnelManager.start();
       res.json(status);
@@ -1045,7 +1191,7 @@ async function bootstrap() {
     }
   });
 
-  app.post("/api/public-access/stop", (_req, res) => {
+  app.post("/api/public-access/stop", ensureAdmin, (_req, res) => {
     const status = tunnelManager.stop();
     res.json(status);
   });
@@ -1132,6 +1278,11 @@ async function bootstrap() {
   });
 
   app.post("/api/v1/network/settings", async (req, res) => {
+    const access = getRequestContext(req);
+    if (access.role !== "host") {
+      res.status(403).json({ error: "remote_devices_cannot_modify_host_settings" });
+      return;
+    }
     const requestedName = req.body?.display_name;
     const requestedVisibility = req.body?.network_visibility;
     let updated = false;
@@ -1170,6 +1321,11 @@ async function bootstrap() {
   });
 
   app.post("/api/v1/telemetry/settings", async (req, res) => {
+    const access = getRequestContext(req);
+    if (access.role !== "host") {
+      res.status(403).json({ error: "remote_devices_cannot_modify_host_settings" });
+      return;
+    }
     const enabled = !!req.body?.enabled;
     userConfig.telemetry_enabled = enabled;
     await updateUserConfig(config.storage.userConfigPath, userConfig);

@@ -11,6 +11,10 @@ const state = {
   fileSearch: "",
   foldersOnly: false,
   selectedShares: new Set(),
+  accessRole: "host",
+  deviceId: null,
+  deviceName: null,
+  deviceFolderRel: null,
 };
 
 const els = {
@@ -25,6 +29,7 @@ const els = {
   toggleSharing: document.getElementById("toggle-sharing"),
   statusDot: document.getElementById("status-dot"),
   status: document.getElementById("node-status"),
+  uploadDestinationLabel: document.getElementById("upload-destination-label"),
   headerDisplayName: document.getElementById("header-display-name"),
   storageLabel: document.getElementById("storage-label"),
   ownerMount: document.getElementById("owner-mount"),
@@ -42,6 +47,9 @@ const els = {
   foldersOnly: document.getElementById("folders-only"),
   viewList: document.getElementById("view-list"),
   viewThumb: document.getElementById("view-thumb"),
+  myFolderShortcut: document.getElementById("my-folder-shortcut"),
+  uploadScopeHint: document.getElementById("upload-scope-hint"),
+  uploadButtonLabel: document.getElementById("upload-button-label"),
   shareList: document.getElementById("share-list"),
   breadcrumbs: document.getElementById("breadcrumbs"),
   refreshFiles: document.getElementById("refresh-files"),
@@ -115,6 +123,20 @@ function displayNameToSuffix(fullName) {
 function buildDisplayNameFromSuffix(suffix) {
   const trimmed = String(suffix || "").trim();
   return trimmed ? `Join ${trimmed}` : "Join";
+}
+
+function isHostRole() {
+  return state.accessRole === "host" || state.isAdmin;
+}
+
+function isRemoteRole() {
+  return state.accessRole === "remote";
+}
+
+function isInMyFolder(pathValue) {
+  if (!isRemoteRole() || !state.deviceFolderRel) return true;
+  const target = String(pathValue || "/");
+  return target === state.deviceFolderRel || target.startsWith(`${state.deviceFolderRel}/`);
 }
 
 function withAuthHeaders(extra = {}) {
@@ -286,11 +308,17 @@ function renderFiles() {
     `;
     const openButton = document.createElement("button");
     openButton.className = "button secondary";
-    openButton.textContent = item.type === "folder" ? "Open" : "Share";
-    openButton.onclick = () => (item.type === "folder" ? loadFiles(item.path) : openShareModal(item.path));
-    row.appendChild(openButton);
-
     if (item.type === "folder") {
+      openButton.textContent = "Open";
+      openButton.onclick = () => loadFiles(item.path);
+      row.appendChild(openButton);
+    } else if (isHostRole()) {
+      openButton.textContent = "Share";
+      openButton.onclick = () => openShareModal(item.path);
+      row.appendChild(openButton);
+    }
+
+    if (item.type === "folder" && isHostRole()) {
       const shareButton = document.createElement("button");
       shareButton.className = "button";
       shareButton.textContent = "Share";
@@ -299,6 +327,7 @@ function renderFiles() {
     }
     els.fileList.appendChild(row);
   });
+  refreshRemoteUploadUi();
 }
 
 function renderShares() {
@@ -508,6 +537,19 @@ async function loadCloudUrl() {
   stateMeta.cloudUrl = String(data.url || window.location.origin);
   els.cloudUrlInput.value = stateMeta.cloudUrl;
   renderCloudQr(`${stateMeta.cloudUrl}?pair=1`);
+}
+
+async function loadAccessMe() {
+  const res = await apiFetch("/api/v1/access/me", {}, true);
+  if (!res.ok) {
+    state.accessRole = state.isAdmin ? "host" : "remote";
+    return;
+  }
+  const data = await res.json();
+  state.accessRole = data.role === "host" ? "host" : "remote";
+  state.deviceId = data.device_id || null;
+  state.deviceName = data.device_name || null;
+  state.deviceFolderRel = data.device_folder_rel || null;
 }
 
 async function fetchStatus() {
@@ -730,28 +772,38 @@ async function startSharing() {
 }
 
 async function addFileViaNativePicker() {
+  if (isRemoteRole() && state.deviceFolderRel && !isInMyFolder(state.path)) {
+    await loadFiles(state.deviceFolderRel);
+  }
   if (!window.joincloud || !window.joincloud.selectFiles) {
-    alert("Add File is available in the desktop app.");
+    if (els.uploadInput) {
+      els.uploadInput.click();
+    }
     return;
   }
   const selectedPaths = await window.joincloud.selectFiles();
   if (!selectedPaths || !selectedPaths.length) return;
+  const importTarget = isRemoteRole() && state.deviceFolderRel ? state.deviceFolderRel : state.path;
   await apiFetch("/api/v1/files/import", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: state.path, sourcePaths: selectedPaths }),
+    body: JSON.stringify({ path: importTarget, sourcePaths: selectedPaths }),
   });
-  await loadFiles(state.path);
+  await loadFiles(importTarget);
   await loadLogs();
 }
 
 async function uploadFiles(files) {
   if (!files || files.length === 0) return;
+  if (isRemoteRole() && state.deviceFolderRel && !isInMyFolder(state.path)) {
+    await loadFiles(state.deviceFolderRel);
+  }
   const formData = new FormData();
   Array.from(files).forEach((file) => formData.append("files", file));
-  formData.append("path", state.path);
+  const uploadPath = isRemoteRole() && state.deviceFolderRel ? state.deviceFolderRel : state.path;
+  formData.append("path", uploadPath);
   await apiFetch("/api/upload", { method: "POST", body: formData });
-  await loadFiles(state.path);
+  await loadFiles(uploadPath);
   await loadLogs();
 }
 
@@ -826,10 +878,21 @@ async function loadApprovedDevices() {
       <div class="pending-item-meta">
         <div class="item-title">${device.device_name || "Unknown Device"}</div>
         <div class="item-sub mono" title="${device.fingerprint}">${shortenFingerprint(device.fingerprint)}</div>
+        <div class="item-sub mono">Folder: ${device.device_folder_rel || "-"}</div>
         <div class="item-sub">Approved: ${device.approved_at ? new Date(device.approved_at).toLocaleString() : "-"}</div>
         <div class="item-sub">Last seen: ${device.last_seen_at ? new Date(device.last_seen_at).toLocaleString() : "Never"}</div>
       </div>
     `;
+    if (device.device_folder_rel) {
+      const openFolderBtn = document.createElement("button");
+      openFolderBtn.className = "button secondary";
+      openFolderBtn.textContent = "Open Device Folder";
+      openFolderBtn.onclick = async () => {
+        setActiveSection("files");
+        await loadFiles(device.device_folder_rel);
+      };
+      row.appendChild(openFolderBtn);
+    }
     const removeBtn = document.createElement("button");
     removeBtn.className = "button danger";
     removeBtn.textContent = "Remove";
@@ -908,7 +971,9 @@ async function bootstrapApp() {
     return;
   }
   state.isAdmin = session.role === "admin";
+  state.accessRole = state.isAdmin ? "host" : "remote";
   showMainApp();
+  await loadAccessMe();
   updateAdminUi();
 
   await fetchStatus();
@@ -946,7 +1011,8 @@ function updateAdminUi() {
     devicesSection.classList.remove("active");
   }
   if (els.addFileHeader) {
-    els.addFileHeader.style.display = state.isAdmin ? "" : "none";
+    els.addFileHeader.style.display = "";
+    els.addFileHeader.textContent = isRemoteRole() ? "Add File" : "Add File";
   }
   if (els.toggleSharing) {
     els.toggleSharing.style.display = state.isAdmin ? "" : "none";
@@ -956,6 +1022,39 @@ function updateAdminUi() {
   }
   if (els.revokeSelected) {
     els.revokeSelected.style.display = state.isAdmin ? "" : "none";
+  }
+  if (els.myFolderShortcut) {
+    els.myFolderShortcut.style.display = isRemoteRole() && state.deviceFolderRel ? "" : "none";
+  }
+}
+
+function refreshRemoteUploadUi() {
+  const remote = isRemoteRole();
+  const inMyFolder = isInMyFolder(state.path);
+  const uploadAllowed = !remote || inMyFolder;
+  if (els.uploadInput) {
+    els.uploadInput.disabled = !uploadAllowed;
+  }
+  if (els.uploadButtonLabel) {
+    els.uploadButtonLabel.classList.toggle("disabled", !uploadAllowed);
+  }
+  if (els.dropZone) {
+    els.dropZone.classList.toggle("disabled", !uploadAllowed);
+    els.dropZone.textContent = remote
+      ? (uploadAllowed ? "Drag & drop files to My Device Folder" : "You can upload only to My Device Folder")
+      : "Drag & drop files here";
+  }
+  if (els.uploadScopeHint) {
+    if (remote && state.deviceFolderRel) {
+      els.uploadScopeHint.textContent = uploadAllowed
+        ? `Uploads go to: My Device Folder (${state.deviceFolderRel})`
+        : "You can upload only to My Device Folder.";
+    } else {
+      els.uploadScopeHint.textContent = "";
+    }
+  }
+  if (els.uploadDestinationLabel) {
+    els.uploadDestinationLabel.textContent = remote && state.deviceFolderRel ? "Uploads go to: My Device Folder" : "";
   }
 }
 
@@ -1046,6 +1145,12 @@ els.viewThumb.addEventListener("click", () => {
   state.fileView = "thumb";
   renderFiles();
 });
+if (els.myFolderShortcut) {
+  els.myFolderShortcut.addEventListener("click", async () => {
+    if (!state.deviceFolderRel) return;
+    await loadFiles(state.deviceFolderRel);
+  });
+}
 els.backButton.onclick = () => {
   if (state.path === "/") return;
   const parts = state.path.split("/").filter(Boolean);
@@ -1064,11 +1169,13 @@ els.uploadInput.onchange = (event) => {
   els.uploadInput.value = "";
 };
 els.dropZone.addEventListener("dragover", (event) => {
+  if (els.uploadInput?.disabled) return;
   event.preventDefault();
   els.dropZone.classList.add("active");
 });
 els.dropZone.addEventListener("dragleave", () => els.dropZone.classList.remove("active"));
 els.dropZone.addEventListener("drop", (event) => {
+  if (els.uploadInput?.disabled) return;
   event.preventDefault();
   els.dropZone.classList.remove("active");
   uploadFiles(event.dataTransfer.files);

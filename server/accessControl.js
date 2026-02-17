@@ -21,6 +21,25 @@ function ensureShape(raw) {
   };
 }
 
+function sanitizeSegment(value) {
+  const normalized = String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-_]+|[-_]+$/g, "");
+  return normalized || "device";
+}
+
+function deriveDeviceId(fingerprint) {
+  return `dev_${crypto.createHash("sha256").update(String(fingerprint || "unknown")).digest("hex").slice(0, 16)}`;
+}
+
+function deriveDeviceFolderRel({ device_id, device_name }) {
+  const safeId = sanitizeSegment(device_id || "device");
+  const safeName = sanitizeSegment(device_name || "device");
+  return `/_devices/${safeId}-${safeName}`;
+}
+
 class AccessControlStore {
   constructor({ storagePath, logger }) {
     this.storagePath = storagePath;
@@ -79,10 +98,14 @@ class AccessControlStore {
   async createRequest({ device_name, fingerprint, user_agent, ip }) {
     await this.cleanupExpired();
     const requestId = crypto.randomUUID();
+    const safeDeviceName = String(device_name || "Unknown Device").trim() || "Unknown Device";
+    const deviceId = deriveDeviceId(fingerprint);
     this.state.requests[requestId] = {
       request_id: requestId,
       status: "pending",
-      device_name: device_name || "Unknown Device",
+      device_id: deviceId,
+      device_name: safeDeviceName,
+      device_folder_rel: deriveDeviceFolderRel({ device_id: deviceId, device_name: safeDeviceName }),
       fingerprint,
       user_agent: user_agent || "",
       ip: ip || "",
@@ -115,14 +138,22 @@ class AccessControlStore {
     }
     const sessionToken = crypto.randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
+    const deviceId = request.device_id || deriveDeviceId(request.fingerprint);
+    const deviceFolderRel =
+      request.device_folder_rel || deriveDeviceFolderRel({ device_id: deviceId, device_name: request.device_name });
     request.status = "approved";
     request.approved_at = nowIso();
     request.session_token = sessionToken;
+    request.device_id = deviceId;
+    request.device_folder_rel = deviceFolderRel;
 
     this.state.sessions[sessionToken] = {
       request_id: requestId,
       fingerprint: request.fingerprint,
+      role: "remote",
+      device_id: deviceId,
       device_name: request.device_name || "Unknown Device",
+      device_folder_rel: deviceFolderRel,
       created_at: nowIso(),
       approved_at: request.approved_at,
       last_seen_at: null,
@@ -157,6 +188,21 @@ class AccessControlStore {
     if (!session.fingerprint || session.fingerprint !== fingerprint) {
       return { authorized: false, reason: "fingerprint_mismatch" };
     }
+    const request = this.state.requests[session.request_id] || null;
+    if (!session.device_id) {
+      session.device_id = (request && request.device_id) || deriveDeviceId(session.fingerprint);
+    }
+    if (!session.device_name) {
+      session.device_name = (request && request.device_name) || "Unknown Device";
+    }
+    if (!session.device_folder_rel) {
+      session.device_folder_rel =
+        (request && request.device_folder_rel) ||
+        deriveDeviceFolderRel({ device_id: session.device_id, device_name: session.device_name });
+    }
+    if (!session.role) {
+      session.role = "remote";
+    }
     session.last_seen_at = nowIso();
     this.state.sessions[token] = session;
     await this.persist();
@@ -170,7 +216,14 @@ class AccessControlStore {
       const key = session.fingerprint || "unknown";
       const existing = grouped.get(key) || {
         fingerprint: key,
+        device_id: session.device_id || deriveDeviceId(session.fingerprint),
         device_name: session.device_name || "Unknown Device",
+        device_folder_rel:
+          session.device_folder_rel ||
+          deriveDeviceFolderRel({
+            device_id: session.device_id || deriveDeviceId(session.fingerprint),
+            device_name: session.device_name || "Unknown Device",
+          }),
         approved_at: session.approved_at || session.created_at || null,
         last_seen_at: session.last_seen_at || null,
         session_count: 0,
