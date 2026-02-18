@@ -17,6 +17,15 @@ const net = require("net");
 const { spawn } = require("child_process");
 const http = require("http");
 
+if (!app.isPackaged) {
+  try {
+    const devUserDataPath = path.join(app.getPath("appData"), "JoinCloud-dev");
+    app.setPath("userData", devUserDataPath);
+  } catch (_error) {
+    // ignore and continue with default userData
+  }
+}
+
 let backendProcess = null;
 let mainWindow = null;
 let logPath = null;
@@ -26,6 +35,9 @@ let consecutiveHealthFailures = 0;
 let restartHistory = [];
 let backendState = "healthy";
 let isStopping = false;
+let isCreatingWindow = false;
+let allowWindowClose = false;
+let isHandlingClosePrompt = false;
 
 const HEALTH_URL = "http://127.0.0.1:8787/api/v1/health";
 const BACKEND_URL = "http://127.0.0.1:8787";
@@ -73,18 +85,49 @@ function showInitFailure(reason, error) {
   showBackendError(message);
 }
 
-function getBackendScriptPath() {
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, "server", "index.js");
+function resolveBackendPaths() {
+  if (!app.isPackaged) {
+    return {
+      script: path.join(__dirname, "..", "server", "index.js"),
+      cwd: path.join(__dirname, "..", "server"),
+    };
   }
-  return path.join(__dirname, "..", "server", "index.js");
+
+  const candidates = [
+    {
+      script: path.join(process.resourcesPath, "app.asar", "server", "index.js"),
+      cwd: process.resourcesPath,
+      source: "resources/app.asar/server/index.js",
+    },
+    {
+      script: path.join(process.resourcesPath, "app", "server", "index.js"),
+      cwd: path.join(process.resourcesPath, "app"),
+      source: "resources/app/server/index.js",
+    },
+    {
+      script: path.join(process.resourcesPath, "server", "index.js"),
+      cwd: process.resourcesPath,
+      source: "resources/server/index.js",
+    },
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate.script)) {
+      return candidate;
+    }
+  }
+
+  return {
+    script: candidates[0].script,
+    cwd: process.resourcesPath,
+    source: "missing",
+    checked: candidates.map((entry) => entry.script),
+  };
 }
 
-function getBackendCwd() {
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, "server");
-  }
-  return path.join(__dirname, "..", "server");
+function getPackagedUiRoot() {
+  if (!app.isPackaged) return "";
+  return path.join(process.resourcesPath, "app.asar.unpacked", "server", "ui");
 }
 
 function getStoragePath() {
@@ -95,12 +138,25 @@ function startBackend() {
   if (backendProcess) return;
 
   // Native modules used by backend that require Electron rebuilds: sqlite3.
-  const backendScript = getBackendScriptPath();
-  const backendCwd = getBackendCwd();
+  const backendPath = resolveBackendPaths();
+  const backendScript = backendPath.script;
+  const backendCwd = backendPath.cwd;
   if (!fs.existsSync(backendScript)) {
     throw new Error(`Backend script not found: ${backendScript}`);
   }
   logLine(`Backend start ${backendScript}`);
+  if (backendPath.source) {
+    logLine(`Backend source ${backendPath.source}`);
+  }
+  const nodePathCandidates = app.isPackaged
+    ? [
+        path.join(process.resourcesPath, "app.asar", "node_modules"),
+        path.join(process.resourcesPath, "app", "node_modules"),
+        path.join(process.resourcesPath, "node_modules"),
+      ].filter((candidatePath) => fs.existsSync(candidatePath))
+    : [];
+  const inheritedNodePath = process.env.NODE_PATH || "";
+  const mergedNodePath = [...nodePathCandidates, inheritedNodePath].filter(Boolean).join(path.delimiter);
   const env = {
     ...process.env,
     NODE_ENV: app.isPackaged ? "production" : "development",
@@ -112,11 +168,18 @@ function startBackend() {
     SHARE_PORT,
     JOINCLOUD_STORAGE_ROOT: getStoragePath(),
     PATH: process.env.PATH || "",
+    NODE_PATH: mergedNodePath || inheritedNodePath,
   };
   if (app.isPackaged && process.resourcesPath) {
     env.JOINCLOUD_RESOURCES_PATH = process.resourcesPath;
+    const packagedUiRoot = getPackagedUiRoot();
+    env.UI_ROOT = packagedUiRoot;
+    env.JOINCLOUD_UI_ROOT = packagedUiRoot;
+    logLine(`Packaged UI root ${packagedUiRoot}`);
   } else {
     delete env.JOINCLOUD_RESOURCES_PATH;
+    delete env.UI_ROOT;
+    delete env.JOINCLOUD_UI_ROOT;
   }
 
   backendProcess = spawn(process.execPath, [backendScript], {
@@ -384,50 +447,88 @@ function stopHealthMonitor() {
 }
 
 async function createWindow() {
+  if (isCreatingWindow) return;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+    return;
+  }
+  isCreatingWindow = true;
   initLogging();
   logLine("UI init");
   try {
-    const resolver = require(path.join(__dirname, "..", "server", "tunnel", "resolveBinary"));
-    resolver.resolveTunnelBinaryPath();
-    logLine("Tunnel binary resolved");
-  } catch (error) {
-    logLine(`Tunnel binary unavailable: ${formatError(error)}`);
-  }
+    try {
+      const resolver = require(path.join(__dirname, "..", "server", "tunnel", "resolveBinary"));
+      resolver.resolveTunnelBinaryPath();
+      logLine("Tunnel binary resolved");
+    } catch (error) {
+      logLine(`Tunnel binary unavailable: ${formatError(error)}`);
+    }
 
-  const ok = await ensureBackend();
-  if (!ok) {
-    logLine("Backend init failed");
-    app.quit();
-    return;
-  }
-  startHealthMonitor();
+    const ok = await ensureBackend();
+    if (!ok) {
+      logLine("Backend init failed");
+      app.quit();
+      return;
+    }
+    startHealthMonitor();
 
-  mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    icon: path.join(__dirname, "..", "assets", "icons.png"),
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      preload: path.join(__dirname, "preload.js"),
-    },
-  });
-  mainWindow.webContents.on("did-fail-load", (_event, code, description, url) => {
-    logLine(`Renderer failed to load code=${code} url=${url} reason=${description}`);
-  });
+    mainWindow = new BrowserWindow({
+      width: 1200,
+      height: 800,
+      icon: path.join(__dirname, "..", "assets", "icons.png"),
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        preload: path.join(__dirname, "preload.js"),
+      },
+    });
+    mainWindow.webContents.on("did-fail-load", (_event, code, description, url) => {
+      logLine(`Renderer failed to load code=${code} url=${url} reason=${description}`);
+    });
 
-  try {
-    await loadRenderer(mainWindow);
-  } catch (error) {
-    logLine(`UI load failed: ${formatError(error)}`);
-    showInitFailure("Renderer URL could not be loaded", error);
-    stopBackend();
-    app.quit();
-    return;
+    try {
+      await loadRenderer(mainWindow);
+    } catch (error) {
+      logLine(`UI load failed: ${formatError(error)}`);
+      showInitFailure("Renderer URL could not be loaded", error);
+      stopBackend();
+      app.quit();
+      return;
+    }
+    mainWindow.on("close", async (event) => {
+      if (isStopping || allowWindowClose) {
+        return;
+      }
+      event.preventDefault();
+      if (isHandlingClosePrompt) {
+        return;
+      }
+      isHandlingClosePrompt = true;
+      const choice = await dialog.showMessageBox(mainWindow, {
+        type: "question",
+        buttons: ["Quit", "Run in Background"],
+        defaultId: 1,
+        cancelId: 1,
+        title: "JoinCloud",
+        message: "Choose what to do when closing JoinCloud.",
+        detail: "Quit will stop sharing and exit the app. Run in Background keeps JoinCloud active.",
+      });
+      if (choice.response === 0) {
+        allowWindowClose = true;
+        isHandlingClosePrompt = false;
+        app.quit();
+        return;
+      }
+      isHandlingClosePrompt = false;
+      mainWindow.hide();
+    });
+    mainWindow.on("closed", () => {
+      mainWindow = null;
+    });
+  } finally {
+    isCreatingWindow = false;
   }
-  mainWindow.on("closed", () => {
-    mainWindow = null;
-  });
 }
 
 if (!app || !BrowserWindow) {
@@ -436,16 +537,36 @@ if (!app || !BrowserWindow) {
 }
 
 app.on("second-instance", () => {
-  if (!mainWindow) return;
-  if (mainWindow.isMinimized()) {
-    mainWindow.restore();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.focus();
+    return;
   }
-  mainWindow.focus();
+  if (app.isReady()) {
+    createWindow().catch((error) => {
+      logLine(`Second-instance window creation failed: ${formatError(error)}`);
+    });
+  }
 });
 
 if (gotLock) {
   app.whenReady().then(createWindow);
 }
+
+app.on("activate", () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+    return;
+  }
+  if (!mainWindow && app.isReady()) {
+    createWindow().catch((error) => {
+      logLine(`Activate window creation failed: ${formatError(error)}`);
+    });
+  }
+});
 
 ipcMain.handle("joincloud-open-storage", async () => {
   const storagePath = getStoragePath();
@@ -467,6 +588,9 @@ ipcMain.handle("joincloud-quit-app", async () => {
 });
 
 app.on("window-all-closed", () => {
+  if (!isStopping) {
+    return;
+  }
   isStopping = true;
   stopHealthMonitor();
   stopBackendGracefully().finally(() => app.quit());
@@ -474,6 +598,39 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", (event) => {
   if (isStopping) return;
+  if (!allowWindowClose) {
+    event.preventDefault();
+    if (isHandlingClosePrompt) {
+      return;
+    }
+    isHandlingClosePrompt = true;
+    const promptTarget = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+    dialog
+      .showMessageBox(promptTarget || undefined, {
+        type: "question",
+        buttons: ["Quit", "Run in Background"],
+        defaultId: 1,
+        cancelId: 1,
+        title: "JoinCloud",
+        message: "Choose what to do when closing JoinCloud.",
+        detail: "Quit will stop sharing and exit the app. Run in Background keeps JoinCloud active.",
+      })
+      .then((choice) => {
+        isHandlingClosePrompt = false;
+        if (choice.response === 0) {
+          allowWindowClose = true;
+          app.quit();
+          return;
+        }
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.hide();
+        }
+      })
+      .catch(() => {
+        isHandlingClosePrompt = false;
+      });
+    return;
+  }
   isStopping = true;
   stopHealthMonitor();
   event.preventDefault();

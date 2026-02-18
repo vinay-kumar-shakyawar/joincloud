@@ -25,12 +25,17 @@
     "icon": "assets/icon.ico"
   },
   "npmRebuild": false,
-  "asar": false,
+  "asar": true,
+  "asarUnpack": [
+    "server/ui/**"
+  ],
+  "files": [
+    "**/*",
+    "!release-artifacts/**",
+    "!**/.git/**",
+    "!**/node_modules/.cache/**"
+  ],
   "extraResources": [
-    {
-      "from": "server",
-      "to": "server"
-    },
     {
       "from": "server/bin",
       "to": "bin"

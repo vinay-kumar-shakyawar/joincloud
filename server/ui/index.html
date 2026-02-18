@@ -12,6 +12,7 @@
         <button class="button secondary menu-toggle" id="menu-toggle" aria-label="Toggle navigation">☰</button>
         <img class="brand-logo" src="/logo.png" alt="JoinCloud" />
         <span>JoinCloud</span>
+        <span class="badge" id="pending-badge" style="display:none">0 Pending</span>
         <span class="brand-separator">|</span>
         <span class="brand-user" id="header-display-name">Join</span>
       </div>
@@ -31,7 +32,7 @@
           <div class="row" style="margin-top:12px">
             <div style="flex:1">
               <div class="label">Device</div>
-              <div class="value mono" id="access-device-name">Unknown device</div>
+              <input class="input mono" id="access-device-name-input" maxlength="48" placeholder="Enter device name" />
             </div>
             <div style="flex:1">
               <div class="label">Fingerprint</div>
@@ -54,6 +55,7 @@
         <button class="nav-button" data-section="logs">Logs</button>
         <button class="nav-button" data-section="settings">Settings</button>
         <button class="nav-button" data-section="devices">Devices</button>
+        <button class="nav-button" data-section="activity">Activity</button>
         <button class="nav-button" data-section="network">Network</button>
       </aside>
 
@@ -239,6 +241,43 @@
         <div class="value value-muted">Approved devices can access JoinCloud after admin approval.</div>
         <div class="pending-list" id="approved-devices-list" style="margin-top:12px"></div>
       </section>
+
+      <section class="card section" data-section="activity">
+        <div class="row space-between">
+          <h2>Activity Dashboard</h2>
+          <button class="button secondary" id="refresh-activity">Refresh</button>
+        </div>
+        <div class="activity-grid" id="activity-metrics">
+          <div class="metric-card">
+            <div class="metric-label">Total Uploads</div>
+            <div class="metric-value" id="metric-total-uploads">0</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Total Downloads</div>
+            <div class="metric-value" id="metric-total-downloads">0</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Shares Created</div>
+            <div class="metric-value" id="metric-shares-created">0</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Connected Devices</div>
+            <div class="metric-value" id="metric-connected-devices">0</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Storage Used</div>
+            <div class="metric-value" id="metric-storage-used">0 B</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Share Downloads</div>
+            <div class="metric-value" id="metric-share-downloads">0</div>
+          </div>
+        </div>
+        <div class="value value-muted" id="activity-summary" style="margin-top:12px">Loading activity...</div>
+        <div class="activity-chart-wrap">
+          <canvas id="activity-chart" height="180"></canvas>
+        </div>
+      </section>
       </div>
     </main>
 
@@ -300,6 +339,18 @@
         </div>
       </div>
     </div>
+
+    <div class="modal" id="preview-modal">
+      <div class="modal-content preview-content">
+        <div class="modal-header">
+          <h3 id="preview-title">Preview</h3>
+          <button class="button ghost" id="close-preview-modal">✕</button>
+        </div>
+        <div class="preview-body" id="preview-body"></div>
+      </div>
+    </div>
+
+    <footer class="build-footer" id="build-id">BUILD: loading...</footer>
 
     <script src="/vendor/qrious.min.js"></script>
     <script src="/app.js"></script>

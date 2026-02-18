@@ -20,10 +20,11 @@ const state = {
 const els = {
   appLayout: document.getElementById("app-layout"),
   accessGate: document.getElementById("access-gate"),
-  accessDeviceName: document.getElementById("access-device-name"),
+  accessDeviceNameInput: document.getElementById("access-device-name-input"),
   accessFingerprint: document.getElementById("access-fingerprint"),
   accessStatus: document.getElementById("access-status"),
   requestApproval: document.getElementById("request-approval"),
+  pendingBadge: document.getElementById("pending-badge"),
   menuToggle: document.getElementById("menu-toggle"),
   addFileHeader: document.getElementById("add-file-header"),
   toggleSharing: document.getElementById("toggle-sharing"),
@@ -41,6 +42,15 @@ const els = {
   pendingAccessCount: document.getElementById("pending-access-count"),
   approvedDevicesList: document.getElementById("approved-devices-list"),
   refreshDevices: document.getElementById("refresh-devices"),
+  refreshActivity: document.getElementById("refresh-activity"),
+  activitySummary: document.getElementById("activity-summary"),
+  metricTotalUploads: document.getElementById("metric-total-uploads"),
+  metricTotalDownloads: document.getElementById("metric-total-downloads"),
+  metricSharesCreated: document.getElementById("metric-shares-created"),
+  metricConnectedDevices: document.getElementById("metric-connected-devices"),
+  metricStorageUsed: document.getElementById("metric-storage-used"),
+  metricShareDownloads: document.getElementById("metric-share-downloads"),
+  activityChart: document.getElementById("activity-chart"),
   fileList: document.getElementById("file-list"),
   fileSearch: document.getElementById("file-search"),
   fileSort: document.getElementById("file-sort"),
@@ -89,6 +99,11 @@ const els = {
   copyPrivacyPolicy: document.getElementById("copy-privacy-policy"),
   downloadPrivacyPolicy: document.getElementById("download-privacy-policy"),
   privacyPolicyContent: document.getElementById("privacy-policy-content"),
+  buildId: document.getElementById("build-id"),
+  previewModal: document.getElementById("preview-modal"),
+  closePreviewModal: document.getElementById("close-preview-modal"),
+  previewTitle: document.getElementById("preview-title"),
+  previewBody: document.getElementById("preview-body"),
 };
 
 const stateMeta = {
@@ -97,6 +112,8 @@ const stateMeta = {
   fingerprint: getOrCreateFingerprint(),
   sessionToken: localStorage.getItem("joincloud:session-token") || "",
   privacyPolicyRaw: "",
+  buildId: "",
+  lastPendingCount: 0,
 };
 
 function getOrCreateFingerprint() {
@@ -125,18 +142,31 @@ function buildDisplayNameFromSuffix(suffix) {
   return trimmed ? `Join ${trimmed}` : "Join";
 }
 
+function getSuggestedDeviceName() {
+  const ua = String(navigator.userAgent || "").toLowerCase();
+  if (ua.includes("iphone")) return "iPhone";
+  if (ua.includes("ipad")) return "iPad";
+  if (ua.includes("android")) return "Android";
+  if (ua.includes("windows")) return "Windows Device";
+  if (ua.includes("mac")) return "Mac Device";
+  return "My Device";
+}
+
 function isHostRole() {
   return state.accessRole === "host" || state.isAdmin;
 }
 
 function isRemoteRole() {
-  return state.accessRole === "remote";
+  return state.accessRole === "remote" || state.accessRole === "device";
 }
 
 function isInMyFolder(pathValue) {
-  if (!isRemoteRole() || !state.deviceFolderRel) return true;
-  const target = String(pathValue || "/");
-  return target === state.deviceFolderRel || target.startsWith(`${state.deviceFolderRel}/`);
+  return true;
+}
+
+function isPreviewableName(fileName) {
+  const lower = String(fileName || "").toLowerCase();
+  return /\.(png|jpe?g|gif|webp|svg|pdf|mp4|webm|mov|m4v)$/i.test(lower);
 }
 
 function withAuthHeaders(extra = {}) {
@@ -166,6 +196,8 @@ function showAccessGate(statusText) {
   els.appLayout.style.display = "none";
   els.accessGate.style.display = "grid";
   els.accessStatus.textContent = statusText || "Waiting to request access.";
+  state.accessRole = "pending";
+  updateAdminUi();
 }
 
 function showMainApp() {
@@ -203,6 +235,38 @@ function getLogIcon(level, message) {
   if (level === "error") return "❌";
   if (level === "warn") return "⚠️";
   return "ℹ️";
+}
+
+function drawActivityChart(entries) {
+  if (!els.activityChart) return;
+  const canvas = els.activityChart;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const width = canvas.clientWidth || 640;
+  const height = Number(canvas.getAttribute("height") || 180);
+  canvas.width = width;
+  canvas.height = height;
+  ctx.clearRect(0, 0, width, height);
+
+  const values = entries.map((entry) => Number(entry.value || 0));
+  const maxValue = Math.max(1, ...values);
+  const gap = 12;
+  const barWidth = Math.max(32, Math.floor((width - gap * (entries.length + 1)) / entries.length));
+  const baseline = height - 26;
+  const drawHeight = height - 52;
+
+  entries.forEach((entry, index) => {
+    const x = gap + index * (barWidth + gap);
+    const value = Number(entry.value || 0);
+    const h = Math.max(3, Math.round((value / maxValue) * drawHeight));
+    const y = baseline - h;
+    ctx.fillStyle = "#2fb7ff";
+    ctx.fillRect(x, y, barWidth, h);
+    ctx.fillStyle = "#a1a1aa";
+    ctx.font = "11px system-ui, -apple-system, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(entry.label, x + barWidth / 2, height - 8);
+  });
 }
 
 function renderBreadcrumbs() {
@@ -318,6 +382,14 @@ function renderFiles() {
       row.appendChild(openButton);
     }
 
+    if (item.type === "file" && isPreviewableName(item.name)) {
+      const previewButton = document.createElement("button");
+      previewButton.className = "button secondary";
+      previewButton.textContent = "Preview";
+      previewButton.onclick = () => openPreviewModal(item);
+      row.appendChild(previewButton);
+    }
+
     if (item.type === "folder" && isHostRole()) {
       const shareButton = document.createElement("button");
       shareButton.className = "button";
@@ -356,37 +428,45 @@ function renderShares() {
       </div>
       <span class="badge badge-active">Active</span>
     `;
-    const checkboxWrap = document.createElement("label");
-    checkboxWrap.className = "item-check";
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.checked = state.selectedShares.has(share.shareId);
-    checkbox.onchange = () => {
-      if (checkbox.checked) state.selectedShares.add(share.shareId);
-      else state.selectedShares.delete(share.shareId);
-      updateBulkButtons();
-    };
-    checkboxWrap.appendChild(checkbox);
-    row.appendChild(checkboxWrap);
+    if (isHostRole()) {
+      const checkboxWrap = document.createElement("label");
+      checkboxWrap.className = "item-check";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = state.selectedShares.has(share.shareId);
+      checkbox.onchange = () => {
+        if (checkbox.checked) state.selectedShares.add(share.shareId);
+        else state.selectedShares.delete(share.shareId);
+        updateBulkButtons();
+      };
+      checkboxWrap.appendChild(checkbox);
+      row.appendChild(checkboxWrap);
+    }
     const copyButton = document.createElement("button");
     copyButton.className = "button secondary";
     copyButton.textContent = "Copy Link";
     copyButton.onclick = async () => {
-      await copyToClipboard(shareUrl);
-      copyButton.textContent = "Copied!";
-      setTimeout(() => (copyButton.textContent = "Copy Link"), 1200);
+      const ok = await copyToClipboard(shareUrl);
+      if (ok) {
+        copyButton.textContent = "Copied!";
+        setTimeout(() => (copyButton.textContent = "Copy Link"), 2000);
+      } else {
+        showCopyFallback(shareUrl, copyButton);
+      }
     };
     row.appendChild(copyButton);
 
-    const revokeButton = document.createElement("button");
-    revokeButton.className = "button danger";
-    revokeButton.textContent = "Revoke";
-    revokeButton.onclick = async () => {
-      revokeButton.disabled = true;
-      revokeButton.textContent = "Revoking...";
-      await revokeShare(share.shareId);
-    };
-    row.appendChild(revokeButton);
+    if (isHostRole()) {
+      const revokeButton = document.createElement("button");
+      revokeButton.className = "button danger";
+      revokeButton.textContent = "Revoke";
+      revokeButton.onclick = async () => {
+        revokeButton.disabled = true;
+        revokeButton.textContent = "Revoking...";
+        await revokeShare(share.shareId);
+      };
+      row.appendChild(revokeButton);
+    }
     els.shareList.appendChild(row);
   });
 }
@@ -413,6 +493,39 @@ function renderNetwork() {
   els.networkList.innerHTML = '<div class="empty-state"><div class="empty-state-title">Coming Soon</div><div class="empty-state-sub">Network discovery will be available in a future release.</div></div>';
 }
 
+function closePreviewModal() {
+  if (!els.previewModal) return;
+  els.previewModal.classList.remove("active");
+  if (els.previewBody) {
+    els.previewBody.innerHTML = "";
+  }
+}
+
+function openPreviewModal(item) {
+  if (!item || item.type !== "file" || !isPreviewableName(item.name)) return;
+  if (!els.previewModal || !els.previewBody || !els.previewTitle) return;
+  const params = new URLSearchParams({
+    path: item.path,
+    fp: stateMeta.fingerprint,
+  });
+  if (stateMeta.sessionToken) {
+    params.set("token", stateMeta.sessionToken);
+  }
+  const previewUrl = `/api/v1/file/content?${params.toString()}`;
+  const lower = String(item.name || "").toLowerCase();
+  els.previewTitle.textContent = `Preview: ${item.name}`;
+  if (/\.(png|jpe?g|gif|webp|svg)$/i.test(lower)) {
+    els.previewBody.innerHTML = `<img src="${previewUrl}" alt="${item.name}" class="preview-image" />`;
+  } else if (/\.pdf$/i.test(lower)) {
+    els.previewBody.innerHTML = `<object data="${previewUrl}" type="application/pdf" class="preview-frame"><iframe src="${previewUrl}" class="preview-frame" title="${item.name}"></iframe></object>`;
+  } else if (/\.(mp4|webm|mov|m4v)$/i.test(lower)) {
+    els.previewBody.innerHTML = `<video controls class="preview-video" src="${previewUrl}"></video>`;
+  } else {
+    return;
+  }
+  els.previewModal.classList.add("active");
+}
+
 function shortenFingerprint(value) {
   const text = String(value || "");
   if (text.length <= 16) return text;
@@ -433,11 +546,48 @@ function renderCloudQr(url) {
 
 async function copyToClipboard(text) {
   try {
-    await navigator.clipboard.writeText(text);
-  } catch (_error) {
-    els.cloudUrlInput.select();
-    document.execCommand("copy");
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (_err) {}
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    ta.style.top = "0";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch (_e) {
+    return false;
   }
+}
+
+function showCopyFallback(text, triggerEl) {
+  const wrap = document.createElement("div");
+  wrap.className = "copy-fallback";
+  wrap.style.marginTop = "8px";
+  wrap.innerHTML = '<div class="value value-muted" style="margin-bottom:4px">Tap and hold to copy:</div>';
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "input mono";
+  input.value = text;
+  input.readOnly = true;
+  input.style.width = "100%";
+  input.onclick = () => input.select();
+  wrap.appendChild(input);
+  const parent = triggerEl.closest(".item") || triggerEl.parentElement;
+  const existing = parent.querySelector(".copy-fallback");
+  if (existing) existing.remove();
+  parent.appendChild(wrap);
 }
 
 function escapeHtml(text) {
@@ -546,10 +696,26 @@ async function loadAccessMe() {
     return;
   }
   const data = await res.json();
-  state.accessRole = data.role === "host" ? "host" : "remote";
+  state.accessRole = data.role === "host" ? "host" : "device";
   state.deviceId = data.device_id || null;
   state.deviceName = data.device_name || null;
-  state.deviceFolderRel = data.device_folder_rel || null;
+  state.deviceFolderRel = null;
+}
+
+async function loadBuildInfo() {
+  try {
+    const res = await fetch("/api/v1/build");
+    if (!res.ok) return;
+    const data = await res.json();
+    stateMeta.buildId = String(data.build_id || "");
+    if (els.buildId) {
+      els.buildId.textContent = `BUILD: ${stateMeta.buildId || "unknown"}`;
+    }
+  } catch (_error) {
+    if (els.buildId) {
+      els.buildId.textContent = "BUILD: unavailable";
+    }
+  }
 }
 
 async function fetchStatus() {
@@ -700,9 +866,13 @@ async function createShare() {
   els.shareResult.textContent = `Share created: ${shareUrl}`;
   els.copyShare.style.display = "inline-flex";
   els.copyShare.onclick = async () => {
-    await copyToClipboard(shareUrl);
-    els.copyShare.textContent = "Copied!";
-    setTimeout(() => (els.copyShare.textContent = "Copy Link"), 1200);
+    const ok = await copyToClipboard(shareUrl);
+    if (ok) {
+      els.copyShare.textContent = "Copied!";
+      setTimeout(() => (els.copyShare.textContent = "Copy Link"), 2000);
+    } else {
+      showCopyFallback(shareUrl, els.copyShare);
+    }
   };
   await loadShares();
   await loadLogs();
@@ -772,18 +942,18 @@ async function startSharing() {
 }
 
 async function addFileViaNativePicker() {
-  if (isRemoteRole() && state.deviceFolderRel && !isInMyFolder(state.path)) {
-    await loadFiles(state.deviceFolderRel);
-  }
   if (!window.joincloud || !window.joincloud.selectFiles) {
-    if (els.uploadInput) {
+    if (els.uploadInput && !els.uploadInput.disabled) {
       els.uploadInput.click();
     }
     return;
   }
+  if (isRemoteRole() && state.deviceFolderRel && !isInMyFolder(state.path)) {
+    await loadFiles(state.deviceFolderRel);
+  }
   const selectedPaths = await window.joincloud.selectFiles();
   if (!selectedPaths || !selectedPaths.length) return;
-  const importTarget = isRemoteRole() && state.deviceFolderRel ? state.deviceFolderRel : state.path;
+  const importTarget = state.path;
   await apiFetch("/api/v1/files/import", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -795,15 +965,21 @@ async function addFileViaNativePicker() {
 
 async function uploadFiles(files) {
   if (!files || files.length === 0) return;
-  if (isRemoteRole() && state.deviceFolderRel && !isInMyFolder(state.path)) {
-    await loadFiles(state.deviceFolderRel);
-  }
   const formData = new FormData();
   Array.from(files).forEach((file) => formData.append("files", file));
-  const uploadPath = isRemoteRole() && state.deviceFolderRel ? state.deviceFolderRel : state.path;
+  const uploadPath = state.path;
   formData.append("path", uploadPath);
-  await apiFetch("/api/upload", { method: "POST", body: formData });
-  await loadFiles(uploadPath);
+  const res = await apiFetch("/api/upload", { method: "POST", body: formData });
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const reason = payload.error || "Upload failed.";
+    if (els.uploadScopeHint) {
+      els.uploadScopeHint.textContent = reason;
+    }
+    throw new Error(reason);
+  }
+  const savedTo = String(payload.saved_to || uploadPath || "/");
+  await loadFiles(savedTo);
   await loadLogs();
 }
 
@@ -811,11 +987,36 @@ async function loadPendingAccessRequests() {
   if (!state.isAdmin) {
     els.pendingAccessCount.textContent = "0";
     els.pendingAccessList.innerHTML = '<div class="value value-muted">Available only on the host machine.</div>';
+    if (els.pendingBadge) els.pendingBadge.style.display = "none";
     return;
   }
   const res = await apiFetch("/api/v1/access/pending");
   const pending = await res.json();
   els.pendingAccessCount.textContent = String(pending.length);
+  if (els.pendingBadge) {
+    if (pending.length > 0) {
+      els.pendingBadge.style.display = "inline-flex";
+      els.pendingBadge.textContent = `${pending.length} Pending`;
+    } else {
+      els.pendingBadge.style.display = "none";
+    }
+  }
+  if (pending.length > stateMeta.lastPendingCount && document.visibilityState === "visible") {
+    try {
+      if ("Notification" in window) {
+        if (Notification.permission === "granted") {
+          new Notification("JoinCloud", {
+            body: `${pending.length} device request(s) pending approval.`,
+          });
+        } else if (Notification.permission === "default") {
+          Notification.requestPermission().then(() => {});
+        }
+      }
+    } catch (_error) {
+      // ignore notification errors
+    }
+  }
+  stateMeta.lastPendingCount = pending.length;
   if (!pending.length) {
     els.pendingAccessList.innerHTML = '<div class="value value-muted">No pending requests.</div>';
     return;
@@ -910,6 +1111,51 @@ async function loadApprovedDevices() {
   });
 }
 
+async function loadActivitySummary() {
+  if (!state.isAdmin) {
+    if (els.activitySummary) els.activitySummary.textContent = "Host-only dashboard.";
+    return;
+  }
+  const [activityRes, storageRes] = await Promise.all([
+    apiFetch("/api/v1/activity/summary"),
+    apiFetch("/api/storage"),
+  ]);
+  const data = await activityRes.json();
+  const storage = await storageRes.json();
+  const telemetry = data.telemetry || {};
+  const devices = Array.isArray(data.devices) ? data.devices : [];
+  const uploadsFromDevices = devices.reduce((sum, device) => sum + Number(device.uploads || 0), 0);
+  const downloadsFromDevices = devices.reduce((sum, device) => sum + Number(device.downloads || 0), 0);
+  const activeSince = Date.now() - 24 * 60 * 60 * 1000;
+  const active24h = devices.filter((device) => {
+    const ts = device.last_seen_at ? new Date(device.last_seen_at).getTime() : 0;
+    return ts > activeSince;
+  }).length;
+  const sharesCreated = Number(telemetry.total_shares_created || 0);
+  const shareDownloads = Number(telemetry.total_downloads || 0);
+  const totalUploads = Number(telemetry.total_uploads || 0) || uploadsFromDevices;
+  const totalDownloads = Math.max(downloadsFromDevices, shareDownloads);
+  const connectedDevices = Number(data.connected_devices || devices.length || 0);
+  const storageUsed = Number(storage.usedBytes || 0);
+
+  if (els.metricTotalUploads) els.metricTotalUploads.textContent = String(totalUploads);
+  if (els.metricTotalDownloads) els.metricTotalDownloads.textContent = String(totalDownloads);
+  if (els.metricSharesCreated) els.metricSharesCreated.textContent = String(sharesCreated);
+  if (els.metricConnectedDevices) els.metricConnectedDevices.textContent = String(connectedDevices);
+  if (els.metricStorageUsed) els.metricStorageUsed.textContent = formatBytes(storageUsed);
+  if (els.metricShareDownloads) els.metricShareDownloads.textContent = String(shareDownloads);
+  if (els.activitySummary) {
+    els.activitySummary.textContent = `Pending requests: ${Number(data.pending_count || 0)} | Active (24h): ${active24h} devices`;
+  }
+  drawActivityChart([
+    { label: "Uploads", value: totalUploads },
+    { label: "Downloads", value: totalDownloads },
+    { label: "Shares", value: sharesCreated },
+    { label: "Devices", value: connectedDevices },
+    { label: "Share DL", value: shareDownloads },
+  ]);
+}
+
 async function pollAccessStatus(requestId) {
   const res = await apiFetch(`/api/v1/access/status?request_id=${encodeURIComponent(requestId)}`, {}, true);
   if (!res.ok) return;
@@ -929,8 +1175,9 @@ async function pollAccessStatus(requestId) {
 }
 
 async function requestAccessApproval() {
+  const deviceName = String(els.accessDeviceNameInput?.value || "").trim() || getSuggestedDeviceName();
   const body = {
-    device_name: els.accessDeviceName.textContent,
+    device_name: deviceName,
     user_agent: navigator.userAgent,
     fingerprint: stateMeta.fingerprint,
   };
@@ -975,6 +1222,7 @@ async function bootstrapApp() {
   showMainApp();
   await loadAccessMe();
   updateAdminUi();
+  await loadBuildInfo();
 
   await fetchStatus();
   await loadRuntimeStatus();
@@ -989,13 +1237,15 @@ async function bootstrapApp() {
   await loadPendingAccessRequests();
   await loadApprovedDevices();
   await loadShareVisitSummary();
+  await loadActivitySummary();
 
   const initial = window.location.hash.replace("#", "") || "home";
   setActiveSection(initial);
 }
 
 function setActiveSection(sectionId) {
-  const safeSection = !state.isAdmin && sectionId === "devices" ? "home" : sectionId;
+  const adminOnly = new Set(["devices", "activity"]);
+  const safeSection = !state.isAdmin && adminOnly.has(sectionId) ? "home" : sectionId;
   if (window.location.hash !== `#${safeSection}`) window.location.hash = safeSection;
   els.sections.forEach((section) => section.classList.toggle("active", section.dataset.section === safeSection));
   els.navButtons.forEach((button) => button.classList.toggle("active", button.dataset.section === safeSection));
@@ -1004,34 +1254,43 @@ function setActiveSection(sectionId) {
 function updateAdminUi() {
   const devicesButton = Array.from(els.navButtons).find((button) => button.dataset.section === "devices");
   const devicesSection = Array.from(els.sections).find((section) => section.dataset.section === "devices");
+  const activityButton = Array.from(els.navButtons).find((button) => button.dataset.section === "activity");
+  const activitySection = Array.from(els.sections).find((section) => section.dataset.section === "activity");
+  const pendingRole = state.accessRole === "pending";
+  const hostRole = isHostRole();
+  const remoteRole = isRemoteRole();
   if (devicesButton) {
-    devicesButton.style.display = state.isAdmin ? "" : "none";
+    devicesButton.style.display = hostRole ? "" : "none";
   }
-  if (devicesSection && !state.isAdmin) {
+  if (devicesSection && !hostRole) {
     devicesSection.classList.remove("active");
   }
+  if (activityButton) {
+    activityButton.style.display = hostRole ? "" : "none";
+  }
+  if (activitySection && !hostRole) {
+    activitySection.classList.remove("active");
+  }
   if (els.addFileHeader) {
-    els.addFileHeader.style.display = "";
-    els.addFileHeader.textContent = isRemoteRole() ? "Add File" : "Add File";
+    els.addFileHeader.style.display = pendingRole ? "none" : "";
+    els.addFileHeader.textContent = remoteRole ? "Add File" : "Add File";
   }
   if (els.toggleSharing) {
-    els.toggleSharing.style.display = state.isAdmin ? "" : "none";
+    els.toggleSharing.style.display = hostRole && !pendingRole ? "" : "none";
   }
   if (els.revokeAll) {
-    els.revokeAll.style.display = state.isAdmin ? "" : "none";
+    els.revokeAll.style.display = hostRole ? "" : "none";
   }
   if (els.revokeSelected) {
-    els.revokeSelected.style.display = state.isAdmin ? "" : "none";
+    els.revokeSelected.style.display = hostRole ? "" : "none";
   }
   if (els.myFolderShortcut) {
-    els.myFolderShortcut.style.display = isRemoteRole() && state.deviceFolderRel ? "" : "none";
+    els.myFolderShortcut.style.display = "none";
   }
 }
 
 function refreshRemoteUploadUi() {
-  const remote = isRemoteRole();
-  const inMyFolder = isInMyFolder(state.path);
-  const uploadAllowed = !remote || inMyFolder;
+  const uploadAllowed = true;
   if (els.uploadInput) {
     els.uploadInput.disabled = !uploadAllowed;
   }
@@ -1040,21 +1299,13 @@ function refreshRemoteUploadUi() {
   }
   if (els.dropZone) {
     els.dropZone.classList.toggle("disabled", !uploadAllowed);
-    els.dropZone.textContent = remote
-      ? (uploadAllowed ? "Drag & drop files to My Device Folder" : "You can upload only to My Device Folder")
-      : "Drag & drop files here";
+    els.dropZone.textContent = "Drag & drop files here";
   }
   if (els.uploadScopeHint) {
-    if (remote && state.deviceFolderRel) {
-      els.uploadScopeHint.textContent = uploadAllowed
-        ? `Uploads go to: My Device Folder (${state.deviceFolderRel})`
-        : "You can upload only to My Device Folder.";
-    } else {
-      els.uploadScopeHint.textContent = "";
-    }
+    els.uploadScopeHint.textContent = "";
   }
   if (els.uploadDestinationLabel) {
-    els.uploadDestinationLabel.textContent = remote && state.deviceFolderRel ? "Uploads go to: My Device Folder" : "";
+    els.uploadDestinationLabel.textContent = "";
   }
 }
 
@@ -1075,9 +1326,13 @@ window.addEventListener("hashchange", () => {
 });
 
 els.copyCloudUrl.addEventListener("click", async () => {
-  await copyToClipboard(`${stateMeta.cloudUrl}?pair=1`);
-  els.copyCloudUrl.textContent = "Copied!";
-  setTimeout(() => (els.copyCloudUrl.textContent = "Copy"), 1200);
+  const ok = await copyToClipboard(`${stateMeta.cloudUrl}?pair=1`);
+  if (ok) {
+    els.copyCloudUrl.textContent = "Copied!";
+    setTimeout(() => (els.copyCloudUrl.textContent = "Copy"), 2000);
+  } else {
+    showCopyFallback(`${stateMeta.cloudUrl}?pair=1`, els.copyCloudUrl);
+  }
 });
 
 els.requestApproval.addEventListener("click", async () => {
@@ -1112,6 +1367,14 @@ els.closeApplication.addEventListener("click", async () => {
     headers: { "Content-Type": "application/json" },
   });
 });
+if (els.closePreviewModal) {
+  els.closePreviewModal.addEventListener("click", closePreviewModal);
+}
+if (els.previewModal) {
+  els.previewModal.addEventListener("click", (event) => {
+    if (event.target === els.previewModal) closePreviewModal();
+  });
+}
 
 els.refreshFiles.onclick = () => loadFiles(state.path);
 els.refreshShares.onclick = () => loadShares();
@@ -1119,6 +1382,9 @@ els.revokeSelected.onclick = () => revokeSelectedShares();
 els.revokeAll.onclick = () => revokeAllShares();
 els.refreshLogs.onclick = () => loadLogs();
 els.refreshDevices.onclick = () => loadApprovedDevices();
+if (els.refreshActivity) {
+  els.refreshActivity.onclick = () => loadActivitySummary();
+}
 els.closeModal.onclick = closeShareModal;
 els.cancelShare.onclick = closeShareModal;
 els.createShare.onclick = createShare;
@@ -1147,8 +1413,7 @@ els.viewThumb.addEventListener("click", () => {
 });
 if (els.myFolderShortcut) {
   els.myFolderShortcut.addEventListener("click", async () => {
-    if (!state.deviceFolderRel) return;
-    await loadFiles(state.deviceFolderRel);
+    await loadFiles(state.path);
   });
 }
 els.backButton.onclick = () => {
@@ -1207,7 +1472,9 @@ els.downloadPrivacyPolicy.addEventListener("click", () => {
   URL.revokeObjectURL(url);
 });
 
-els.accessDeviceName.textContent = `${navigator.platform || "Unknown"} • ${navigator.userAgent.slice(0, 40)}...`;
+if (els.accessDeviceNameInput) {
+  els.accessDeviceNameInput.value = getSuggestedDeviceName();
+}
 els.accessFingerprint.textContent = stateMeta.fingerprint;
 bootstrapApp();
 
@@ -1219,6 +1486,7 @@ setInterval(async () => {
       await loadPendingAccessRequests();
       await loadApprovedDevices();
       await loadShareVisitSummary();
+      await loadActivitySummary();
     }
   } else if (state.requestId) {
     await pollAccessStatus(state.requestId);

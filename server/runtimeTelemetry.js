@@ -6,6 +6,7 @@ const FLUSH_DEBOUNCE_MS = 400;
 function defaultState() {
   return {
     total_app_starts: 0,
+    total_uploads: 0,
     total_shares_created: 0,
     total_shares_revoked: 0,
     share_page_visits: 0,
@@ -62,6 +63,7 @@ class RuntimeTelemetryStore {
   getSummary() {
     return {
       total_app_starts: Number(this.state.total_app_starts || 0),
+      total_uploads: Number(this.state.total_uploads || 0),
       total_shares_created: Number(this.state.total_shares_created || 0),
       total_shares_revoked: Number(this.state.total_shares_revoked || 0),
       share_page_visits: Number(this.state.share_page_visits || 0),

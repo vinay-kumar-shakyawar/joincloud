@@ -468,6 +468,11 @@ body {
   color: var(--muted);
 }
 
+#pending-badge {
+  background: rgba(245, 158, 11, 0.2);
+  color: var(--warning);
+}
+
 .badge-active {
   background: rgba(34, 197, 94, 0.15);
   color: var(--success);
@@ -575,6 +580,72 @@ body {
   border-radius: 12px;
   width: min(480px, 100%);
   padding: 20px;
+}
+
+.preview-content {
+  width: min(900px, 100%);
+}
+
+.preview-body {
+  margin-top: 12px;
+  min-height: 240px;
+}
+
+.preview-image,
+.preview-frame,
+.preview-video {
+  width: 100%;
+  max-height: 72vh;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #000;
+  display: block;
+}
+
+.build-footer {
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px 12px 18px;
+}
+
+.activity-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.metric-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  padding: 10px 12px;
+}
+
+.metric-label {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.metric-value {
+  color: var(--foreground);
+  font-weight: 700;
+  font-size: 20px;
+}
+
+.activity-chart-wrap {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  padding: 10px;
+}
+
+#activity-chart {
+  width: 100%;
+  display: block;
 }
 
 .modal-header {
@@ -850,6 +921,10 @@ h3 {
   }
 
   .file-list[data-view="thumb"] {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .activity-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

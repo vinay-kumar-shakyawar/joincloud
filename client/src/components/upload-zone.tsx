@@ -4,7 +4,6 @@ import { Upload, X, FileText, Loader2, CheckCircle2, AlertCircle } from "lucide-
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { useMutation } from "@tanstack/react-query";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { StorageAPI } from "@/lib/storage-api";
@@ -28,62 +27,77 @@ export function UploadZone({ open, onOpenChange, parentPath = "/" }: UploadZoneP
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const uploadMutation = useMutation({
-    mutationFn: async (files: File[]) => {
-      return StorageAPI.uploadFiles(files, parentPath);
-    },
-    onSuccess: () => {
+  const handleFiles = useCallback(
+    async (files: FileList | null) => {
+      if (!files || files.length === 0) return;
+
+      const fileArray = Array.from(files);
+      const newUploadingFiles: UploadingFile[] = fileArray.map((file) => ({
+        file,
+        progress: 0,
+        status: "uploading" as const,
+      }));
+
+      setUploadingFiles(newUploadingFiles);
+
+      let successCount = 0;
+      let hasError = false;
+
+      for (let i = 0; i < fileArray.length; i++) {
+        const file = fileArray[i];
+        try {
+          await StorageAPI.uploadFiles([file], parentPath);
+          setUploadingFiles((prev) => {
+            const updated = [...prev];
+            if (updated[i]) {
+              updated[i] = { ...updated[i], progress: 100, status: "complete" };
+            }
+            return updated;
+          });
+          successCount += 1;
+        } catch (error: any) {
+          hasError = true;
+          setUploadingFiles((prev) => {
+            const updated = [...prev];
+            if (updated[i]) {
+              updated[i] = {
+                ...updated[i],
+                progress: 0,
+                status: "error" as const,
+                error: error?.message || "Upload failed",
+              };
+            }
+            return updated;
+          });
+        }
+      }
+
       queryClient.invalidateQueries({ queryKey: ["/api/files"] });
       queryClient.invalidateQueries({ queryKey: ["/api/storage"] });
-      toast({
-        title: "Upload complete",
-        description: "Your files have been uploaded successfully",
-      });
+
+      if (hasError) {
+        toast({
+          title: successCount > 0 ? "Partial upload complete" : "Upload failed",
+          description:
+            successCount > 0
+              ? `${successCount} of ${fileArray.length} files uploaded`
+              : "Some or all files failed to upload",
+          variant: hasError ? "destructive" : "default",
+        });
+      } else {
+        toast({
+          title: "Upload complete",
+          description: "Your files have been uploaded successfully",
+        });
+      }
+
       setTimeout(() => {
         onOpenChange(false);
         setUploadingFiles([]);
       }, 1500);
     },
-    onError: (error: any) => {
-      toast({
-        title: "Upload failed",
-        description: error?.message || "Failed to upload files",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const handleFiles = useCallback((files: FileList | null) => {
-    if (!files || files.length === 0) return;
-
-    const fileArray = Array.from(files);
-    const newUploadingFiles: UploadingFile[] = fileArray.map((file) => ({
-      file,
-      progress: 0,
-      status: "uploading" as const,
-    }));
-
-    setUploadingFiles(newUploadingFiles);
-
-    newUploadingFiles.forEach((_, index) => {
-      const interval = setInterval(() => {
-        setUploadingFiles((prev) => {
-          const updated = [...prev];
-          if (updated[index] && updated[index].progress < 90) {
-            updated[index] = {
-              ...updated[index],
-              progress: updated[index].progress + 10,
-            };
-          }
-          return updated;
-        });
-      }, 100);
-
-      setTimeout(() => clearInterval(interval), 900);
-    });
-
-    uploadMutation.mutate(fileArray);
-  }, [uploadMutation]);
+    [parentPath, queryClient, toast, onOpenChange]
+  );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -184,22 +198,22 @@ export function UploadZone({ open, onOpenChange, parentPath = "/" }: UploadZoneP
                       </p>
                       <div className="mt-2 space-y-1">
                         <Progress 
-                          value={uploadMutation.isSuccess ? 100 : uploadFile.progress} 
+                          value={uploadFile.status === "complete" ? 100 : uploadFile.progress} 
                           className="h-2"
                         />
                         <div className="flex items-center justify-between text-xs">
                           <span className="text-muted-foreground">
-                            {uploadMutation.isSuccess ? "100%" : `${uploadFile.progress}%`}
+                            {uploadFile.status === "complete" ? "100%" : `${uploadFile.progress}%`}
                           </span>
-                          {uploadMutation.isSuccess ? (
+                          {uploadFile.status === "complete" ? (
                             <span className="text-chart-5 flex items-center gap-1">
                               <CheckCircle2 className="h-3 w-3" />
                               Complete
                             </span>
-                          ) : uploadMutation.isError ? (
+                          ) : uploadFile.status === "error" ? (
                             <span className="text-destructive flex items-center gap-1">
                               <AlertCircle className="h-3 w-3" />
-                              Failed
+                              {uploadFile.error || "Failed"}
                             </span>
                           ) : (
                             <span className="text-primary flex items-center gap-1">
@@ -217,7 +231,7 @@ export function UploadZone({ open, onOpenChange, parentPath = "/" }: UploadZoneP
           </div>
         )}
 
-        {uploadingFiles.length > 0 && !uploadMutation.isSuccess && (
+        {uploadingFiles.length > 0 && uploadingFiles.some((u) => u.status === "uploading") && (
           <div className="flex justify-end gap-2 pt-4 border-t">
             <Button
               variant="outline"

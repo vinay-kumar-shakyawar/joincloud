@@ -18,6 +18,7 @@ function ensureShape(raw) {
   return {
     requests: raw && typeof raw.requests === "object" ? raw.requests : {},
     sessions: raw && typeof raw.sessions === "object" ? raw.sessions : {},
+    device_stats: raw && typeof raw.device_stats === "object" ? raw.device_stats : {},
   };
 }
 
@@ -35,9 +36,7 @@ function deriveDeviceId(fingerprint) {
 }
 
 function deriveDeviceFolderRel({ device_id, device_name }) {
-  const safeId = sanitizeSegment(device_id || "device");
-  const safeName = sanitizeSegment(device_name || "device");
-  return `/_devices/${safeId}-${safeName}`;
+  return null;
 }
 
 class AccessControlStore {
@@ -105,7 +104,7 @@ class AccessControlStore {
       status: "pending",
       device_id: deviceId,
       device_name: safeDeviceName,
-      device_folder_rel: deriveDeviceFolderRel({ device_id: deviceId, device_name: safeDeviceName }),
+      device_folder_rel: null,
       fingerprint,
       user_agent: user_agent || "",
       ip: ip || "",
@@ -114,6 +113,16 @@ class AccessControlStore {
       denied_at: null,
       session_token: null,
     };
+    if (!this.state.device_stats[fingerprint]) {
+      this.state.device_stats[fingerprint] = {
+        uploads: 0,
+        downloads: 0,
+        requests: 0,
+        last_seen_at: null,
+      };
+    }
+    this.state.device_stats[fingerprint].requests = Number(this.state.device_stats[fingerprint].requests || 0) + 1;
+    this.state.device_stats[fingerprint].last_seen_at = nowIso();
     await this.persist();
     return this.state.requests[requestId];
   }
@@ -139,13 +148,12 @@ class AccessControlStore {
     const sessionToken = crypto.randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
     const deviceId = request.device_id || deriveDeviceId(request.fingerprint);
-    const deviceFolderRel =
-      request.device_folder_rel || deriveDeviceFolderRel({ device_id: deviceId, device_name: request.device_name });
+    const deviceFolderRel = null;
     request.status = "approved";
     request.approved_at = nowIso();
     request.session_token = sessionToken;
     request.device_id = deviceId;
-    request.device_folder_rel = deviceFolderRel;
+    request.device_folder_rel = null;
 
     this.state.sessions[sessionToken] = {
       request_id: requestId,
@@ -153,7 +161,7 @@ class AccessControlStore {
       role: "remote",
       device_id: deviceId,
       device_name: request.device_name || "Unknown Device",
-      device_folder_rel: deviceFolderRel,
+      device_folder_rel: null,
       created_at: nowIso(),
       approved_at: request.approved_at,
       last_seen_at: null,
@@ -196,13 +204,20 @@ class AccessControlStore {
       session.device_name = (request && request.device_name) || "Unknown Device";
     }
     if (!session.device_folder_rel) {
-      session.device_folder_rel =
-        (request && request.device_folder_rel) ||
-        deriveDeviceFolderRel({ device_id: session.device_id, device_name: session.device_name });
+      session.device_folder_rel = null;
     }
     if (!session.role) {
       session.role = "remote";
     }
+    if (!this.state.device_stats[session.fingerprint]) {
+      this.state.device_stats[session.fingerprint] = {
+        uploads: 0,
+        downloads: 0,
+        requests: 0,
+        last_seen_at: null,
+      };
+    }
+    this.state.device_stats[session.fingerprint].last_seen_at = nowIso();
     session.last_seen_at = nowIso();
     this.state.sessions[token] = session;
     await this.persist();
@@ -218,15 +233,12 @@ class AccessControlStore {
         fingerprint: key,
         device_id: session.device_id || deriveDeviceId(session.fingerprint),
         device_name: session.device_name || "Unknown Device",
-        device_folder_rel:
-          session.device_folder_rel ||
-          deriveDeviceFolderRel({
-            device_id: session.device_id || deriveDeviceId(session.fingerprint),
-            device_name: session.device_name || "Unknown Device",
-          }),
+        device_folder_rel: null,
         approved_at: session.approved_at || session.created_at || null,
         last_seen_at: session.last_seen_at || null,
         session_count: 0,
+        uploads: Number(this.state.device_stats?.[key]?.uploads || 0),
+        downloads: Number(this.state.device_stats?.[key]?.downloads || 0),
       };
       existing.session_count += 1;
       const approvedAt = toMs(existing.approved_at) > toMs(session.approved_at) ? existing.approved_at : (session.approved_at || existing.approved_at);
@@ -258,9 +270,28 @@ class AccessControlStore {
       }
     }
     if (changed) {
+      delete this.state.device_stats[fingerprint];
       await this.persist();
     }
     return { removed_sessions: removedSessions };
+  }
+
+  async incrementDeviceStat(fingerprint, field, delta = 1) {
+    const key = String(fingerprint || "").trim();
+    if (!key) return;
+    const allowedField = field === "downloads" ? "downloads" : "uploads";
+    if (!this.state.device_stats[key]) {
+      this.state.device_stats[key] = {
+        uploads: 0,
+        downloads: 0,
+        requests: 0,
+        last_seen_at: null,
+      };
+    }
+    this.state.device_stats[key][allowedField] =
+      Number(this.state.device_stats[key][allowedField] || 0) + Number(delta || 0);
+    this.state.device_stats[key].last_seen_at = nowIso();
+    await this.persist();
   }
 }
 

@@ -3,10 +3,12 @@ const fs = require("fs/promises");
 const fsSync = require("fs");
 const path = require("path");
 const os = require("os");
+const stream = require("stream");
 const express = require("express");
-const multer = require("multer");
 const mime = require("mime-types");
 const bonjour = require("bonjour")();
+const archiver = require("archiver");
+const Busboy = require("busboy");
 
 const config = require("./config/default");
 const { createOwnerServer } = require("./webdav/ownerServer");
@@ -92,6 +94,9 @@ function getAppVersion() {
     return "0.1.0";
   }
 }
+
+const BUILD_STAMP = new Date().toISOString();
+const BUILD_ID = `v${getAppVersion()} ${BUILD_STAMP}`;
 
 function generateDisplayName() {
   return "Join";
@@ -204,7 +209,12 @@ function getRequestFingerprint(req) {
   if (Array.isArray(headerValue)) {
     return String(headerValue[0] || "").trim();
   }
-  return String(headerValue || "").trim();
+  const direct = String(headerValue || "").trim();
+  if (direct) return direct;
+  if (req.method === "GET" && req.path === "/v1/file/content") {
+    return String(req.query?.fp || "").trim();
+  }
+  return "";
 }
 
 function getRequestToken(req) {
@@ -216,27 +226,59 @@ function getRequestToken(req) {
   if (Array.isArray(tokenHeader)) {
     return String(tokenHeader[0] || "").trim();
   }
-  return String(tokenHeader || "").trim();
+  const direct = String(tokenHeader || "").trim();
+  if (direct) return direct;
+  if (req.method === "GET" && req.path === "/v1/file/content") {
+    return String(req.query?.token || "").trim();
+  }
+  return "";
+}
+
+function hasRequiredUiAssets(rootPath) {
+  if (!rootPath) return false;
+  const required = ["index.html", "app.js", "styles.css"];
+  return required.every((fileName) => fsSync.existsSync(path.join(rootPath, fileName)));
 }
 
 function resolveUiRoot() {
-  if (process.env.JOINCLOUD_UI_ROOT) {
-    return process.env.JOINCLOUD_UI_ROOT;
+  const candidates = [];
+  const envRoot = process.env.UI_ROOT || process.env.JOINCLOUD_UI_ROOT;
+  if (envRoot) {
+    candidates.push({ root: envRoot, source: "env" });
   }
   const resourcesPath = process.env.JOINCLOUD_RESOURCES_PATH || process.resourcesPath;
   if (resourcesPath) {
-    const candidates = [
-      path.join(resourcesPath, "app.asar", "server", "ui"),
-      path.join(resourcesPath, "server", "ui"),
-    ];
-    for (const candidate of candidates) {
-      if (fsSync.existsSync(candidate)) {
-        return candidate;
-      }
-    }
-    return candidates[1];
+    candidates.push({
+      root: path.join(resourcesPath, "app.asar.unpacked", "server", "ui"),
+      source: "resources:app.asar.unpacked",
+    });
+    candidates.push({
+      root: path.join(resourcesPath, "server", "ui"),
+      source: "resources:server",
+    });
+    candidates.push({
+      root: path.join(resourcesPath, "app.asar", "server", "ui"),
+      source: "resources:app.asar",
+    });
   }
-  return path.join(__dirname, "ui");
+  candidates.push({ root: path.join(__dirname, "ui"), source: "dev:__dirname" });
+
+  for (const candidate of candidates) {
+    if (hasRequiredUiAssets(candidate.root)) {
+      return {
+        uiRoot: candidate.root,
+        uiRootExists: true,
+        source: candidate.source,
+        checked: candidates.map((entry) => entry.root),
+      };
+    }
+  }
+  return {
+    uiRoot: candidates[0] ? candidates[0].root : path.join(__dirname, "ui"),
+    uiRootExists: false,
+    source: candidates[0] ? candidates[0].source : "fallback",
+    checked: candidates.map((entry) => entry.root),
+  };
 }
 
 async function listDirectory(ownerRoot, requestedPath) {
@@ -249,8 +291,12 @@ async function listDirectory(ownerRoot, requestedPath) {
 
   const entries = await fs.readdir(resolved, { withFileTypes: true });
   const results = [];
+  const hiddenSystemFiles = new Set(["shares.json"]);
   for (const entry of entries) {
     if (entry.name.startsWith(".") || entry.name.startsWith("._")) {
+      continue;
+    }
+    if (hiddenSystemFiles.has(entry.name)) {
       continue;
     }
     if (entry.isSymbolicLink()) {
@@ -337,6 +383,11 @@ function sanitizeDownloadFileName(input) {
   const raw = String(input || "download");
   const normalized = raw.replace(/[\\/:*?"<>|]/g, "_").replace(/[\r\n\t]/g, " ").trim();
   return normalized || "download";
+}
+
+function isPreviewableFile(fileName) {
+  const mimeType = mime.lookup(fileName) || "";
+  return mimeType.startsWith("image/") || mimeType.startsWith("video/") || mimeType === "application/pdf";
 }
 
 function sanitizePathSegment(input) {
@@ -473,7 +524,6 @@ async function bootstrap() {
 
   const app = express();
   app.use(express.json());
-  const upload = multer({ storage: multer.memoryStorage() });
   const accessControl = new AccessControlStore({
     storagePath: config.storage.accessControlPath,
     logger,
@@ -485,16 +535,9 @@ async function bootstrap() {
   await runtimeTelemetry.init();
   runtimeTelemetry.increment("total_app_starts");
   let sharingEnabled = true;
-  const deviceRootRel = "/_devices";
-  const deviceRootAbs = resolveOwnerPath(config.storage.ownerRoot, deviceRootRel);
-  await fs.mkdir(deviceRootAbs, { recursive: true });
 
   async function ensureDeviceFolderForSession(session) {
-    if (!session || !session.device_folder_rel) return null;
-    const safeFolderRel = toPosixPath(session.device_folder_rel);
-    const resolved = resolveOwnerPath(config.storage.ownerRoot, safeFolderRel);
-    await fs.mkdir(resolved, { recursive: true });
-    return { rel: safeFolderRel, abs: resolved };
+    return null;
   }
 
   function getRequestContext(req) {
@@ -514,23 +557,23 @@ async function bootstrap() {
   }
 
   function canWritePathForContext(context, requestedPath) {
-    if (!context || context.role === "host") return true;
-    if (!context.device_folder_rel) return false;
-    try {
-      const targetAbs = resolveOwnerPath(config.storage.ownerRoot, toPosixPath(requestedPath || "/"));
-      const deviceAbs = resolveOwnerPath(config.storage.ownerRoot, toPosixPath(context.device_folder_rel));
-      return isPathWithin(deviceAbs, targetAbs);
-    } catch (_error) {
-      return false;
-    }
+    return true;
   }
-  const uiRoot = resolveUiRoot();
-  const hasUiRoot = fsSync.existsSync(uiRoot);
+  const uiResolution = resolveUiRoot();
+  const uiRoot = uiResolution.uiRoot;
+  const hasUiRoot = uiResolution.uiRootExists;
+  logger.info("ui root resolved", {
+    uiRoot,
+    exists: hasUiRoot,
+    source: uiResolution.source,
+  });
   if (hasUiRoot) {
-    logger.info("ui root resolved", { uiRoot });
     app.use("/", express.static(uiRoot));
   } else {
-    logger.error("ui root missing, static UI not mounted", { uiRoot });
+    logger.error("ui root missing, static UI not mounted", {
+      uiRoot,
+      checked: uiResolution.checked,
+    });
     app.get("/", (_req, res) => {
       res
         .status(503)
@@ -544,6 +587,52 @@ async function bootstrap() {
   }
   app.get("/api/v1/cloud/url", (_req, res) => {
     res.json({ url: getCloudUrl() });
+  });
+
+  app.get("/api/v1/build", (_req, res) => {
+    res.json({
+      build_id: BUILD_ID,
+      version: getAppVersion(),
+      started_at: BUILD_STAMP,
+      ui_root: uiRoot,
+      ui_root_exists: hasUiRoot,
+    });
+  });
+
+  app.get("/api/v1/diagnostics/ping", (req, res) => {
+    const bytes = Math.min(
+      Math.max(parseInt(req.query.bytes, 10) || 1048576, 1),
+      524288000
+    );
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("Content-Length", String(bytes));
+    res.setHeader("Cache-Control", "no-store");
+    const chunkSize = 65536;
+    let remaining = bytes;
+    const randomStream = new stream.Readable({
+      read() {
+        if (remaining <= 0) {
+          this.push(null);
+          return;
+        }
+        const toSend = Math.min(chunkSize, remaining);
+        remaining -= toSend;
+        this.push(crypto.randomBytes(toSend));
+      },
+    });
+    randomStream.pipe(res);
+  });
+
+  app.get("/api/v1/diagnostics/info", (_req, res) => {
+    const uptimeMs = Date.now() - (global.SERVER_START_TIME || Date.now());
+    res.json({
+      version: getAppVersion(),
+      build_id: BUILD_ID,
+      lan_ip: getLanAddress(),
+      port: config.server.port,
+      share_port: config.server.sharePort,
+      uptime_seconds: Math.floor(uptimeMs / 1000),
+    });
   });
 
   app.get("/api/v1/status", (_req, res) => {
@@ -577,7 +666,7 @@ async function bootstrap() {
       cloud_url: getCloudUrl(),
       device_id: validation.session.device_id,
       device_name: validation.session.device_name,
-      device_folder_rel: validation.session.device_folder_rel,
+      device_folder_rel: null,
     });
   });
 
@@ -601,10 +690,10 @@ async function bootstrap() {
     }
     await ensureDeviceFolderForSession(validation.session);
     res.json({
-      role: "remote",
+      role: "device",
       device_id: validation.session.device_id || sanitizePathSegment(validation.session.fingerprint),
       device_name: validation.session.device_name || "Unknown Device",
-      device_folder_rel: toPosixPath(validation.session.device_folder_rel || `${deviceRootRel}/unknown-device`),
+      device_folder_rel: null,
       can_upload: true,
     });
   });
@@ -659,6 +748,10 @@ async function bootstrap() {
 
   function ensureAdmin(req, res, next) {
     if (!isLocalhostRequest(req)) {
+      logger.warn("blocked host-only action from remote", {
+        path: req.path,
+        ip: getClientIp(req),
+      });
       res.status(403).json({ error: "admin access required" });
       return;
     }
@@ -713,7 +806,7 @@ async function bootstrap() {
       status: "approved",
       request_id: requestId,
       device_id: approved.request.device_id,
-      device_folder_rel: approved.request.device_folder_rel,
+      device_folder_rel: null,
     });
   });
 
@@ -747,6 +840,29 @@ async function bootstrap() {
 
   app.get("/api/v1/telemetry/summary", ensureAdmin, (_req, res) => {
     res.json(runtimeTelemetry.getSummary());
+  });
+
+  app.get("/api/v1/activity/summary", ensureAdmin, async (_req, res) => {
+    const pending = await accessControl.getPending();
+    const devices = await accessControl.listApprovedDevices();
+    const telemetrySummary = runtimeTelemetry.getSummary();
+    const storageStats = await getStorageStats(config.storage.ownerRoot);
+    const totalUploads = devices.reduce((sum, device) => sum + Number(device.uploads || 0), 0);
+    const totalDownloads = devices.reduce((sum, device) => sum + Number(device.downloads || 0), 0);
+    res.json({
+      build_id: BUILD_ID,
+      pending_count: pending.length,
+      connected_devices: devices.length,
+      devices,
+      telemetry: telemetrySummary,
+      metrics: {
+        total_uploads: Number(telemetrySummary.total_uploads || totalUploads),
+        total_downloads: totalDownloads,
+        total_shares_created: Number(telemetrySummary.total_shares_created || 0),
+        total_share_downloads: Number(telemetrySummary.total_downloads || 0),
+        storage_used_bytes: Number(storageStats.usedBytes || 0),
+      },
+    });
   });
 
   app.get("/share/:shareId", (req, res) => {
@@ -812,6 +928,10 @@ async function bootstrap() {
       downloadUrl: isFile
         ? `/share/${encodeURIComponent(share.shareId)}/download`
         : null,
+      previewUrl: isFile && isPreviewableFile(name)
+        ? `/share/${encodeURIComponent(share.shareId)}/preview`
+        : null,
+      zipUrl: !isFile ? `/share/${encodeURIComponent(share.shareId)}/download.zip` : null,
       marketingUrl,
       expiresAt: share.expiryTime,
     });
@@ -833,11 +953,134 @@ async function bootstrap() {
     }
     try {
       const listing = await listSharedFolderFiles(share.targetPath, req.query.path || "");
-      res.json(listing);
+      const payload = {
+        ...listing,
+        items: listing.items.map((item) => ({
+          ...item,
+          previewUrl:
+            item.type === "file" && isPreviewableFile(item.name)
+              ? `/share/${encodeURIComponent(share.shareId)}/preview?path=${encodeURIComponent(item.relativePath)}`
+              : null,
+          downloadUrl:
+            item.type === "file"
+              ? `/share/${encodeURIComponent(share.shareId)}/download?path=${encodeURIComponent(item.relativePath)}`
+              : null,
+        })),
+      };
+      res.json(payload);
     } catch (error) {
       logger.error("folder share listing failed", { error: error.message });
       res.status(400).json({ error: error.message || "failed_to_list_folder" });
     }
+  });
+
+  app.get("/share/:shareId/preview", async (req, res) => {
+    if (!sharingEnabled) {
+      res.status(423).send("sharing_stopped");
+      return;
+    }
+    const share = shareService.getShare(req.params.shareId);
+    if (!share) {
+      res.status(404).send("share_not_found");
+      return;
+    }
+    try {
+      let filePath = share.targetPath;
+      if ((share.targetType || "file") === "folder") {
+        const relativePath = toSafeRelative(req.query.path || "");
+        if (!relativePath) {
+          res.status(400).send("file path is required");
+          return;
+        }
+        filePath = ensureWithinShareRoot(share.targetPath, path.join(share.targetPath, relativePath));
+      }
+      const stats = await fs.stat(filePath);
+      if (!stats.isFile()) {
+        res.status(400).send("not_a_file");
+        return;
+      }
+      const fileName = sanitizeDownloadFileName(path.basename(filePath));
+      if (!isPreviewableFile(fileName)) {
+        res.status(415).send("preview_not_supported");
+        return;
+      }
+      const contentType = mime.lookup(fileName) || "application/octet-stream";
+      res.setHeader("Content-Type", contentType);
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+      );
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Content-Length", String(stats.size));
+      const readStream = fsSync.createReadStream(filePath, { highWaterMark: 1024 * 1024 });
+      readStream.on("error", () => {
+        if (!res.headersSent) {
+          res.status(500).send("preview_failed");
+          return;
+        }
+        res.destroy();
+      });
+      readStream.pipe(res);
+    } catch (error) {
+      res.status(400).send(error.message || "preview_failed");
+    }
+  });
+
+  app.get("/share/:shareId/download.zip", async (req, res) => {
+    if (!sharingEnabled) {
+      res.status(423).send("sharing_stopped");
+      return;
+    }
+    const share = shareService.getShare(req.params.shareId);
+    if (!share) {
+      res.status(404).send("share_not_found");
+      return;
+    }
+    if ((share.targetType || "file") !== "folder") {
+      res.status(400).send("share_is_not_folder");
+      return;
+    }
+    const selectionRaw = String(req.query.paths || "").trim();
+    const selected = selectionRaw
+      ? selectionRaw
+          .split(",")
+          .map((part) => toSafeRelative(part))
+          .filter(Boolean)
+      : [];
+    const archiveName = `${sanitizeDownloadFileName(path.basename(share.targetPath) || "shared-folder")}.zip`;
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${archiveName}"; filename*=UTF-8''${encodeURIComponent(archiveName)}`
+    );
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Cache-Control", "no-store");
+
+    const archive = archiver("zip", { zlib: { level: 9 } });
+    archive.on("error", () => {
+      if (!res.headersSent) {
+        res.status(500).end("zip_failed");
+      } else {
+        res.destroy();
+      }
+    });
+    archive.pipe(res);
+    if (!selected.length) {
+      archive.directory(share.targetPath, false);
+    } else {
+      for (const relPath of selected) {
+        const fullPath = ensureWithinShareRoot(share.targetPath, path.join(share.targetPath, relPath));
+        const stats = await fs.stat(fullPath);
+        if (stats.isDirectory()) {
+          archive.directory(fullPath, relPath);
+        } else if (stats.isFile()) {
+          archive.file(fullPath, { name: relPath });
+        }
+      }
+    }
+    await archive.finalize();
   });
 
   app.get("/share/:shareId/download", async (req, res) => {
@@ -886,7 +1129,10 @@ async function bootstrap() {
       }
       const fileName = sanitizeDownloadFileName(path.basename(filePath));
       const contentType = mime.lookup(fileName) || "application/octet-stream";
+      const fileSize = stats.size;
       res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Length", String(fileSize));
+      res.setHeader("Accept-Ranges", "bytes");
       res.setHeader(
         "Content-Disposition",
         `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
@@ -894,16 +1140,28 @@ async function bootstrap() {
       res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("Cache-Control", "no-store");
 
-      const stream = fsSync.createReadStream(filePath);
-      stream.on("error", () => {
+      const clientIp = getClientIp(req);
+      const startTime = Date.now();
+      logger.info("share download start", { path: filePath, size: fileSize, client_ip: clientIp });
+
+      const readStream = fsSync.createReadStream(filePath, { highWaterMark: 1024 * 1024 });
+      readStream.on("error", () => {
         if (!res.headersSent) {
           res.status(500).send("download_failed");
           return;
         }
         res.destroy();
       });
-      stream.pipe(res);
-      logger.info("share download served");
+      readStream.on("end", () => {
+        const durationMs = Date.now() - startTime;
+        const mbPerSec = durationMs > 0 ? (fileSize / (1024 * 1024)) / (durationMs / 1000) : 0;
+        logger.info("share download end", {
+          bytes_sent: fileSize,
+          duration_ms: durationMs,
+          mb_per_sec: mbPerSec.toFixed(2),
+        });
+      });
+      readStream.pipe(res);
       runtimeTelemetry.increment("total_downloads");
     } catch (error) {
       res.status(400).send(error.message || "download_failed");
@@ -913,8 +1171,11 @@ async function bootstrap() {
   app.use("/api", async (req, res, next) => {
     const publicApiPaths = new Set([
       "/v1/health",
+      "/v1/build",
       "/v1/status",
       "/v1/cloud/url",
+      "/v1/diagnostics/ping",
+      "/v1/diagnostics/info",
       "/v1/access/session",
       "/v1/access/me",
       "/v1/access/request",
@@ -953,7 +1214,7 @@ async function bootstrap() {
       fingerprint,
       device_id: validation.session.device_id,
       device_name: validation.session.device_name,
-      device_folder_rel: toPosixPath(validation.session.device_folder_rel || `${deviceRootRel}/unknown-device`),
+      device_folder_rel: null,
     };
     next();
   });
@@ -994,6 +1255,57 @@ async function bootstrap() {
       res.json({ path: toPosixPath(requestedPath), items });
     } catch (error) {
       res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/v1/file/content", async (req, res) => {
+    try {
+      const requestedPath = req.query.path || "/";
+      const resolvedPath = resolveOwnerPath(config.storage.ownerRoot, toPosixPath(requestedPath));
+      const stats = await fs.stat(resolvedPath);
+      if (!stats.isFile()) {
+        res.status(400).json({ error: "not_a_file" });
+        return;
+      }
+      const fileName = sanitizeDownloadFileName(path.basename(resolvedPath));
+      const contentType = mime.lookup(fileName) || "application/octet-stream";
+      const fileSize = stats.size;
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Length", String(fileSize));
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+      );
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "no-store");
+      const access = getRequestContext(req);
+      if (access.role === "remote" && access.fingerprint) {
+        await accessControl.incrementDeviceStat(access.fingerprint, "downloads", 1);
+      }
+      const clientIp = getClientIp(req);
+      const startTime = Date.now();
+      logger.info("file content download start", { path: resolvedPath, size: fileSize, client_ip: clientIp });
+      const readStream = fsSync.createReadStream(resolvedPath, { highWaterMark: 1024 * 1024 });
+      readStream.on("error", (err) => {
+        if (!res.headersSent) {
+          res.status(500).json({ error: "download_failed" });
+          return;
+        }
+        res.destroy();
+      });
+      readStream.on("end", () => {
+        const durationMs = Date.now() - startTime;
+        const mbPerSec = durationMs > 0 ? (fileSize / (1024 * 1024)) / (durationMs / 1000) : 0;
+        logger.info("file content download end", {
+          bytes_sent: fileSize,
+          duration_ms: durationMs,
+          mb_per_sec: mbPerSec.toFixed(2),
+        });
+      });
+      readStream.pipe(res);
+    } catch (error) {
+      res.status(400).json({ error: error.message || "preview_failed" });
     }
   });
 
@@ -1092,56 +1404,135 @@ async function bootstrap() {
     res.json({ revoked });
   });
 
-  app.post("/api/upload", upload.array("files"), async (req, res) => {
-    try {
-      const access = getRequestContext(req);
-      const hostRequestedTarget = req.body?.path || req.body?.parentPath || "/";
-      const forcedRemoteTarget = access.role === "remote" ? access.device_folder_rel : null;
-      const target = forcedRemoteTarget || hostRequestedTarget;
-      const targetPath = resolveOwnerPath(config.storage.ownerRoot, toPosixPath(target));
-      if (!canWritePathForContext(access, target)) {
-        res.status(403).json({ error: "write_outside_device_folder_denied" });
-        return;
-      }
-      if (access.role === "remote") {
-        await fs.mkdir(targetPath, { recursive: true });
-      }
-      logger.info("upload started", {
-        count: (req.files || []).length,
-        target: toPosixPath(target),
-        role: access.role,
-        device_id: access.device_id || null,
-      });
-      await fs.mkdir(targetPath, { recursive: true });
-      const stored = [];
-      let totalBytes = 0;
-      for (const file of req.files || []) {
-        const cleanName = file.originalname || "upload";
-        const destination = path.join(targetPath, cleanName);
-        await fs.writeFile(destination, file.buffer);
-        stored.push(cleanName);
-        totalBytes += file.buffer.length;
-      }
-      if (access.role === "remote") {
-        logger.info("remote upload completed", {
-          device_id: access.device_id,
-          count: stored.length,
-          bytes: totalBytes,
-          target: toPosixPath(target),
-        });
-      } else {
-        logger.info("upload completed", { count: stored.length });
-      }
-      telemetry.trackEvent("file_uploaded", {
-        user_id: userConfig.user_id,
-        count: stored.length,
-        bytes: totalBytes,
-      });
-      res.json({ success: true });
-    } catch (error) {
-      logger.error("upload failed", { error: error.message });
-      res.status(400).json({ error: error.message });
+  app.post("/api/upload", (req, res) => {
+    req.setTimeout(30 * 60 * 1000);
+    const contentType = req.headers["content-type"] || "";
+    if (!contentType.includes("multipart/form-data")) {
+      res.status(400).json({ error: "multipart form data required" });
+      return;
     }
+    const access = getRequestContext(req);
+    const fields = {};
+    let targetPath = null;
+    const stored = [];
+    let totalBytes = 0;
+    let uploadStartTime = null;
+    const clientIp = getClientIp(req);
+    let pendingWrites = 0;
+
+    const busboy = Busboy({ headers: { "content-type": contentType } });
+
+    busboy.on("field", (name, value) => {
+      fields[name] = value;
+      if ((name === "path" || name === "parentPath") && value) {
+        try {
+          const target = String(value || "/").trim() || "/";
+          if (canWritePathForContext(access, target)) {
+            targetPath = resolveOwnerPath(config.storage.ownerRoot, toPosixPath(target));
+          }
+        } catch (_e) {
+          targetPath = null;
+        }
+      }
+    });
+
+    busboy.on("file", (fieldname, file, info) => {
+      const { filename } = info;
+      const cleanName = (filename || "upload").replace(/[\\/:*?"<>|]/g, "_").trim() || "upload";
+      if (!targetPath) {
+        const target = fields.path || fields.parentPath || "/";
+        if (!canWritePathForContext(access, target)) {
+          file.resume();
+          return;
+        }
+        try {
+          targetPath = resolveOwnerPath(config.storage.ownerRoot, toPosixPath(target));
+        } catch (_e) {
+          file.resume();
+          return;
+        }
+      }
+      fs.mkdir(targetPath, { recursive: true }).catch(() => {});
+      if (!uploadStartTime) {
+        uploadStartTime = Date.now();
+        logger.info("upload start", {
+          filename: cleanName,
+          client_ip: clientIp,
+        });
+      }
+      pendingWrites += 1;
+      const destination = path.join(targetPath, cleanName);
+      const writeStream = fsSync.createWriteStream(destination, { highWaterMark: 1024 * 1024 });
+      let bytesWritten = 0;
+      file.on("data", (chunk) => {
+        bytesWritten += chunk.length;
+      });
+      file.pipe(writeStream);
+      writeStream.on("finish", () => {
+        stored.push(cleanName);
+        totalBytes += bytesWritten;
+        pendingWrites -= 1;
+      });
+      writeStream.on("error", (err) => {
+        logger.error("upload write failed", { file: cleanName, error: err.message });
+        file.resume();
+        pendingWrites -= 1;
+      });
+    });
+
+    busboy.on("finish", () => {
+      const target = fields.path || fields.parentPath || "/";
+      const checkDone = () => {
+        if (pendingWrites > 0) {
+          setTimeout(checkDone, 50);
+          return;
+        }
+        try {
+          if (!targetPath) {
+            res.status(403).json({ error: "write_outside_device_folder_denied" });
+            return;
+          }
+          const durationMs = uploadStartTime ? Date.now() - uploadStartTime : 0;
+          const mbPerSec = durationMs > 0 && totalBytes > 0
+            ? (totalBytes / (1024 * 1024)) / (durationMs / 1000)
+            : 0;
+          logger.info("upload end", {
+            bytes_written: totalBytes,
+            duration_ms: durationMs,
+            mb_per_sec: mbPerSec.toFixed(2),
+            files: stored.length,
+          });
+          if (access.role === "remote" && access.fingerprint) {
+            accessControl.incrementDeviceStat(access.fingerprint, "uploads", stored.length).catch(() => {});
+          }
+          runtimeTelemetry.increment("total_uploads", stored.length);
+          telemetry.trackEvent("file_uploaded", {
+            user_id: userConfig.user_id,
+            count: stored.length,
+            bytes: totalBytes,
+          });
+          res.json({
+            success: true,
+            saved_to: toPosixPath(target),
+            uploaded: stored.length,
+            bytes: totalBytes,
+          });
+        } catch (error) {
+          logger.error("upload failed", { error: error.message });
+          res.status(400).json({ error: error.message });
+        }
+      };
+      checkDone();
+    });
+
+    busboy.on("error", (err) => {
+      logger.error("upload parse failed", { error: err.message });
+      if (!res.headersSent) {
+        res.status(400).json({ error: err.message || "upload_failed" });
+      }
+    });
+
+    req.pipe(busboy);
   });
 
   app.post("/api/v1/files/import", ensureAdmin, async (req, res) => {
@@ -1213,7 +1604,7 @@ async function bootstrap() {
   });
 
   app.get("/api/v1/health", (_req, res) => {
-    res.json({ status: "ok" });
+    res.json({ status: "ok", build_id: BUILD_ID, version: getAppVersion() });
   });
 
   let presenceList = [];
@@ -1339,7 +1730,7 @@ async function bootstrap() {
   server = http.createServer((req, res) => {
     const url = req.url || "/";
     const pathname = url.split("?")[0];
-    const shareViewPath = new RegExp(`^${config.server.shareBasePath}/[^/]+(?:/(meta|files|download))?$`);
+    const shareViewPath = new RegExp(`^${config.server.shareBasePath}/[^/]+(?:/(meta|files|download|preview|download\\.zip))?$`);
     if (req.method === "GET" && shareViewPath.test(pathname)) {
       app(req, res);
       return;
@@ -1394,6 +1785,7 @@ async function bootstrap() {
     );
   }
 
+  global.SERVER_START_TIME = Date.now();
   shareOnlyServer.listen(config.server.sharePort, "127.0.0.1");
   server.listen(config.server.port, config.server.host, () => {
     const publicHost = config.server.host === "0.0.0.0" ? "127.0.0.1" : config.server.host;

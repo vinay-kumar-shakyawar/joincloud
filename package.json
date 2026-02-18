@@ -17,10 +17,11 @@
     "prebuild:win": "npm run rebuild:server && npm run build:icon:win"
   },
   "dependencies": {
+    "archiver": "^7.0.1",
+    "busboy": "^1.6.0",
     "bonjour": "^3.5.1",
     "express": "^5.2.1",
     "mime-types": "^3.0.2",
-    "multer": "^2.0.2",
     "qrious": "^4.0.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
