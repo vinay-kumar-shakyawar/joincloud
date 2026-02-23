@@ -61,6 +61,15 @@ const els = {
   uploadScopeHint: document.getElementById("upload-scope-hint"),
   uploadButtonLabel: document.getElementById("upload-button-label"),
   shareList: document.getElementById("share-list"),
+  teamsList: document.getElementById("teams-list"),
+  teamDetail: document.getElementById("team-detail"),
+  teamDetailBack: document.getElementById("team-detail-back"),
+  teamDetailName: document.getElementById("team-detail-name"),
+  teamChatFeed: document.getElementById("team-chat-feed"),
+  teamMessageInput: document.getElementById("team-message-input"),
+  teamSendBtn: document.getElementById("team-send-btn"),
+  teamInviteBtn: document.getElementById("team-invite-btn"),
+  createTeamBtn: document.getElementById("create-team-btn"),
   breadcrumbs: document.getElementById("breadcrumbs"),
   refreshFiles: document.getElementById("refresh-files"),
   refreshShares: document.getElementById("refresh-shares"),
@@ -100,20 +109,39 @@ const els = {
   downloadPrivacyPolicy: document.getElementById("download-privacy-policy"),
   privacyPolicyContent: document.getElementById("privacy-policy-content"),
   buildId: document.getElementById("build-id"),
+  uptimeDisplay: document.getElementById("uptime-display"),
   previewModal: document.getElementById("preview-modal"),
   closePreviewModal: document.getElementById("close-preview-modal"),
   previewTitle: document.getElementById("preview-title"),
   previewBody: document.getElementById("preview-body"),
+  uploadBanner: document.getElementById("upload-banner"),
+  uploadBannerText: document.querySelector(".upload-banner-text"),
+  uploadBannerDismiss: document.querySelector(".upload-banner-dismiss"),
+  shareQrModal: document.getElementById("share-qr-modal"),
+  closeShareQrModal: document.getElementById("close-share-qr-modal"),
+  technicalConfigContent: document.getElementById("technical-config-content"),
+  mdnsHostname: document.getElementById("mdns-hostname"),
+  mdnsIpFallback: document.getElementById("mdns-ip-fallback"),
+  mdnsStatusBadge: document.getElementById("mdns-status-badge"),
+  mdnsOpenBtn: document.getElementById("mdns-open-btn"),
+  manualConnectIp: document.getElementById("manual-connect-ip"),
+  manualConnectPort: document.getElementById("manual-connect-port"),
+  manualConnectBtn: document.getElementById("manual-connect-btn"),
+  manualConnectStatus: document.getElementById("manual-connect-status"),
 };
 
 const stateMeta = {
   lanBaseUrl: window.location.origin,
   cloudUrl: window.location.origin,
+  shareLinkUrls: { ip: "" },
+  lastNetworkChangedAt: 0,
+  mdnsUnresolvableToastShown: false,
   fingerprint: getOrCreateFingerprint(),
   sessionToken: localStorage.getItem("joincloud:session-token") || "",
   privacyPolicyRaw: "",
   buildId: "",
   lastPendingCount: 0,
+  lastNetworkHash: "",
 };
 
 function getOrCreateFingerprint() {
@@ -363,40 +391,71 @@ function renderFiles() {
     const row = document.createElement("div");
     row.className = "item file-item";
     const fileExt = getFileExtension(item.name);
-    row.innerHTML = `
-      <span class="file-icon">${getFileIcon(item)}</span>
-      <div class="file-info">
-        <div class="item-title">${item.name}</div>
-        <div class="item-sub">${item.type === "folder" ? "Folder" : `${fileExt || "file"} · ${formatBytes(item.size)}`}</div>
-      </div>
-    `;
-    const openButton = document.createElement("button");
-    openButton.className = "button secondary";
+    const details = item.type === "folder" ? "Folder" : `${fileExt || "file"} · ${formatBytes(item.size)}`;
+
+    const topRow = document.createElement("div");
+    topRow.className = "file-item-top";
+    const titleEl = document.createElement("span");
+    titleEl.className = "item-title";
+    titleEl.textContent = item.name;
+    titleEl.title = item.name;
+    topRow.innerHTML = `<span class="file-icon">${getFileIcon(item)}</span>`;
+    topRow.appendChild(titleEl);
+
+    const actions = document.createElement("div");
+    actions.className = "file-item-actions";
+
     if (item.type === "folder") {
-      openButton.textContent = "Open";
-      openButton.onclick = () => loadFiles(item.path);
-      row.appendChild(openButton);
-    } else if (isHostRole()) {
-      openButton.textContent = "Share";
-      openButton.onclick = () => openShareModal(item.path);
-      row.appendChild(openButton);
+      const openBtn = document.createElement("button");
+      openBtn.className = "button secondary";
+      openBtn.textContent = "Open";
+      openBtn.onclick = () => loadFiles(item.path);
+      actions.appendChild(openBtn);
+      if (isHostRole()) {
+        const shareBtn = document.createElement("button");
+        shareBtn.className = "button secondary";
+        shareBtn.textContent = "Share";
+        shareBtn.onclick = () => openShareModal(item.path);
+        actions.appendChild(shareBtn);
+      }
+    } else {
+      if (isHostRole()) {
+        const shareBtn = document.createElement("button");
+        shareBtn.className = "button secondary";
+        shareBtn.textContent = "Share";
+        shareBtn.onclick = () => openShareModal(item.path);
+        actions.appendChild(shareBtn);
+      }
+      if (isPreviewableName(item.name)) {
+        const previewBtn = document.createElement("button");
+        previewBtn.className = "button secondary";
+        previewBtn.textContent = "Preview";
+        previewBtn.onclick = () => openPreviewModal(item);
+        actions.appendChild(previewBtn);
+      }
     }
 
-    if (item.type === "file" && isPreviewableName(item.name)) {
-      const previewButton = document.createElement("button");
-      previewButton.className = "button secondary";
-      previewButton.textContent = "Preview";
-      previewButton.onclick = () => openPreviewModal(item);
-      row.appendChild(previewButton);
+    topRow.appendChild(actions);
+    row.appendChild(topRow);
+
+    const detailsRow = document.createElement("div");
+    detailsRow.className = "file-item-details";
+    detailsRow.innerHTML = `<span class="item-sub">${details}</span>`;
+    row.appendChild(detailsRow);
+
+    if (isHostRole()) {
+      const bottomRow = document.createElement("div");
+      bottomRow.className = "file-item-bottom";
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "button danger button-icon-only";
+      deleteBtn.title = "Delete";
+      deleteBtn.setAttribute("aria-label", "Delete");
+      deleteBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+      deleteBtn.onclick = () => confirmDeleteItem(item);
+      bottomRow.appendChild(deleteBtn);
+      row.appendChild(bottomRow);
     }
 
-    if (item.type === "folder" && isHostRole()) {
-      const shareButton = document.createElement("button");
-      shareButton.className = "button";
-      shareButton.textContent = "Share";
-      shareButton.onclick = () => openShareModal(item.path);
-      row.appendChild(shareButton);
-    }
     els.fileList.appendChild(row);
   });
   refreshRemoteUploadUi();
@@ -420,11 +479,12 @@ function renderShares() {
   activeShares.forEach((share) => {
     const row = document.createElement("div");
     row.className = "item";
-    const shareUrl = `${stateMeta.lanBaseUrl}/share/${share.shareId}`;
+    const shareUrl = share.urlIp || share.url || `${stateMeta.lanBaseUrl}/share/${share.shareId}`;
     row.innerHTML = `
-      <div>
-        <div class="item-title">${share.path}</div>
+      <div style="flex:1;min-width:0">
+        <div class="item-title">${escapeHtml(share.path)}</div>
         <div class="item-sub">${share.permission} · expires ${new Date(share.expiresAt).toLocaleString()}</div>
+        <div class="share-link-box" style="margin-top:8px;padding:8px 10px;border:1px solid var(--stroke);border-radius:6px;background:var(--bg);font-size:12px;font-family:ui-monospace,monospace;word-break:break-all">${escapeHtml(shareUrl)}</div>
       </div>
       <span class="badge badge-active">Active</span>
     `;
@@ -455,6 +515,11 @@ function renderShares() {
       }
     };
     row.appendChild(copyButton);
+    const qrBtn = document.createElement("button");
+    qrBtn.className = "button secondary";
+    qrBtn.textContent = "QR";
+    qrBtn.onclick = () => showShareQrModal(shareUrl);
+    row.appendChild(qrBtn);
 
     if (isHostRole()) {
       const revokeButton = document.createElement("button");
@@ -498,6 +563,49 @@ function closePreviewModal() {
   els.previewModal.classList.remove("active");
   if (els.previewBody) {
     els.previewBody.innerHTML = "";
+  }
+}
+
+function showShareQrModal(url) {
+  if (!window.QRious || !els.shareQrModal) return;
+  const canvas = document.getElementById("share-qr-canvas");
+  const urlEl = document.getElementById("share-qr-url");
+  if (!canvas || !urlEl) return;
+  canvas.width = 220;
+  canvas.height = 220;
+  new window.QRious({
+    element: canvas,
+    value: url || "",
+    size: 220,
+    level: "M",
+    background: "white",
+    foreground: "#000000",
+  });
+  urlEl.textContent = url || "";
+  els.shareQrModal.classList.add("active");
+}
+
+function closeShareQrModal() {
+  if (els.shareQrModal) els.shareQrModal.classList.remove("active");
+}
+
+async function confirmDeleteItem(item) {
+  const name = item.name || item.path || "item";
+  const typeLabel = item.type === "folder" ? "folder" : "file";
+  const msg = item.type === "folder"
+    ? `Permanently delete the folder "${name}" and all its contents?`
+    : `Permanently delete "${name}"?`;
+  if (!confirm(msg)) return;
+  try {
+    const res = await apiFetch(`/api/v1/file?path=${encodeURIComponent(item.path)}`, { method: "DELETE" });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || "Delete failed");
+    }
+    await loadFiles(state.path);
+    await loadLogs();
+  } catch (err) {
+    alert(err.message || "Delete failed");
   }
 }
 
@@ -702,20 +810,49 @@ async function loadAccessMe() {
   state.deviceFolderRel = null;
 }
 
+function formatUptime(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return `${h}H ${m}M`;
+  if (m > 0) return `${m}M`;
+  return `${seconds}S`;
+}
+
 async function loadBuildInfo() {
   try {
-    const res = await fetch("/api/v1/build");
-    if (!res.ok) return;
-    const data = await res.json();
-    stateMeta.buildId = String(data.build_id || "");
-    if (els.buildId) {
-      els.buildId.textContent = `BUILD: ${stateMeta.buildId || "unknown"}`;
+    const [buildRes, diagRes] = await Promise.all([
+      fetch("/api/v1/build"),
+      fetch("/api/v1/diagnostics/info", {}).catch(() => null),
+    ]);
+    if (buildRes.ok) {
+      const data = await buildRes.json();
+      stateMeta.buildId = String(data.build_id || "");
+      if (els.buildId) {
+        els.buildId.textContent = `Build ${stateMeta.buildId || "unknown"}`;
+      }
+    }
+    if (diagRes?.ok && els.uptimeDisplay) {
+      const diag = await diagRes.json();
+      const sec = Number(diag.uptime_seconds) || 0;
+      if (sec > 0) els.uptimeDisplay.textContent = `Uptime: ${formatUptime(sec)}`;
     }
   } catch (_error) {
-    if (els.buildId) {
-      els.buildId.textContent = "BUILD: unavailable";
-    }
+    if (els.buildId) els.buildId.textContent = "BUILD: unavailable";
   }
+}
+
+function showNetworkToast() {
+  const banner = document.getElementById("upload-banner");
+  if (!banner) return;
+  const textEl = banner.querySelector(".upload-banner-text");
+  if (!textEl) return;
+  banner.className = "upload-banner upload-banner-loading";
+  banner.classList.remove("upload-banner-hidden");
+  textEl.textContent = "Network changed — share links updated.";
+  setTimeout(() => {
+    banner.classList.add("upload-banner-hidden");
+  }, 3000);
 }
 
 async function fetchStatus() {
@@ -726,6 +863,44 @@ async function fetchStatus() {
   els.storageLabel.textContent = data.storageLabel || "Local storage";
   els.ownerMount.textContent = data.ownerBasePath;
   if (data.lanBaseUrl) stateMeta.lanBaseUrl = data.lanBaseUrl;
+  if (data.shareLinkUrls) stateMeta.shareLinkUrls = data.shareLinkUrls;
+  const networkHash = data.lanBaseUrl || "";
+  if (stateMeta.lastNetworkHash && stateMeta.lastNetworkHash !== networkHash) {
+    showNetworkToast();
+  }
+  if (data.network_changed_at && data.network_changed_at !== stateMeta.lastNetworkChangedAt) {
+    stateMeta.lastNetworkChangedAt = data.network_changed_at;
+    showNetworkToast();
+  }
+  stateMeta.lastNetworkHash = networkHash;
+  if (els.mdnsHostname) els.mdnsHostname.textContent = data.mdns_hostname || "--";
+  if (els.mdnsIpFallback) {
+    const port = data.port || (data.lanBaseUrl && data.lanBaseUrl.match(/:(\d+)/)?.[1]) || "8787";
+    els.mdnsIpFallback.textContent = data.bestLanIp ? `IP fallback: ${data.bestLanIp}:${port}` : "--";
+  }
+  if (els.mdnsStatusBadge) {
+    const resolvable = !!data.mdns_resolvable;
+    els.mdnsStatusBadge.textContent = running ? (resolvable ? "Resolvable" : "IP fallback") : "Inactive";
+    els.mdnsStatusBadge.className = "badge " + (running ? (resolvable ? "badge-active" : "badge-private") : "badge-private");
+    els.mdnsStatusBadge.title = resolvable ? "mDNS hostname resolves" : "mDNS hostname not resolvable; use IP fallback";
+  }
+  if (els.mdnsOpenBtn) {
+    const port = data.port || "8787";
+    const resolvable = !!data.mdns_resolvable;
+    const openUrl = resolvable && data.mdns_hostname
+      ? `http://${data.mdns_hostname}:${port}/`
+      : data.lanBaseUrl || (data.bestLanIp ? `http://${data.bestLanIp}:${port}/` : null);
+    els.mdnsOpenBtn.href = openUrl || "#";
+    els.mdnsOpenBtn.style.display = openUrl && running ? "" : "none";
+  }
+  if (running && !data.mdns_resolvable && !stateMeta.mdnsUnresolvableToastShown) {
+    stateMeta.mdnsUnresolvableToastShown = true;
+    showUploadBanner("mDNS hostname not resolvable; using IP fallback.", "loading");
+    setTimeout(() => hideUploadBanner(), 3000);
+  }
+  if (els.uptimeDisplay && Number.isFinite(data.uptime_seconds)) {
+    els.uptimeDisplay.textContent = `Uptime: ${formatUptime(data.uptime_seconds)}`;
+  }
 }
 
 function updateHeaderStatus(running) {
@@ -745,27 +920,38 @@ async function loadRuntimeStatus() {
 }
 
 async function loadFiles(pathValue) {
-  const res = await apiFetch(`/api/files?path=${encodeURIComponent(pathValue)}`);
-  const data = await res.json();
-  state.path = data.path;
-  state.rawItems = Array.isArray(data.items) ? data.items : [];
-  renderBreadcrumbs();
-  renderFiles();
+  setRefreshLoading(els.refreshFiles, true);
+  try {
+    const res = await apiFetch(`/api/files?path=${encodeURIComponent(pathValue)}`);
+    const data = await res.json();
+    state.path = data.path;
+    state.rawItems = Array.isArray(data.items) ? data.items : [];
+    renderBreadcrumbs();
+    renderFiles();
+  } finally {
+    setRefreshLoading(els.refreshFiles, false);
+  }
 }
 
 async function loadShares() {
-  els.refreshShares.disabled = true;
-  const res = await apiFetch("/api/shares");
-  state.shares = await res.json();
-  renderShares();
-  els.refreshShares.disabled = false;
+  setRefreshLoading(els.refreshShares, true);
+  try {
+    const res = await apiFetch("/api/shares");
+    state.shares = await res.json();
+    renderShares();
+  } finally {
+    setRefreshLoading(els.refreshShares, false);
+  }
 }
 
 async function loadLogs() {
-  els.refreshLogs.disabled = true;
-  const res = await apiFetch("/api/v1/logs");
-  renderLogs(await res.json());
-  els.refreshLogs.disabled = false;
+  setRefreshLoading(els.refreshLogs, true);
+  try {
+    const res = await apiFetch("/api/v1/logs");
+    renderLogs(await res.json());
+  } finally {
+    setRefreshLoading(els.refreshLogs, false);
+  }
 }
 
 async function loadShareVisitSummary() {
@@ -798,6 +984,27 @@ async function updateTelemetrySettings(enabled) {
   });
 }
 
+async function loadTechnicalConfig() {
+  if (!els.technicalConfigContent || !isHostRole()) return;
+  try {
+    const res = await apiFetch("/api/v1/technical-config");
+    if (!res.ok) {
+      els.technicalConfigContent.textContent = "Available on host only.";
+      return;
+    }
+    const data = await res.json();
+    const lines = [
+      `Host ID: ${data.host_id || "-"}`,
+      `Local IPs: ${(data.local_ips || []).join(", ") || "-"}`,
+      `Port: ${data.port || "-"}`,
+      `App version: ${data.app_version || "-"}`,
+    ];
+    els.technicalConfigContent.textContent = lines.join("\n");
+  } catch (_err) {
+    els.technicalConfigContent.textContent = "Failed to load.";
+  }
+}
+
 async function loadNetworkSettings() {
   const res = await apiFetch("/api/v1/network/settings");
   const data = await res.json();
@@ -812,11 +1019,215 @@ async function loadNetworkSettings() {
   }
   setHeaderDisplayName(normalized);
   els.networkNameSuffix.value = displayNameToSuffix(normalized);
-  els.networkVisibility.checked = false;
-  els.networkVisibility.disabled = true;
-  if (els.networkVisibilityNetwork) {
-    els.networkVisibilityNetwork.checked = false;
-    els.networkVisibilityNetwork.disabled = true;
+  const visibility = !!data.network_visibility;
+  els.networkVisibility.checked = visibility;
+  if (els.networkVisibilityNetwork) els.networkVisibilityNetwork.checked = visibility;
+}
+
+async function loadNetwork() {
+  if (!els.networkList) return;
+  try {
+    const res = await apiFetch("/api/v1/network");
+    const peers = await res.json();
+    if (!peers.length) {
+      els.networkList.innerHTML = '<div class="value value-muted">No peers discovered. Use Manual Connect if mDNS is unavailable.</div>';
+      return;
+    }
+    els.networkList.innerHTML = "";
+    peers.forEach((p) => {
+      const row = document.createElement("div");
+      row.className = "pending-item";
+      const addr = p.bestIp ? `${p.bestIp}:${p.port || 8787}` : (p.hostname || "-");
+      row.innerHTML = `
+        <div class="pending-item-meta">
+          <div class="item-title">${escapeHtml(p.display_name || "Unknown")}</div>
+          <div class="item-sub mono">${escapeHtml(addr)}</div>
+          <div class="item-sub">${p.hostname ? escapeHtml(p.hostname) + " · " : ""}${p.status || "online"} ${p.source === "manual" ? "(manual)" : ""}</div>
+        </div>
+      `;
+      if (p.bestIp) {
+        const openBtn = document.createElement("button");
+        openBtn.className = "button secondary";
+        openBtn.textContent = "Open";
+        openBtn.onclick = () => window.open(`http://${p.bestIp}:${p.port || 8787}`, "_blank");
+        row.appendChild(openBtn);
+      }
+      els.networkList.appendChild(row);
+    });
+  } catch (_) {
+    els.networkList.innerHTML = '<div class="value value-muted">Failed to load peers.</div>';
+  }
+}
+
+const stateTeams = { teams: [], invites: [], currentTeamId: null };
+
+async function loadTeams() {
+  if (!els.teamsList) return;
+  try {
+    const res = await apiFetch("/api/v1/teams");
+    const data = await res.json();
+    stateTeams.teams = data.teams || [];
+    stateTeams.invites = data.invites || [];
+    renderTeams();
+  } catch (_) {
+    els.teamsList.innerHTML = '<div class="value value-muted">Failed to load teams.</div>';
+  }
+}
+
+function renderTeams() {
+  if (!els.teamsList) return;
+  if (stateTeams.currentTeamId) return;
+  els.teamsList.style.display = "";
+  if (els.teamDetail) els.teamDetail.style.display = "none";
+  if (stateTeams.invites.length > 0) {
+    const inviteHtml = stateTeams.invites.map((i) => {
+      const teamName = i.teamName || stateTeams.teams.find((t) => t.teamId === i.teamId)?.teamName || "Unknown";
+      return `<div class="pending-item"><span>Invite to ${escapeHtml(teamName)}</span><button class="button secondary accept-invite" data-invite-id="${escapeHtml(i.inviteId)}">Accept</button></div>`;
+    }).join("");
+    els.teamsList.innerHTML = `<div class="label">Pending Invites</div>${inviteHtml}<div class="label" style="margin-top:12px">Your Teams</div>`;
+    els.teamsList.querySelectorAll(".accept-invite").forEach((btn) => {
+      btn.onclick = async () => {
+        await apiFetch(`/api/v1/teams/invites/${btn.dataset.inviteId}/accept`, { method: "POST" });
+        await loadTeams();
+      };
+    });
+  } else {
+    els.teamsList.innerHTML = '<div class="label">Your Teams</div>';
+  }
+  if (!stateTeams.teams.length) {
+    els.teamsList.innerHTML += '<div class="value value-muted">No teams yet. Create one to get started.</div>';
+    return;
+  }
+  stateTeams.teams.forEach((t) => {
+    const row = document.createElement("div");
+    row.className = "pending-item";
+    row.innerHTML = `<div class="item-title">${escapeHtml(t.teamName)}</div><div class="item-sub">${t.members?.length || 0} members</div>`;
+    const openBtn = document.createElement("button");
+    openBtn.className = "button secondary";
+    openBtn.textContent = "Open";
+    openBtn.onclick = () => showTeamDetail(t.teamId);
+    row.appendChild(openBtn);
+    els.teamsList.appendChild(row);
+  });
+}
+
+async function showTeamDetail(teamId) {
+  stateTeams.currentTeamId = teamId;
+  els.teamsList.style.display = "none";
+  if (els.teamDetail) els.teamDetail.style.display = "block";
+  const team = stateTeams.teams.find((t) => t.teamId === teamId);
+  if (els.teamDetailName) els.teamDetailName.textContent = team?.teamName || "Team";
+  await loadTeamMessages(teamId);
+}
+
+async function loadTeamMessages(teamId) {
+  if (!els.teamChatFeed) return;
+  try {
+    const res = await apiFetch(`/api/v1/teams/${teamId}/messages`);
+    const data = await res.json();
+    const messages = data.messages || [];
+    els.teamChatFeed.innerHTML = messages.map((m) => {
+      const text = m.type === "text" ? (m.payload?.text || "") : m.type === "file" ? `[File: ${m.payload?.filename || "?"}]` : m.type === "note" ? `[Note: ${m.payload?.text || ""}]` : "";
+      return `<div class="team-message"><span class="team-message-sender">${escapeHtml(m.senderDeviceId?.slice(0, 8) || "?")}</span>: ${escapeHtml(text)}</div>`;
+    }).join("") || '<div class="value value-muted">No messages yet.</div>';
+    els.teamChatFeed.scrollTop = els.teamChatFeed.scrollHeight;
+  } catch (_) {
+    els.teamChatFeed.innerHTML = '<div class="value value-muted">Failed to load messages.</div>';
+  }
+}
+
+async function sendTeamMessage() {
+  const teamId = stateTeams.currentTeamId;
+  if (!teamId || !els.teamMessageInput) return;
+  const text = els.teamMessageInput.value.trim();
+  if (!text) return;
+  els.teamMessageInput.value = "";
+  try {
+    await apiFetch("/api/v1/teams/message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teamId, type: "text", payload: { text } }),
+    });
+    await loadTeamMessages(teamId);
+  } catch (_) {}
+}
+
+async function inviteToTeam() {
+  const teamId = stateTeams.currentTeamId;
+  if (!teamId) return;
+  const networkRes = await apiFetch("/api/v1/network").catch(() => ({ json: () => [] }));
+  const peers = await (networkRes.ok ? networkRes.json() : []);
+  const team = stateTeams.teams.find((t) => t.teamId === teamId);
+  const existingIds = new Set(team?.members || []);
+  const candidates = peers.filter((p) => p.deviceId && !existingIds.has(p.deviceId));
+  if (!candidates.length) {
+    alert("No peers available to invite. Discover devices in the Network tab first.");
+    return;
+  }
+  const list = candidates.map((c, i) => `${i + 1}. ${c.display_name || c.displayName || c.deviceId} (${c.deviceId})`).join("\n");
+  const choice = prompt(`Enter number or device ID to invite:\n${list}`);
+  if (!choice) return;
+  const num = parseInt(choice, 10);
+  const peer = Number.isFinite(num) && num >= 1 && num <= candidates.length
+    ? candidates[num - 1]
+    : candidates.find((c) => c.deviceId === choice.trim() || (c.display_name || c.displayName) === choice.trim());
+  if (!peer) {
+    alert("Invalid selection.");
+    return;
+  }
+  try {
+    await apiFetch(`/api/v1/teams/${teamId}/invite`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toDeviceId: peer.deviceId }),
+    });
+    alert("Invite sent to " + (peer.display_name || peer.displayName || peer.deviceId) + ".");
+  } catch (e) {
+    alert("Failed to send invite.");
+  }
+}
+
+async function createTeam() {
+  const name = prompt("Team name?", "My Team") || "My Team";
+  try {
+    await apiFetch("/api/v1/teams", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teamName: name }),
+    });
+    await loadTeams();
+  } catch (_) {
+    alert("Failed to create team.");
+  }
+}
+
+async function manualConnect() {
+  if (!els.manualConnectBtn || !els.manualConnectIp) return;
+  const ip = els.manualConnectIp.value.trim();
+  const port = parseInt(els.manualConnectPort?.value || "8787", 10) || 8787;
+  if (!ip) {
+    if (els.manualConnectStatus) els.manualConnectStatus.textContent = "Enter IP address.";
+    return;
+  }
+  els.manualConnectBtn.disabled = true;
+  if (els.manualConnectStatus) els.manualConnectStatus.textContent = "Connecting...";
+  try {
+    const res = await apiFetch("/api/v1/network/manual-connect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ip, port }),
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      if (els.manualConnectStatus) els.manualConnectStatus.textContent = `Added ${data.displayName || data.deviceId}.`;
+      await loadNetwork();
+    } else {
+      if (els.manualConnectStatus) els.manualConnectStatus.textContent = data.message || data.error || "Connection failed.";
+    }
+  } catch (_) {
+    if (els.manualConnectStatus) els.manualConnectStatus.textContent = "Connection failed.";
+  } finally {
+    els.manualConnectBtn.disabled = false;
   }
 }
 
@@ -862,8 +1273,11 @@ async function createShare() {
     els.shareResult.textContent = data.error || "Failed to create share";
     return;
   }
-  const shareUrl = `${stateMeta.lanBaseUrl}/share/${data.shareId}`;
-  els.shareResult.textContent = `Share created: ${shareUrl}`;
+  const shareUrl = data.urlIp || data.url || `${stateMeta.lanBaseUrl}/share/${data.shareId}`;
+  els.shareResult.innerHTML = `
+    <div>Share created.</div>
+    <div class="share-link-box" style="margin-top:10px;padding:12px;border:1px solid var(--stroke);border-radius:8px;background:var(--bg);word-break:break-all;font-size:13px;font-family:ui-monospace,monospace">${shareUrl}</div>
+  `;
   els.copyShare.style.display = "inline-flex";
   els.copyShare.onclick = async () => {
     const ok = await copyToClipboard(shareUrl);
@@ -871,7 +1285,7 @@ async function createShare() {
       els.copyShare.textContent = "Copied!";
       setTimeout(() => (els.copyShare.textContent = "Copy Link"), 2000);
     } else {
-      showCopyFallback(shareUrl, els.copyShare);
+      showCopyFallback(shareUrl, els.shareResult);
     }
   };
   await loadShares();
@@ -965,22 +1379,38 @@ async function addFileViaNativePicker() {
 
 async function uploadFiles(files) {
   if (!files || files.length === 0) return;
+  const fileList = Array.from(files);
+  const count = fileList.length;
+  const label = count === 1 ? fileList[0].name : `${count} files`;
+  showUploadBanner(`Uploading ${label}...`, "loading");
+
   const formData = new FormData();
-  Array.from(files).forEach((file) => formData.append("files", file));
+  fileList.forEach((file) => formData.append("files", file));
   const uploadPath = state.path;
   formData.append("path", uploadPath);
-  const res = await apiFetch("/api/upload", { method: "POST", body: formData });
-  const payload = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const reason = payload.error || "Upload failed.";
-    if (els.uploadScopeHint) {
-      els.uploadScopeHint.textContent = reason;
+
+  try {
+    const res = await apiFetch("/api/upload", { method: "POST", body: formData });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const reason = payload.error || "Upload failed.";
+      showUploadBanner(reason, "error");
+      if (els.uploadScopeHint) {
+        els.uploadScopeHint.textContent = reason;
+      }
+      return;
     }
-    throw new Error(reason);
+    const savedTo = String(payload.saved_to || uploadPath || "/");
+    showUploadBanner("Upload complete", "success");
+    setTimeout(hideUploadBanner, 2500);
+    await loadFiles(savedTo);
+    await loadLogs();
+  } catch (err) {
+    showUploadBanner(err.message || "Upload failed", "error");
+    if (els.uploadScopeHint) {
+      els.uploadScopeHint.textContent = err.message || "Upload failed";
+    }
   }
-  const savedTo = String(payload.saved_to || uploadPath || "/");
-  await loadFiles(savedTo);
-  await loadLogs();
 }
 
 async function loadPendingAccessRequests() {
@@ -1065,8 +1495,10 @@ async function loadApprovedDevices() {
     els.approvedDevicesList.innerHTML = '<div class="value value-muted">Devices management is available on the host machine only.</div>';
     return;
   }
-  const res = await apiFetch("/api/v1/access/devices");
-  const devices = await res.json();
+  setRefreshLoading(els.refreshDevices, true);
+  try {
+    const res = await apiFetch("/api/v1/access/devices");
+    const devices = await res.json();
   if (!devices.length) {
     els.approvedDevicesList.innerHTML = '<div class="value value-muted">No approved devices.</div>';
     return;
@@ -1109,6 +1541,9 @@ async function loadApprovedDevices() {
     row.appendChild(removeBtn);
     els.approvedDevicesList.appendChild(row);
   });
+  } finally {
+    setRefreshLoading(els.refreshDevices, false);
+  }
 }
 
 async function loadActivitySummary() {
@@ -1116,6 +1551,8 @@ async function loadActivitySummary() {
     if (els.activitySummary) els.activitySummary.textContent = "Host-only dashboard.";
     return;
   }
+  setRefreshLoading(els.refreshActivity, true);
+  try {
   const [activityRes, storageRes] = await Promise.all([
     apiFetch("/api/v1/activity/summary"),
     apiFetch("/api/storage"),
@@ -1154,6 +1591,9 @@ async function loadActivitySummary() {
     { label: "Devices", value: connectedDevices },
     { label: "Share DL", value: shareDownloads },
   ]);
+  } finally {
+    setRefreshLoading(els.refreshActivity, false);
+  }
 }
 
 async function pollAccessStatus(requestId) {
@@ -1233,6 +1673,7 @@ async function bootstrapApp() {
   await loadNetwork();
   await loadTelemetrySettings();
   await loadNetworkSettings();
+  await loadTechnicalConfig();
   await loadPrivacyPolicy();
   await loadPendingAccessRequests();
   await loadApprovedDevices();
@@ -1249,6 +1690,8 @@ function setActiveSection(sectionId) {
   if (window.location.hash !== `#${safeSection}`) window.location.hash = safeSection;
   els.sections.forEach((section) => section.classList.toggle("active", section.dataset.section === safeSection));
   els.navButtons.forEach((button) => button.classList.toggle("active", button.dataset.section === safeSection));
+  if (safeSection === "network") loadNetwork();
+  if (safeSection === "teams") loadTeams();
 }
 
 function updateAdminUi() {
@@ -1289,6 +1732,34 @@ function updateAdminUi() {
   }
 }
 
+function showUploadBanner(text, type = "loading") {
+  if (!els.uploadBanner || !els.uploadBannerText) return;
+  els.uploadBanner.className = `upload-banner upload-banner-${type}`;
+  els.uploadBanner.classList.remove("upload-banner-hidden");
+  els.uploadBanner.setAttribute("aria-hidden", "false");
+  els.uploadBannerText.textContent = text;
+  if (els.uploadBannerDismiss) {
+    els.uploadBannerDismiss.style.display = type === "loading" ? "none" : "inline-flex";
+  }
+}
+
+function hideUploadBanner() {
+  if (!els.uploadBanner) return;
+  els.uploadBanner.classList.add("upload-banner-hidden");
+  els.uploadBanner.setAttribute("aria-hidden", "true");
+}
+
+function setRefreshLoading(buttonEl, loading) {
+  if (!buttonEl) return;
+  if (loading) {
+    buttonEl.classList.add("loading");
+    buttonEl.disabled = true;
+  } else {
+    buttonEl.classList.remove("loading");
+    buttonEl.disabled = false;
+  }
+}
+
 function refreshRemoteUploadUi() {
   const uploadAllowed = true;
   if (els.uploadInput) {
@@ -1310,7 +1781,11 @@ function refreshRemoteUploadUi() {
 }
 
 els.menuToggle.addEventListener("click", () => {
-  document.body.classList.toggle("sidebar-open");
+  if (window.innerWidth < 768) {
+    document.body.classList.toggle("sidebar-open");
+  } else {
+    document.body.classList.toggle("sidebar-collapsed");
+  }
 });
 
 els.navButtons.forEach((button) => {
@@ -1334,6 +1809,53 @@ els.copyCloudUrl.addEventListener("click", async () => {
     showCopyFallback(`${stateMeta.cloudUrl}?pair=1`, els.copyCloudUrl);
   }
 });
+
+if (els.manualConnectBtn) {
+  els.manualConnectBtn.addEventListener("click", manualConnect);
+}
+if (els.createTeamBtn) {
+  els.createTeamBtn.addEventListener("click", createTeam);
+}
+if (els.teamDetailBack) {
+  els.teamDetailBack.addEventListener("click", () => {
+    stateTeams.currentTeamId = null;
+    loadTeams();
+  });
+}
+if (els.teamSendBtn) {
+  els.teamSendBtn.addEventListener("click", sendTeamMessage);
+}
+if (els.teamInviteBtn) {
+  els.teamInviteBtn.addEventListener("click", inviteToTeam);
+}
+if (els.teamMessageInput) {
+  els.teamMessageInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendTeamMessage();
+    }
+  });
+}
+if (els.networkVisibility) {
+  els.networkVisibility.addEventListener("change", async () => {
+    await apiFetch("/api/v1/network/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ network_visibility: els.networkVisibility.checked }),
+    });
+    if (els.networkVisibilityNetwork) els.networkVisibilityNetwork.checked = els.networkVisibility.checked;
+  });
+}
+if (els.networkVisibilityNetwork) {
+  els.networkVisibilityNetwork.addEventListener("change", async () => {
+    await apiFetch("/api/v1/network/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ network_visibility: els.networkVisibilityNetwork.checked }),
+    });
+    if (els.networkVisibility) els.networkVisibility.checked = els.networkVisibilityNetwork.checked;
+  });
+}
 
 els.requestApproval.addEventListener("click", async () => {
   await requestAccessApproval();
@@ -1373,6 +1895,14 @@ if (els.closePreviewModal) {
 if (els.previewModal) {
   els.previewModal.addEventListener("click", (event) => {
     if (event.target === els.previewModal) closePreviewModal();
+  });
+}
+if (els.closeShareQrModal) {
+  els.closeShareQrModal.addEventListener("click", closeShareQrModal);
+}
+if (els.shareQrModal) {
+  els.shareQrModal.addEventListener("click", (event) => {
+    if (event.target === els.shareQrModal) closeShareQrModal();
   });
 }
 
@@ -1439,12 +1969,99 @@ els.dropZone.addEventListener("dragover", (event) => {
   els.dropZone.classList.add("active");
 });
 els.dropZone.addEventListener("dragleave", () => els.dropZone.classList.remove("active"));
-els.dropZone.addEventListener("drop", (event) => {
+els.dropZone.addEventListener("drop", async (event) => {
   if (els.uploadInput?.disabled) return;
   event.preventDefault();
   els.dropZone.classList.remove("active");
+  const items = event.dataTransfer?.items;
+  if (items && items.length > 0) {
+    const collected = await collectFilesFromItems(items);
+    if (collected.length > 0) {
+      uploadFilesWithPaths(collected);
+      return;
+    }
+  }
   uploadFiles(event.dataTransfer.files);
 });
+
+async function collectFilesFromItems(items) {
+  const result = [];
+  const readDirEntries = (dirReader) =>
+    new Promise((resolve, reject) => {
+      const all = [];
+      function read() {
+        dirReader.readEntries(
+          (entries) => {
+            if (entries.length === 0) {
+              resolve(all);
+              return;
+            }
+            all.push(...entries);
+            read();
+          },
+          (err) => (err ? reject(err) : resolve(all))
+        );
+      }
+      read();
+    });
+  const readEntry = async (entry, basePath = "") => {
+    if (entry.isFile) {
+      return new Promise((resolve) => {
+        entry.file(
+          (file) => {
+            const relPath = basePath ? `${basePath}/${file.name}` : file.name;
+            result.push({ file, relativePath: relPath });
+            resolve();
+          },
+          () => resolve()
+        );
+      });
+    }
+    if (entry.isDirectory) {
+      const dirPath = basePath ? `${basePath}/${entry.name}` : entry.name;
+      const entries = await readDirEntries(entry.createReader());
+      for (const e of entries) {
+        if (e.name.startsWith(".") || e.name.startsWith("._")) continue;
+        await readEntry(e, dirPath);
+      }
+    }
+  };
+  for (let i = 0; i < items.length; i++) {
+    const entry = items[i].webkitGetAsEntry ? items[i].webkitGetAsEntry() : null;
+    if (entry) await readEntry(entry);
+  }
+  return result;
+}
+
+async function uploadFilesWithPaths(items) {
+  if (!items || items.length === 0) return;
+  const label = items.length === 1 ? items[0].relativePath : `${items.length} files`;
+  showUploadBanner(`Uploading ${label}...`, "loading");
+  const formData = new FormData();
+  formData.append("path", state.path);
+  for (const { file, relativePath } of items) {
+    formData.append("fileRelPath", relativePath);
+    formData.append("files", file);
+  }
+  try {
+    const res = await apiFetch("/api/upload", { method: "POST", body: formData });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const reason = payload.error || "Upload failed.";
+      showUploadBanner(reason, "error");
+      if (els.uploadScopeHint) els.uploadScopeHint.textContent = reason;
+      return;
+    }
+    const savedTo = String(payload.saved_to || state.path || "/");
+    showUploadBanner("Upload complete", "success");
+    setTimeout(hideUploadBanner, 2500);
+    await loadFiles(savedTo);
+    await loadLogs();
+  } catch (err) {
+    showUploadBanner(err.message || "Upload failed", "error");
+    if (els.uploadScopeHint) els.uploadScopeHint.textContent = err.message || "Upload failed";
+  }
+}
 els.telemetryToggle.addEventListener("change", async (event) => {
   await updateTelemetrySettings(event.target.checked);
 });
@@ -1472,6 +2089,9 @@ els.downloadPrivacyPolicy.addEventListener("click", () => {
   URL.revokeObjectURL(url);
 });
 
+if (els.uploadBannerDismiss) {
+  els.uploadBannerDismiss.addEventListener("click", hideUploadBanner);
+}
 if (els.accessDeviceNameInput) {
   els.accessDeviceNameInput.value = getSuggestedDeviceName();
 }

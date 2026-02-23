@@ -1,5 +1,19 @@
 # JoinCloud Changelog
 
+## v0.3.4 (February 2026)
+
+### Highlights
+
+- **UI Changes**: Refined interface and styling updates
+- **mDNS**: Network discovery and resolution improvements
+- **Teams Section**: New teams functionality
+
+### Build
+
+- Mac and Windows builds output to separate directories (`dist/mac`, `dist/win`)
+
+---
+
 ## v0.3.1 - Phase 4C (January 26, 2026)
 
 ### Bug Fixes

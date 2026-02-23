@@ -9,7 +9,7 @@
   <body>
     <header class="topbar">
       <div class="brand">
-        <button class="button secondary menu-toggle" id="menu-toggle" aria-label="Toggle navigation">☰</button>
+        <button class="button secondary menu-toggle" id="menu-toggle" aria-label="Toggle sidebar" title="Toggle menu">☰</button>
         <img class="brand-logo" src="/logo.png" alt="JoinCloud" />
         <span>JoinCloud</span>
         <span class="badge" id="pending-badge" style="display:none">0 Pending</span>
@@ -17,7 +17,7 @@
         <span class="brand-user" id="header-display-name">Join</span>
       </div>
       <div class="header-actions">
-        <button class="button secondary" id="add-file-header">Add File</button>
+        <button class="button" id="add-file-header"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></span> Add File</button>
         <button class="button secondary" id="toggle-sharing">Stop</button>
         <div class="value value-muted" id="upload-destination-label"></div>
         <div class="status" id="node-status"><span class="status-dot running" id="status-dot"></span> Status: Running</div>
@@ -49,94 +49,97 @@
 
     <main class="layout" id="app-layout" style="display:none;">
       <aside class="sidebar">
-        <button class="nav-button active" data-section="home">Home</button>
-        <button class="nav-button" data-section="files">Files</button>
-        <button class="nav-button" data-section="shares">Shares</button>
-        <button class="nav-button" data-section="logs">Logs</button>
-        <button class="nav-button" data-section="settings">Settings</button>
-        <button class="nav-button" data-section="devices">Devices</button>
-        <button class="nav-button" data-section="activity">Activity</button>
-        <button class="nav-button" data-section="network">Network</button>
+        <nav class="nav-group">
+        <nav class="nav-group">
+          <button class="nav-button active" data-section="home" title="Home"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></span><span class="nav-label">Home</span></button>
+          <button class="nav-button" data-section="files" title="Files"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg></span><span class="nav-label">Files</span></button>
+          <button class="nav-button" data-section="devices" title="Devices"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4V6zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1zm-1 9h-4v-7h4v7z"/></svg></span><span class="nav-label">Devices</span></button>
+          <button class="nav-button" data-section="shares" title="Shares"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92c0-1.61-1.31-2.92-2.92-2.92z"/></svg></span><span class="nav-label">Shares</span></button>
+          <button class="nav-button" data-section="teams" title="Teams"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg></span><span class="nav-label">Teams</span></button>
+          <button class="nav-button" data-section="activity" title="Activity"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></svg></span><span class="nav-label">Activity</span></button>
+        </nav>
+        <nav class="nav-group nav-group-bottom">
+          <button class="nav-button" data-section="settings" title="Settings"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg></span><span class="nav-label">Settings</span></button>
+          <button class="nav-button" data-section="logs" title="Logs"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg></span><span class="nav-label">Logs</span></button>
+          <button class="nav-button" data-section="network" title="Network"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.7 2.06 7.3 2.06 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg></span><span class="nav-label">Network</span></button>
+        </nav>
       </aside>
 
       <div class="content">
       <section class="card section" data-section="home">
         <h2>Home</h2>
-        <div class="row">
-          <div>
+        <div class="home-grid">
+          <div class="home-section">
             <div class="label">Storage</div>
             <div class="value" id="storage-label">Local storage</div>
+            <div class="value value-muted" style="font-size:12px" id="owner-mount">--</div>
+            <button class="button secondary" id="open-storage" style="margin-top:12px"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg></span>Open Storage</button>
           </div>
-          <div>
-            <div class="label">WebDAV Mount</div>
-            <div class="value mono" id="owner-mount">--</div>
-          </div>
-        </div>
-        <div class="row" style="margin-top:12px">
-          <button class="button secondary" id="open-storage">Open Storage Folder</button>
-        </div>
-        <div class="row space-between" style="margin-top:16px">
-          <div>
-            <div class="label">Public Access</div>
-            <div class="value" id="public-status">Coming Soon</div>
-            <div class="value" id="public-reason">Public access is coming soon.</div>
-          </div>
-        </div>
-        <div class="row cloud-url-section" style="margin-top:18px">
-          <div style="flex:1">
+          <div class="home-section">
             <div class="label">Cloud URL</div>
-            <input class="input mono" id="cloud-url-input" readonly />
+            <input class="input mono" id="cloud-url-input" readonly style="margin-top:8px" />
             <div class="row" style="margin-top:10px">
-              <button class="button secondary" id="copy-cloud-url">Copy</button>
+              <button class="button secondary" id="copy-cloud-url"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></span>Copy</button>
             </div>
             <div class="qr-wrap">
               <canvas id="cloud-url-qr" width="220" height="220"></canvas>
             </div>
           </div>
         </div>
-        <div class="row" style="margin-top:18px">
-          <div style="width:100%">
-            <div class="label">Pending Access Requests <span class="badge" id="pending-access-count">0</span></div>
-            <div class="pending-list" id="pending-access-list"></div>
-          </div>
+        <div class="home-section-divider">
+          <div class="label">mDNS (Cloud UI access)</div>
+          <div class="value mono" id="mdns-hostname" style="font-size:13px">--</div>
+          <div class="value value-muted" id="mdns-ip-fallback" style="font-size:12px;margin-top:2px">--</div>
+          <span class="badge" id="mdns-status-badge" style="margin-top:6px">--</span>
+          <a class="button secondary" id="mdns-open-btn" href="#" target="_blank" rel="noopener" style="margin-top:8px;display:inline-flex;text-decoration:none">Open Cloud UI</a>
         </div>
-        <div class="row" style="margin-top:18px">
-          <div style="width:100%">
-            <div class="label">Share Page Visits</div>
-            <div class="value" id="share-visit-total">Total: 0</div>
-            <div class="value value-muted" id="share-visit-today">Today: 0</div>
-          </div>
+        <div class="home-section-divider">
+          <div class="label">Public File Sharing</div>
+          <div class="value value-muted" id="public-status">Coming soon</div>
+        </div>
+        <div class="home-section-divider">
+          <div class="label">Pending Access Requests <span class="badge" id="pending-access-count">0</span></div>
+          <div class="pending-list" id="pending-access-list"></div>
+        </div>
+        <div class="home-section-divider">
+          <div class="label">Share Page Visits</div>
+          <div class="value" id="share-visit-total">Total: 0</div>
+          <div class="value value-muted" id="share-visit-today">Today: 0</div>
         </div>
       </section>
 
       <section class="card section" data-section="files">
-        <div class="row space-between">
+        <div class="file-browser-header">
           <h2>File Browser</h2>
-          <div class="row">
-            <label class="button secondary" id="upload-button-label" for="upload-input">Upload</label>
+          <div class="file-actions">
+            <label class="button" id="upload-button-label" for="upload-input"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"/></svg></span> Upload</label>
             <input id="upload-input" type="file" multiple hidden />
             <button class="button secondary" id="my-folder-shortcut" style="display:none">My Folder</button>
-            <button class="button secondary" id="back-button">Back</button>
-            <button class="button secondary" id="refresh-files">Refresh</button>
+            <button class="button secondary" id="back-button"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg></span>Back</button>
+            <button class="button secondary" id="refresh-files"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></span>Refresh</button>
           </div>
         </div>
         <div class="file-controls">
-          <input class="input" id="file-search" placeholder="Search in current folder" />
-          <select class="input" id="file-sort">
-            <option value="name_asc">Name (A-Z)</option>
-            <option value="name_desc">Name (Z-A)</option>
-            <option value="modified_desc">Date Modified (Newest)</option>
-            <option value="modified_asc">Date Modified (Oldest)</option>
-            <option value="ext_asc">Extension (A-Z)</option>
-            <option value="ext_desc">Extension (Z-A)</option>
-          </select>
-          <label class="toggle">
-            <input type="checkbox" id="folders-only" />
-            <span>Folders only</span>
-          </label>
-          <div class="view-toggle" role="group" aria-label="File view mode">
-            <button class="button secondary active" id="view-list">List</button>
-            <button class="button secondary" id="view-thumb">Thumbnails</button>
+          <div class="file-search-wrap">
+            <input class="input" id="file-search" placeholder="Search in current folder" />
+          </div>
+          <div class="file-filters">
+            <select class="input input-compact" id="file-sort">
+              <option value="name_asc">Name (A-Z)</option>
+              <option value="name_desc">Name (Z-A)</option>
+              <option value="modified_desc">Date Modified (Newest)</option>
+              <option value="modified_asc">Date Modified (Oldest)</option>
+              <option value="ext_asc">Extension (A-Z)</option>
+              <option value="ext_desc">Extension (Z-A)</option>
+            </select>
+            <label class="toggle toggle-compact">
+              <input type="checkbox" id="folders-only" />
+              <span>Folders only</span>
+            </label>
+            <div class="view-toggle" role="group" aria-label="File view mode">
+              <button class="button secondary button-compact active" id="view-list"><span class="btn-icon" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg></span>List</button>
+              <button class="button secondary button-compact" id="view-thumb"><span class="btn-icon" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg></span>Thumbnails</button>
+            </div>
           </div>
         </div>
         <div class="drop-zone" id="drop-zone">Drag & drop files here</div>
@@ -151,16 +154,36 @@
           <div class="row">
             <button class="button secondary" id="revoke-selected" disabled>Revoke Selected</button>
             <button class="button danger" id="revoke-all">Revoke All</button>
-            <button class="button secondary" id="refresh-shares">Refresh</button>
+            <button class="button secondary" id="refresh-shares"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></span>Refresh</button>
           </div>
         </div>
         <div class="share-list" id="share-list"></div>
+      </section>
+
+      <section class="card section" data-section="teams">
+        <div class="row space-between">
+          <h2>Teams</h2>
+          <button class="button" id="create-team-btn">Create Team</button>
+        </div>
+        <div class="teams-list" id="teams-list"></div>
+        <div class="team-detail" id="team-detail" style="display:none">
+          <div class="team-detail-header">
+            <button class="button secondary" id="team-detail-back">← Back</button>
+            <h3 id="team-detail-name"></h3>
+            <button class="button secondary" id="team-invite-btn">Invite</button>
+          </div>
+          <div class="team-chat-feed" id="team-chat-feed"></div>
+          <div class="team-message-input">
+            <input class="input" id="team-message-input" placeholder="Type a message..." />
+            <button class="button secondary" id="team-send-btn">Send</button>
+          </div>
+        </div>
       </section>
       
       <section class="card section" data-section="logs">
         <div class="row space-between">
           <h2>Logs</h2>
-          <button class="button secondary" id="refresh-logs">Refresh</button>
+          <button class="button secondary" id="refresh-logs"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></span>Refresh</button>
         </div>
         <div class="log-list" id="log-list"></div>
       </section>
@@ -177,17 +200,23 @@
             <span>Enabled</span>
           </label>
         </div>
-        <div class="row" style="margin-top:18px">
+        <div class="row" style="margin-top:16px">
+          <div style="flex:1">
+            <div class="label">Technical Configuration (Host Only)</div>
+            <div id="technical-config-content" class="value value-muted mono" style="font-size:12px;margin-top:8px">Loading...</div>
+          </div>
+        </div>
+        <div class="row" style="margin-top:16px">
           <div style="flex:1">
             <div class="label">Privacy Policy</div>
             <div class="row" style="margin-top:8px">
-              <button class="button secondary" id="copy-privacy-policy">Copy</button>
-              <button class="button secondary" id="download-privacy-policy">Download</button>
+              <button class="button secondary" id="copy-privacy-policy"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></span>Copy</button>
+              <button class="button secondary" id="download-privacy-policy"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg></span>Download</button>
             </div>
             <div class="privacy-policy-content" id="privacy-policy-content"></div>
           </div>
         </div>
-        <div class="row" style="margin-top:24px">
+        <div class="row" style="margin-top:16px">
           <div style="flex:1">
             <div class="label">Name</div>
             <div class="name-input-group">
@@ -197,15 +226,14 @@
           </div>
           <button class="button secondary" id="save-network-name">Save</button>
         </div>
-        <div class="row space-between" style="margin-top:16px">
+        <div class="row space-between" style="margin-top:12px">
           <div>
             <div class="label">Network Visibility</div>
-            <div class="value">Coming Soon</div>
-            <div class="value value-muted">Network visibility is coming soon.</div>
+            <div class="value value-muted" style="margin-top:2px">Advertise this device for LAN discovery</div>
           </div>
           <label class="toggle">
-            <input type="checkbox" id="network-visibility" disabled />
-            <span>Coming Soon</span>
+            <input type="checkbox" id="network-visibility" />
+            <span>On</span>
           </label>
         </div>
         <div class="row" style="margin-top:8px">
@@ -216,36 +244,46 @@
       </section>
 
       <section class="card section" data-section="network">
-        <div class="row space-between">
-          <h2>Network</h2>
-        </div>
-        <div class="value">Coming Soon</div>
-        <div class="row space-between" style="margin-top:16px">
-          <div>
-            <div class="label">Network Visibility</div>
-            <div class="value">Coming Soon</div>
+        <h2>Network</h2>
+        <p class="value value-muted" style="margin:0 0 12px">mDNS discovery and manual connect.</p>
+        <div class="network-settings">
+          <div class="network-setting-row">
+            <div>
+              <div class="label">Network Visibility</div>
+              <div class="value value-muted" style="margin-top:2px">Advertise this device for LAN discovery</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="network-visibility-network" />
+              <span>On</span>
+            </label>
           </div>
-          <label class="toggle">
-            <input type="checkbox" id="network-visibility-network" disabled />
-            <span>Coming Soon</span>
-          </label>
         </div>
+        <div class="manual-connect-wrap" style="margin-top:16px">
+          <div class="label">Manual Connect</div>
+          <div class="row" style="margin-top:6px;gap:8px;flex-wrap:wrap">
+            <input class="input" id="manual-connect-ip" placeholder="192.168.1.100" style="flex:1;min-width:140px" />
+            <input class="input" id="manual-connect-port" placeholder="8787" style="width:80px" type="number" />
+            <button class="button secondary" id="manual-connect-btn">Connect</button>
+          </div>
+          <div class="value value-muted" id="manual-connect-status" style="margin-top:6px;font-size:12px"></div>
+        </div>
+        <div class="label" style="margin-top:16px">Discovered Peers</div>
         <div class="network-list" id="network-list"></div>
       </section>
 
       <section class="card section" data-section="devices">
         <div class="row space-between">
           <h2>Devices</h2>
-          <button class="button secondary" id="refresh-devices">Refresh</button>
+          <button class="button secondary" id="refresh-devices"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></span>Refresh</button>
         </div>
-        <div class="value value-muted">Approved devices can access JoinCloud after admin approval.</div>
-        <div class="pending-list" id="approved-devices-list" style="margin-top:12px"></div>
+        <p class="value value-muted" style="margin:0 0 8px">Approved devices can access JoinCloud after admin approval.</p>
+        <div class="pending-list" id="approved-devices-list"></div>
       </section>
 
       <section class="card section" data-section="activity">
         <div class="row space-between">
           <h2>Activity Dashboard</h2>
-          <button class="button secondary" id="refresh-activity">Refresh</button>
+          <button class="button secondary" id="refresh-activity"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></span>Refresh</button>
         </div>
         <div class="activity-grid" id="activity-metrics">
           <div class="metric-card">
@@ -315,7 +353,7 @@
         </div>
         <div class="modal-actions">
           <button class="button secondary" id="cancel-share">Cancel</button>
-          <button class="button" id="create-share">Create Share</button>
+          <button class="button" id="create-share"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92c0-1.61-1.31-2.92-2.92-2.92z"/></svg></span>Create Share</button>
         </div>
         <div class="modal-result" id="share-result"></div>
         <button class="button secondary" id="copy-share" style="display:none">Copy Link</button>
@@ -350,7 +388,29 @@
       </div>
     </div>
 
-    <footer class="build-footer" id="build-id">BUILD: loading...</footer>
+    <div class="modal" id="share-qr-modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Share Link QR Code</h3>
+          <button class="button ghost" id="close-share-qr-modal">✕</button>
+        </div>
+        <div class="modal-body" style="text-align:center">
+          <canvas id="share-qr-canvas" width="220" height="220"></canvas>
+          <div class="value value-muted" id="share-qr-url" style="margin-top:10px;word-break:break-all;font-size:12px"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="upload-banner" class="upload-banner upload-banner-hidden" role="status" aria-live="polite" aria-hidden="true">
+      <span class="upload-banner-text"></span>
+      <button type="button" class="upload-banner-dismiss" aria-label="Dismiss">✕</button>
+    </div>
+
+    <footer class="build-footer">
+      <span class="build-footer-left">JoinCloud</span>
+      <span id="build-id">BUILD: loading...</span>
+      <span class="build-footer-right" id="uptime-display"></span>
+    </footer>
 
     <script src="/vendor/qrious.min.js"></script>
     <script src="/app.js"></script>

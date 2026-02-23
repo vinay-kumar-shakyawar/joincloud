@@ -129,6 +129,7 @@ Outputs:
 | `/api/v1/diagnostics/ping?bytes=N` | GET | Throughput test (streams N random bytes) |
 | `/api/v1/diagnostics/info` | GET | Version, LAN IP, ports, uptime |
 | `/api/upload` | POST | Multipart file upload (busboy, streaming) |
+| `/api/v1/file/raw?path=` | PUT | Raw stream upload (fast path, no multipart parsing) |
 | `/api/files?path=` | GET | List directory |
 | `/share/:id` | GET | Share page (HTML) |
 | `/share/:id/meta` | GET | Share metadata |
@@ -147,6 +148,12 @@ Outputs:
 - **Conclusion:** Bottleneck is in the **file streaming path**, not network or HTTP layer.
 - **Cause:** HTTP response (`res`) has a small default writable buffer (~16 KB). `pipe()` causes frequent backpressure and limits throughput.
 - **Planned fix:** Add a `PassThrough` stream with `highWaterMark: 1MB` (or 2MB) between the file read stream and `res` to reduce backpressure cycles and improve throughput.
+
+### Upload speed improvements (applied)
+
+- **Upload timeout:** 60 min (was 30 min) for large files
+- **Socket tuning:** `socket.setNoDelay(true)` on all server connections
+- **Upload route:** `req.socket.setNoDelay(true)` + optional `setRecvBufferSize(1MB)` if available
 
 ### Relevant code (share download)
 
@@ -188,6 +195,12 @@ After making changes, run:
 5. **Copy link:**
    - Copy share link on desktop and mobile.
    - Expect: "Copied!" or fallback selectable field.
+
+6. **Raw upload fast path:**
+   ```bash
+   curl -T bigfile.bin "http://<HOST_LAN_IP>:8787/api/v1/file/raw?path=/Uploads/bigfile.bin"
+   ```
+   Requires auth (same as `/api/upload`). Check logs for `bytes_received`, `duration_ms`, `mb_per_sec`.
 
 ---
 

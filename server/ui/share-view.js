@@ -7,19 +7,91 @@
   const actionsEl = document.getElementById("share-actions");
   const listEl = document.getElementById("share-list");
   const previewEl = document.getElementById("share-preview");
+  const dropZoneEl = document.getElementById("share-drop-zone");
   let selectedPaths = new Set();
+  let currentFolderPath = "/";
+  let metaCache = null;
+  let sharePermission = "read-only";
 
   function getShareUrl() {
     return window.location.origin + "/share/" + encodeURIComponent(shareId);
   }
 
-  async function copyToClipboard(text) {
+  function setupShareDropZone() {
+    if (!dropZoneEl) return;
+    const handleDrag = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZoneEl.classList.toggle("active", e.type === "dragenter" || e.type === "dragover");
+    };
+    const handleDrop = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dropZoneEl.classList.remove("active");
+      if (sharePermission !== "read-write") {
+        showToast("Upload not available for read-only shares.", "info");
+        return;
+      }
+      const files = e.dataTransfer?.files;
+      if (!files || !files.length) return;
+      const formData = new FormData();
+      formData.append("path", currentFolderPath.replace(/^\//, "") || "");
+      for (let i = 0; i < files.length; i++) formData.append("files", files[i]);
+      try {
+        showToast("Uploading...", "info");
+        const res = await fetch(`/share/${encodeURIComponent(shareId)}/upload`, {
+          method: "POST",
+          body: formData,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          showToast("Upload complete", "success");
+          await loadFolder(currentFolderPath);
+        } else {
+          showToast(data.error || "Upload failed", "error");
+        }
+      } catch (err) {
+        showToast(err.message || "Upload failed", "error");
+      }
+    };
+    dropZoneEl.ondragenter = dropZoneEl.ondragover = handleDrag;
+    dropZoneEl.ondragleave = handleDrag;
+    dropZoneEl.ondrop = handleDrop;
+  }
+
+  function showToast(message, type) {
+    const existing = document.getElementById("share-toast");
+    if (existing) existing.remove();
+    const toast = document.createElement("div");
+    toast.id = "share-toast";
+    toast.className = "share-toast share-toast-" + (type || "info");
+    toast.textContent = message;
+    toast.setAttribute("role", "status");
+    document.body.appendChild(toast);
+    setTimeout(() => toast.classList.add("share-toast-visible"), 10);
+    setTimeout(() => {
+      toast.classList.remove("share-toast-visible");
+      setTimeout(() => toast.remove(), 300);
+    }, 2500);
+  }
+
+  async function copyToClipboard(text, container) {
     try {
       if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
         await navigator.clipboard.writeText(text);
         return true;
       }
     } catch (_err) {}
+    const input = container ? container.querySelector("input.mono") : null;
+    if (input) {
+      input.value = text;
+      input.focus();
+      input.select();
+      input.setSelectionRange(0, text.length);
+      try {
+        if (document.execCommand("copy")) return true;
+      } catch (_e) {}
+    }
     try {
       const ta = document.createElement("textarea");
       ta.value = text;
@@ -37,6 +109,24 @@
       return ok;
     } catch (_e) {
       return false;
+    }
+  }
+
+  async function handleCopyLink(text, container, copyBtn) {
+    const ok = await copyToClipboard(text, container);
+    if (ok) {
+      showToast("Copied!", "success");
+      if (copyBtn) {
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => (copyBtn.textContent = "Share"), 2000);
+      }
+    } else {
+      showToast("Copy failed — press Ctrl+C / Cmd+C", "error");
+      const input = container ? container.querySelector("input.mono") : null;
+      if (input) {
+        input.focus();
+        input.select();
+      }
     }
   }
 
@@ -105,32 +195,62 @@
     previewEl.innerHTML = "";
   }
 
-  function renderZipActions() {
+  function renderBreadcrumbs(folderPath) {
+    const parts = folderPath.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
+    const bc = document.createElement("div");
+    bc.className = "share-breadcrumbs";
+    const home = document.createElement("button");
+    home.className = "button secondary";
+    home.textContent = "Home";
+    home.onclick = () => loadFolder("/");
+    bc.appendChild(home);
+    let current = "";
+    parts.forEach((part) => {
+      const sep = document.createElement("span");
+      sep.className = "breadcrumb-sep";
+      sep.textContent = " / ";
+      bc.appendChild(sep);
+      current += "/" + part;
+      const btn = document.createElement("button");
+      btn.className = "button secondary";
+      btn.textContent = part;
+      const pathToUse = current;
+      btn.onclick = () => loadFolder(pathToUse);
+      bc.appendChild(btn);
+    });
+    return bc;
+  }
+
+  function renderZipActions(folderPath) {
     const controls = document.createElement("div");
     controls.className = "actions";
+    const copyWrap = document.createElement("div");
+    copyWrap.className = "copy-link-wrap";
     const copyBtn = document.createElement("button");
-    copyBtn.className = "button secondary";
-    copyBtn.textContent = "Copy Link";
-    copyBtn.onclick = async () => {
-      const ok = await copyToClipboard(getShareUrl());
-      if (ok) {
-        copyBtn.textContent = "Copied!";
-        setTimeout(() => (copyBtn.textContent = "Copy Link"), 2000);
-      } else {
-        showCopyFallback(getShareUrl(), listEl);
-      }
-    };
-    controls.appendChild(copyBtn);
+    copyBtn.className = "button";
+    copyBtn.textContent = "Share";
+    copyBtn.title = "Copy share link";
+    copyBtn.onclick = () => handleCopyLink(getShareUrl(), copyWrap, copyBtn);
+    copyWrap.appendChild(copyBtn);
+    controls.appendChild(copyWrap);
+
     const allLink = document.createElement("a");
     allLink.className = "button";
     allLink.href = `/share/${encodeURIComponent(shareId)}/download.zip`;
     allLink.textContent = "Download All (ZIP)";
     controls.appendChild(allLink);
 
-    const selectedLink = document.createElement("a");
+    if (folderPath && folderPath !== "/") {
+      const folderZipLink = document.createElement("a");
+      folderZipLink.className = "button secondary";
+      folderZipLink.href = `/share/${encodeURIComponent(shareId)}/download.zip?paths=${encodeURIComponent(folderPath.replace(/^\//, ""))}`;
+      folderZipLink.textContent = "Download Folder (ZIP)";
+      controls.appendChild(folderZipLink);
+    }
+
+    const selectedLink = document.createElement("button");
     selectedLink.className = "button secondary";
     selectedLink.textContent = "Download Selected (ZIP)";
-    selectedLink.href = "#";
     selectedLink.onclick = (event) => {
       event.preventDefault();
       if (!selectedPaths.size) return;
@@ -141,10 +261,17 @@
     listEl.appendChild(controls);
   }
 
-  function renderFolderList(payload) {
+  function renderFolderList(payload, folderPath) {
     listEl.innerHTML = "";
+    const bc = renderBreadcrumbs(folderPath || "/");
+    listEl.appendChild(bc);
+
     if (!payload.items || !payload.items.length) {
-      listEl.innerHTML = '<div class="muted">Folder is empty.</div>';
+      const empty = document.createElement("div");
+      empty.className = "muted";
+      empty.textContent = "Folder is empty.";
+      listEl.appendChild(empty);
+      renderZipActions(folderPath || "/");
       return;
     }
 
@@ -153,11 +280,17 @@
       row.className = "list-item";
       const left = document.createElement("div");
       left.innerHTML = `
-        <div>${item.type === "folder" ? "Folder" : "File"}: <span class="mono">${item.relativePath}</span></div>
+        <div>${item.type === "folder" ? "Folder" : "File"}: <span class="mono">${item.name}</span></div>
         <div class="muted">${item.type === "file" ? formatBytes(item.size) : "-"}</div>
       `;
       row.appendChild(left);
-      if (item.type === "file") {
+      if (item.type === "folder") {
+        const openBtn = document.createElement("button");
+        openBtn.className = "button";
+        openBtn.textContent = "Open";
+        openBtn.onclick = () => loadFolder(item.relativePath);
+        row.appendChild(openBtn);
+      } else {
         const selectWrap = document.createElement("label");
         selectWrap.className = "select-wrap";
         const checkbox = document.createElement("input");
@@ -179,7 +312,8 @@
       }
       listEl.appendChild(row);
     });
-    renderZipActions();
+    renderZipActions(folderPath || "/");
+    if (metaCache && metaCache.marketingUrl) renderGrowthCta(metaCache.marketingUrl);
   }
 
   function renderGrowthCta(marketingUrl) {
@@ -198,6 +332,15 @@
     return res.json();
   }
 
+  async function loadFolder(folderPath) {
+    currentFolderPath = folderPath || "/";
+    selectedPaths = new Set();
+    const pathParam = currentFolderPath === "/" ? "" : currentFolderPath.replace(/^\//, "");
+    const url = `/share/${encodeURIComponent(shareId)}/files` + (pathParam ? `?path=${encodeURIComponent(pathParam)}` : "");
+    const files = await fetchJson(url);
+    renderFolderList(files, currentFolderPath);
+  }
+
   async function init() {
     if (!shareId) {
       setError("Invalid share link.");
@@ -208,6 +351,12 @@
       titleEl.textContent = meta.name || "Shared Item";
       const sizeText = meta.targetType === "file" && Number.isFinite(meta.size) ? ` | Size: ${formatBytes(meta.size)}` : "";
       metaEl.textContent = `Type: ${meta.targetType === "folder" ? "Folder" : "File"}${sizeText} | Expires: ${new Date(meta.expiresAt).toLocaleString()}`;
+      sharePermission = meta.permission || "read-only";
+
+      if (dropZoneEl) {
+        dropZoneEl.style.display = meta.targetType === "folder" ? "" : "none";
+        setupShareDropZone();
+      }
 
       actionsEl.innerHTML = "";
       if (meta.targetType === "file") {
@@ -216,19 +365,15 @@
         direct.href = meta.downloadUrl || `/share/${encodeURIComponent(shareId)}/download`;
         direct.textContent = "Download File";
         actionsEl.appendChild(direct);
+        const copyWrap = document.createElement("div");
+        copyWrap.className = "copy-link-wrap";
         const copyBtn = document.createElement("button");
-        copyBtn.className = "button secondary";
-        copyBtn.textContent = "Copy Link";
-        copyBtn.onclick = async () => {
-          const ok = await copyToClipboard(getShareUrl());
-          if (ok) {
-            copyBtn.textContent = "Copied!";
-            setTimeout(() => (copyBtn.textContent = "Copy Link"), 2000);
-          } else {
-            showCopyFallback(getShareUrl(), actionsEl);
-          }
-        };
-        actionsEl.appendChild(copyBtn);
+        copyBtn.className = "button";
+        copyBtn.textContent = "Share";
+        copyBtn.title = "Copy share link";
+        copyBtn.onclick = () => handleCopyLink(getShareUrl(), copyWrap, copyBtn);
+        copyWrap.appendChild(copyBtn);
+        actionsEl.appendChild(copyWrap);
         if (meta.previewUrl) {
           const previewBtn = document.createElement("button");
           previewBtn.className = "button secondary";
@@ -242,13 +387,12 @@
         return;
       }
 
-      const files = await fetchJson(`/share/${encodeURIComponent(shareId)}/files`);
-      renderFolderList(files);
+      metaCache = meta;
+      await loadFolder("/");
       const note = document.createElement("div");
       note.className = "muted";
       note.textContent = "Sharing is caring ❤️";
       listEl.appendChild(note);
-      renderGrowthCta(meta.marketingUrl);
     } catch (error) {
       setError("Share unavailable or expired.");
     }

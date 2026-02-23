@@ -44,6 +44,9 @@ module.exports = {
     accessControlPath:
       process.env.JOINCLOUD_ACCESS_CONTROL_PATH ||
       path.join(APP_SUPPORT_DIR, "data", "access-control.json"),
+    teamsPath:
+      process.env.JOINCLOUD_TEAMS_PATH ||
+      path.join(APP_SUPPORT_DIR, "data", "teams.json"),
   },
   share: {
     defaultPermission: "read-only",
