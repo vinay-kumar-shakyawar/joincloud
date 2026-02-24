@@ -24,6 +24,11 @@
       </div>
     </header>
 
+    <div class="grace-banner" id="grace-banner" style="display:none;" role="alert">
+      <span id="grace-banner-text">Payment issue – please update your payment method. Full access until <span id="grace-ends-date"></span>.</span>
+      <a id="grace-banner-upgrade" href="#" target="_blank" rel="noopener noreferrer" style="margin-left:12px; color:inherit; font-weight:600; text-decoration:underline; display:none;">Upgrade now</a>
+    </div>
+
     <section class="layout" id="access-gate" style="display:none;">
       <div class="content">
         <section class="card access-card">
@@ -47,6 +52,24 @@
       </div>
     </section>
 
+    <section class="layout" id="activation-gate" style="display:none;">
+      <div class="content">
+        <section class="card access-card" style="max-width:440px; margin:0 auto; text-align:center;">
+          <div style="margin-bottom:16px;">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.7"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+          </div>
+          <h2 style="margin:0 0 8px">Sign in to JoinCloud</h2>
+          <p class="value value-muted" style="margin:0 0 24px; line-height:1.5;">A free 7-day trial starts automatically when you sign in.<br>No credit card required.</p>
+          <button class="button" id="activation-gate-signin-web" style="width:100%; padding:12px 0; font-size:15px;">Sign In / Create Account</button>
+          <div id="activation-gate-message" class="modal-result" style="margin-top:12px;"></div>
+          <p class="value value-muted" style="margin-top:20px; font-size:12px; line-height:1.4;">Your browser will open to sign in or create an account.<br>You'll be redirected back here automatically.</p>
+          <p id="activation-gate-upgrade-wrap" style="display:none; margin-top:12px;">
+            <a id="activation-gate-upgrade-link" class="link" href="#" target="_blank" rel="noopener noreferrer">View plans &amp; pricing</a>
+          </p>
+        </section>
+      </div>
+    </section>
+
     <main class="layout" id="app-layout" style="display:none;">
       <aside class="sidebar">
         <button class="nav-button active" data-section="home">Home</button>
@@ -57,6 +80,7 @@
         <button class="nav-button" data-section="devices">Devices</button>
         <button class="nav-button" data-section="activity">Activity</button>
         <button class="nav-button" data-section="network">Network</button>
+        <button class="nav-button" data-section="support">Support</button>
       </aside>
 
       <div class="content">
@@ -167,7 +191,65 @@
 
       <section class="card section" data-section="settings">
         <h2>Settings</h2>
-        <div class="row space-between">
+        <!-- Rich profile card (shown when a license is active) -->
+        <div id="settings-profile-card" style="display:none; background:var(--surface-2,#f6f8fa); border:1px solid var(--border,#e2e8f0); border-radius:10px; padding:16px 18px; margin-bottom:18px;">
+          <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+            <div style="width:40px;height:40px;border-radius:50%;background:var(--accent,#3b82f6);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
+            </div>
+            <div style="flex:1;min-width:160px;">
+              <div id="settings-profile-email" style="font-size:14px;font-weight:600;color:var(--fg,#1a202c);word-break:break-all;">—</div>
+              <div style="margin-top:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span style="font-size:12px;color:var(--muted,#888);">Plan:</span>
+                <span id="settings-profile-plan" style="font-size:12px;font-weight:600;color:var(--fg,#1a202c);">—</span>
+                <span id="settings-profile-status" class="settings-profile-badge">—</span>
+              </div>
+              <div style="margin-top:6px;display:flex;gap:16px;flex-wrap:wrap;">
+                <div>
+                  <span style="font-size:11px;color:var(--muted,#888);">Device limit: </span>
+                  <span id="settings-profile-device-limit" style="font-size:11px;font-weight:600;">—</span>
+                </div>
+                <div>
+                  <span style="font-size:11px;color:var(--muted,#888);">Expires: </span>
+                  <span id="settings-profile-expiry" style="font-size:11px;font-weight:600;">—</span>
+                </div>
+              </div>
+            </div>
+            <div>
+              <a id="settings-open-dashboard-link" class="button" href="#" target="_blank" rel="noopener noreferrer" style="font-size:12px;padding:6px 12px;text-decoration:none;display:inline-block;">Open Dashboard</a>
+            </div>
+          </div>
+        </div>
+        <!-- Legacy profile row (hidden when rich card is shown) -->
+        <div class="profile-row" id="settings-profile-row" style="display:none; margin-bottom: 16px; padding: 12px 0; border-bottom: 1px solid var(--border, #e2e8f0);">
+          <div class="label" style="font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted, #888);">Profile</div>
+          <div class="value" id="settings-profile-value">—</div>
+        </div>
+        <div class="subscription-card" id="subscription-card" style="display:none;">
+          <h3 class="subscription-title">Subscription &amp; Billing</h3>
+          <div class="row" style="margin-top:8px">
+            <div class="label">Plan</div>
+            <div class="value" id="subscription-plan">—</div>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <div class="label">Status</div>
+            <div class="value" id="subscription-status">—</div>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <div class="label">Renewal date</div>
+            <div class="value" id="subscription-renewal">—</div>
+          </div>
+          <div class="row" style="margin-top:12px; gap: 12px;">
+            <button class="button" id="subscription-manage-btn" style="display:none;">Manage subscription / Payment</button>
+            <a id="subscription-upgrade-link" class="link" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">Upgrade / Buy plan</a>
+            <a id="subscription-open-dashboard-link" class="link" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">Open Dashboard</a>
+          </div>
+          <div class="value value-muted" style="margin-top:8px; font-size: 12px;">Payment and subscription are managed securely. Use &quot;Manage subscription&quot; to update payment method or cancel. View past payments on the web dashboard.</div>
+        </div>
+        <div class="row" style="margin-top:18px;">
+          <button class="button secondary" id="settings-logout" type="button">Sign out</button>
+        </div>
+        <div class="row space-between" style="margin-top:18px">
           <div>
             <div class="label">Operational Telemetry</div>
             <div class="value">Anonymous, aggregated usage metrics</div>
@@ -278,6 +360,18 @@
           <canvas id="activity-chart" height="180"></canvas>
         </div>
       </section>
+
+      <section class="card section" data-section="support">
+        <h2>Support</h2>
+        <p class="value value-muted">Chat with your admin. Messages sync with the control panel.</p>
+        <div class="support-chat">
+          <div class="support-messages" id="support-messages"></div>
+          <div class="support-send-row">
+            <input class="input" id="support-message-input" type="text" placeholder="Type a message..." maxlength="2000" />
+            <button class="button" id="support-send">Send</button>
+          </div>
+        </div>
+      </section>
       </div>
     </main>
 
@@ -288,6 +382,17 @@
           <button class="button ghost" id="close-modal">✕</button>
         </div>
         <div class="modal-body">
+          <div id="activation-block" class="activation-block" style="display:none">
+            <p class="value value-muted">Sign in once to link this device to your account. You can then create shares and use all features without signing in again.</p>
+            <div class="activation-actions">
+              <button class="button" id="activation-signin-web">Sign In / Create Account</button>
+            </div>
+            <p class="value value-muted" style="margin-top:8px;font-size:12px;">Opens the JoinCloud website in your browser. You'll be redirected back here automatically.</p>
+            <div id="activation-message" class="modal-result"></div>
+            <p class="activation-upgrade-wrap" id="activation-upgrade-wrap" style="display:none; margin-top: 12px;">
+              <a id="activation-upgrade-link" class="link" href="#" target="_blank" rel="noopener noreferrer">Upgrade / Buy plan</a>
+            </p>
+          </div>
           <label class="label">Path</label>
           <input class="input mono" id="share-path" readonly />
 

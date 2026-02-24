@@ -13,6 +13,7 @@ const ipcMain = electron.ipcMain;
 const shell = electron.shell;
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const net = require("net");
 const { spawn } = require("child_process");
 const http = require("http");
@@ -38,6 +39,9 @@ let isStopping = false;
 let isCreatingWindow = false;
 let allowWindowClose = false;
 let isHandlingClosePrompt = false;
+let deviceIdentity = null;
+let heartbeatTimer = null;
+let registrationSchedulerRef = null;
 
 const HEALTH_URL = "http://127.0.0.1:8787/api/v1/health";
 const BACKEND_URL = "http://127.0.0.1:8787";
@@ -48,9 +52,96 @@ const HEALTH_FAILURE_THRESHOLD = 2;
 const RESTART_WINDOW_MS = 10 * 60 * 1000;
 const MAX_RESTARTS_IN_WINDOW = 3;
 
+// Register joincloud:// deep link protocol so the website can redirect back to the app.
+if (process.defaultApp) {
+  app.setAsDefaultProtocolClient("joincloud", process.execPath, [path.resolve(process.argv[1])]);
+} else {
+  app.setAsDefaultProtocolClient("joincloud");
+}
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
+}
+
+/** Handle a joincloud:// deep-link URL (auth or refresh). */
+async function handleDeepLink(url) {
+  try {
+    logLine(`[deep-link] received: ${url}`);
+    const parsed = new URL(url);
+
+    if (parsed.hostname === "refresh" || parsed.pathname === "//refresh") {
+      logLine("[deep-link] refresh requested — re-fetching config");
+      await new Promise((resolve, reject) => {
+        const req = http.request(
+          { hostname: "127.0.0.1", port: parseInt(BACKEND_PORT, 10), path: "/api/v1/control-plane-config", method: "GET", timeout: 8000 },
+          (resp) => { let d = ""; resp.on("data", (c) => { d += c; }); resp.on("end", () => resolve(d)); }
+        );
+        req.on("error", reject);
+        req.end();
+      });
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("license-updated");
+        mainWindow.show();
+        mainWindow.focus();
+      }
+      return;
+    }
+
+    const token = parsed.searchParams.get("token");
+    if (!token) {
+      logLine("[deep-link] no token in URL");
+      return;
+    }
+    const res = await new Promise((resolve, reject) => {
+      const bodyStr = JSON.stringify({ token });
+      const req = http.request(
+        {
+          hostname: "127.0.0.1",
+          port: parseInt(BACKEND_PORT, 10),
+          path: "/api/desktop/verify",
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bodyStr) },
+          timeout: 8000,
+        },
+        (resp) => {
+          let data = "";
+          resp.on("data", (chunk) => { data += chunk; });
+          resp.on("end", () => {
+            try { resolve({ statusCode: resp.statusCode, body: JSON.parse(data) }); }
+            catch { resolve({ statusCode: resp.statusCode, body: {} }); }
+          });
+        }
+      );
+      req.on("error", reject);
+      req.write(bodyStr);
+      req.end();
+    });
+    if (res.statusCode !== 200 || !res.body) {
+      logLine(`[deep-link] verify failed: ${JSON.stringify(res.body)}`);
+      return;
+    }
+    const userDataPath = app.getPath("userData");
+    const systemDir = path.join(userDataPath, "JoinCloud", "system");
+    if (!fs.existsSync(systemDir)) fs.mkdirSync(systemDir, { recursive: true });
+    if (res.body.jwt) {
+      const authPath = path.join(systemDir, "auth.json");
+      fs.writeFileSync(authPath, JSON.stringify({ token: res.body.jwt }, null, 2), "utf8");
+      logLine("[deep-link] auth token saved");
+    }
+    if (res.body.license) {
+      const licensePath = path.join(systemDir, "license.json");
+      fs.writeFileSync(licensePath, JSON.stringify(res.body.license, null, 2), "utf8");
+      logLine("[deep-link] license updated from web auth");
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("license-updated");
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  } catch (err) {
+    logLine(`[deep-link] error: ${formatError(err)}`);
+  }
 }
 
 function initLogging() {
@@ -157,6 +248,7 @@ function startBackend() {
     : [];
   const inheritedNodePath = process.env.NODE_PATH || "";
   const mergedNodePath = [...nodePathCandidates, inheritedNodePath].filter(Boolean).join(path.delimiter);
+  const userDataPath = app.getPath("userData");
   const env = {
     ...process.env,
     NODE_ENV: app.isPackaged ? "production" : "development",
@@ -167,6 +259,7 @@ function startBackend() {
     PORT: BACKEND_PORT,
     SHARE_PORT,
     JOINCLOUD_STORAGE_ROOT: getStoragePath(),
+    JOINCLOUD_USER_DATA: userDataPath,
     PATH: process.env.PATH || "",
     NODE_PATH: mergedNodePath || inheritedNodePath,
   };
@@ -473,6 +566,66 @@ async function createWindow() {
     }
     startHealthMonitor();
 
+    setImmediate(() => {
+      try {
+        const userDataPath = app.getPath("userData");
+        const systemDir = path.join(userDataPath, "JoinCloud", "system");
+        const identityPath = path.join(systemDir, "identity.json");
+        let appVersion = "0.0.0";
+        try {
+          const pkg = require(path.join(__dirname, "..", "package.json"));
+          if (pkg && pkg.version) appVersion = pkg.version;
+        } catch (_) {}
+        const deviceIdentityModule = require(path.join(__dirname, "..", "core", "device-identity"));
+        const registrationClient = require(path.join(__dirname, "..", "core", "registration-client"));
+        const identityVault = require(path.join(__dirname, "..", "core", "identity-vault"));
+        let vault = null;
+        if (typeof electron.safeStorage !== "undefined" && electron.safeStorage.isEncryptionAvailable()) {
+          const vaultPath = path.join(systemDir, "vault.dat");
+          vault = identityVault.createFileBackedVault({
+            vaultPath,
+            encrypt: (str) => electron.safeStorage.encryptString(str),
+            decrypt: (buf) => electron.safeStorage.decryptString(Buffer.isBuffer(buf) ? buf : Buffer.from(buf)),
+          });
+        }
+        deviceIdentity = deviceIdentityModule.getOrCreateIdentity({ appVersion, identityPath, vault });
+        if (!fs.existsSync(systemDir)) fs.mkdirSync(systemDir, { recursive: true });
+        try {
+          fs.writeFileSync(path.join(systemDir, "host_uuid"), deviceIdentity.host_uuid, "utf8");
+        } catch (_) {}
+        let controlPlaneHost = process.env.JOINCLOUD_ADMIN_HOST;
+        if (!controlPlaneHost && process.env.JOINCLOUD_CONTROL_PLANE_URL) {
+          try {
+            const u = new URL(process.env.JOINCLOUD_CONTROL_PLANE_URL);
+            controlPlaneHost = u.port ? `${u.hostname}:${u.port}` : u.hostname;
+          } catch (_) {}
+        }
+        if (controlPlaneHost) {
+          const log = (msg, meta) => logLine(`[identity] ${msg} ${meta ? JSON.stringify(meta) : ""}`);
+          registrationSchedulerRef = registrationClient.createRegistrationScheduler({
+            identityPath,
+            getIdentity: () => deviceIdentity,
+            persistIdentity: deviceIdentityModule.persistIdentity,
+            controlPlaneHost,
+            log,
+          });
+          registrationSchedulerRef.start();
+          const heartbeatIntervalMs = 12 * 60 * 60 * 1000 * (0.9 + 0.2 * Math.random());
+          heartbeatTimer = setInterval(() => {
+            if (!deviceIdentity) return;
+            const uptimeSeconds = typeof process.uptime === "function" ? process.uptime() : 0;
+            registrationClient.sendHeartbeat(deviceIdentity, {
+              controlPlaneHost,
+              uptimeSeconds,
+              log: (msg, meta) => logLine(`[heartbeat] ${msg} ${meta ? JSON.stringify(meta) : ""}`),
+            }).catch(() => {});
+          }, heartbeatIntervalMs);
+        }
+      } catch (err) {
+        logLine(`Device identity init failed: ${formatError(err)}`);
+      }
+    });
+
     mainWindow = new BrowserWindow({
       width: 1200,
       height: 800,
@@ -485,6 +638,16 @@ async function createWindow() {
     });
     mainWindow.webContents.on("did-fail-load", (_event, code, description, url) => {
       logLine(`Renderer failed to load code=${code} url=${url} reason=${description}`);
+    });
+
+    // Open all external links (http/https) in the system browser, not in a new Electron window.
+    // This ensures "Open Dashboard on Web" and "Upgrade / Buy plan" open in Chrome/Edge/Safari.
+    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+      if (url.startsWith("http://") || url.startsWith("https://")) {
+        shell.openExternal(url).catch(() => {});
+        return { action: "deny" };
+      }
+      return { action: "allow" };
     });
 
     try {
@@ -536,7 +699,13 @@ if (!app || !BrowserWindow) {
   process.exit(1);
 }
 
-app.on("second-instance", () => {
+app.on("second-instance", (_event, argv) => {
+  // Check for deep link in argv (Windows/Linux)
+  const deepLinkUrl = argv.find((arg) => arg.startsWith("joincloud://"));
+  if (deepLinkUrl) {
+    handleDeepLink(deepLinkUrl).catch((err) => logLine(`[deep-link] second-instance error: ${formatError(err)}`));
+    return;
+  }
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) {
       mainWindow.restore();
@@ -548,6 +717,13 @@ app.on("second-instance", () => {
     createWindow().catch((error) => {
       logLine(`Second-instance window creation failed: ${formatError(error)}`);
     });
+  }
+});
+
+// macOS: handle deep link via open-url event
+app.on("open-url", (_event, url) => {
+  if (url.startsWith("joincloud://")) {
+    handleDeepLink(url).catch((err) => logLine(`[deep-link] open-url error: ${formatError(err)}`));
   }
 });
 
@@ -593,6 +769,14 @@ app.on("window-all-closed", () => {
   }
   isStopping = true;
   stopHealthMonitor();
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+  if (registrationSchedulerRef && typeof registrationSchedulerRef.stop === "function") {
+    registrationSchedulerRef.stop();
+    registrationSchedulerRef = null;
+  }
   stopBackendGracefully().finally(() => app.quit());
 });
 
@@ -633,6 +817,14 @@ app.on("before-quit", (event) => {
   }
   isStopping = true;
   stopHealthMonitor();
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+  if (registrationSchedulerRef && typeof registrationSchedulerRef.stop === "function") {
+    registrationSchedulerRef.stop();
+    registrationSchedulerRef = null;
+  }
   event.preventDefault();
   stopBackendGracefully().finally(() => app.quit());
 });

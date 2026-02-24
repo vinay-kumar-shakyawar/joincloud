@@ -114,3 +114,19 @@ Applied a refined dark theme with the following color system:
 - Cloudflare Tunnel integration for public access
 - Time-based share expiration
 - Share revocation
+
+
+Account and connection are not correct 
+please in such a way so that we can track limit boundations as per the packages plan please make the correct management of accounts for pro plan of single user and teams plans and after payement update the db and fro show in control panel 
+
+please remove my activate the device setup do not add using activate will add  device in plan of email which is not correct i thing you need to impove in accounts section
+
+please make propfessional setup (like take reference from cursor setup of users for plans) 
+- like cursor on starting want signin and limit the usages . make sure how joincloud electron can able  detect login via joincloud web website just like cursor do verify and connect with device
+- once device is login free trails starts working and on after expiry please focus users to upgrade our plan  
+- why after upgrade payment show Razorpay not configured please correct this setup 
+- make surre whole setup fuctionality works and on upgrade JoinCloud electron must detect login and upgrade detail imediately 
+- prepare proper flow moving from browser to destop app and destop app to website for smoother user experience 
+- on clicking get pro make sure user first login 
+
+- any device login can count the connected devices and limit on 5 devices for pro single users  

@@ -1,7 +1,9 @@
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 const http = require("http");
+const https = require("https");
 const fs = require("fs/promises");
 const fsSync = require("fs");
-const path = require("path");
 const os = require("os");
 const stream = require("stream");
 const express = require("express");
@@ -21,6 +23,7 @@ const { TunnelManager } = require("./tunnel/TunnelManager");
 const { createLogger } = require("./utils/logger");
 const { createTelemetryStore } = require("./telemetry/store");
 const { createTelemetrySync } = require("./telemetry/sync");
+const { createUsageAggregation } = require("./usage-aggregation");
 const { AccessControlStore } = require("./accessControl");
 const { RuntimeTelemetryStore } = require("./runtimeTelemetry");
 const crypto = require("crypto");
@@ -78,6 +81,260 @@ async function ensureUserConfig(configPath) {
 
 async function updateUserConfig(configPath, payload) {
   await fs.writeFile(configPath, JSON.stringify(payload, null, 2));
+}
+
+let controlPlaneConfigCache = null;
+
+function getHostUuidForConfig() {
+  try {
+    const userData = process.env.JOINCLOUD_USER_DATA;
+    if (!userData) return null;
+    const hostUuidPath = path.join(userData, "JoinCloud", "system", "host_uuid");
+    if (!fsSync.existsSync(hostUuidPath)) return null;
+    const uuid = fsSync.readFileSync(hostUuidPath, "utf8").trim();
+    return uuid.length >= 8 && uuid.length <= 128 ? uuid : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function getActivationPaths() {
+  const userData = process.env.JOINCLOUD_USER_DATA;
+  if (!userData) return null;
+  const systemDir = path.join(userData, "JoinCloud", "system");
+  return {
+    systemDir,
+    authPath: path.join(systemDir, "auth.json"),
+    licensePath: path.join(systemDir, "license.json"),
+  };
+}
+
+/** Fire-and-forget: if license expires within 48h or is in grace, try to refresh from Control Plane. */
+function tryRefreshLicense() {
+  const adminHost = config.telemetry?.adminHost;
+  if (!adminHost) return;
+  const paths = getActivationPaths();
+  const hostUuid = getHostUuidForConfig();
+  if (!paths || !hostUuid) return;
+  setImmediate(() => {
+    let license;
+    try {
+      if (!fsSync.existsSync(paths.licensePath)) return;
+      const raw = fsSync.readFileSync(paths.licensePath, "utf8");
+      license = JSON.parse(raw);
+    } catch (_) {
+      return;
+    }
+    if (!license || !license.license_id) return;
+    const now = Math.floor(Date.now() / 1000);
+    const expiresIn48h = now + 48 * 3600;
+    if (license.expires_at > expiresIn48h && license.state !== "grace") return;
+    controlPlanePost(adminHost, "/api/v1/license/validate", { license, host_uuid: hostUuid }, null, (err, result) => {
+      if (err || !result?.data?.license) return;
+      const newLicense = result.data.license;
+      const tmpPath = paths.licensePath + ".tmp." + Date.now();
+      fs.writeFile(tmpPath, JSON.stringify(newLicense, null, 2), "utf8")
+        .then(() => fs.rename(tmpPath, paths.licensePath))
+        .then(() => {
+          if (controlPlaneConfigCache) {
+            controlPlaneConfigCache.license = { state: newLicense.state || "active", ...newLicense };
+          }
+          logger.info("license refreshed from Control Plane");
+        })
+        .catch((e) => logger.warn("license refresh write failed", { error: e.message }));
+    });
+  });
+}
+
+/** After config is served: fetch latest license from Control Plane and update file/cache if changed (e.g. plan upgrade). */
+function refreshLicenseFromControlPlane(hostUuid) {
+  const adminHost = config.telemetry?.adminHost;
+  if (!adminHost || !hostUuid || hostUuid.length < 8) return;
+  const paths = getActivationPaths();
+  if (!paths) return;
+  setImmediate(() => {
+    controlPlaneGet(adminHost, `/api/v1/config?host_uuid=${encodeURIComponent(hostUuid)}`, (err, result) => {
+      if (err || result?.statusCode !== 200 || !result?.data?.license) return;
+      const remote = result.data.license;
+      if (remote.state === "UNREGISTERED") return;
+      let current = null;
+      try {
+        if (fsSync.existsSync(paths.licensePath)) {
+          const raw = fsSync.readFileSync(paths.licensePath, "utf8");
+          current = JSON.parse(raw);
+        }
+      } catch (_) {}
+      const changed = !current || current.tier !== remote.tier || current.state !== remote.state ||
+        (current.expires_at !== remote.expires_at);
+      if (!changed) return;
+      const toWrite = {
+        ...current,
+        state: remote.state,
+        tier: remote.tier,
+        device_limit: remote.device_limit,
+        expires_at: remote.expires_at,
+        grace_ends_at: remote.grace_ends_at,
+        features: remote.features || (current && current.features) || {},
+        account_id: remote.account_id || (current && current.account_id),
+      };
+      if (result.data.account_email) toWrite.account_email = result.data.account_email;
+      else if (current && current.account_email) toWrite.account_email = current.account_email;
+      const tmpPath = paths.licensePath + ".tmp." + Date.now();
+      fs.writeFile(tmpPath, JSON.stringify(toWrite, null, 2), "utf8")
+        .then(() => fs.rename(tmpPath, paths.licensePath))
+        .then(() => {
+          if (controlPlaneConfigCache) {
+            controlPlaneConfigCache.license = { state: toWrite.state || "active", ...toWrite };
+            if (toWrite.account_email) controlPlaneConfigCache.account_email = toWrite.account_email;
+          }
+          logger.info("license refreshed from Control Plane (config sync)");
+        })
+        .catch((e) => logger.warn("license config sync write failed", { error: e.message }));
+    });
+  });
+}
+
+function controlPlanePost(adminHost, apiPath, body, bearerToken, callback) {
+  const parsed = parseAdminHost(adminHost);
+  if (!parsed) {
+    callback(new Error("Control Plane not configured"), null);
+    return;
+  }
+  const lib = parsed.isHttps ? https : http;
+  const bodyStr = JSON.stringify(body || {});
+  const opts = {
+    hostname: parsed.hostname,
+    port: parsed.port,
+    path: apiPath,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Content-Length": Buffer.byteLength(bodyStr, "utf8"),
+    },
+    timeout: 15000,
+  };
+  if (bearerToken) opts.headers.Authorization = `Bearer ${bearerToken}`;
+  const req = lib.request(opts, (res) => {
+    let data = "";
+    res.on("data", (chunk) => { data += chunk; });
+    res.on("end", () => {
+      let json = null;
+      try {
+        json = data ? JSON.parse(data) : {};
+      } catch (_) {}
+      callback(null, { statusCode: res.statusCode, data: json });
+    });
+  });
+  req.on("error", (err) => callback(err, null));
+  req.setTimeout(15000, () => req.destroy());
+  req.end(bodyStr);
+}
+
+function controlPlaneGet(adminHost, apiPath, callback) {
+  const parsed = parseAdminHost(adminHost);
+  if (!parsed) {
+    callback(new Error("Control Plane not configured"), null);
+    return;
+  }
+  const lib = parsed.isHttps ? https : http;
+  const req = lib.request(
+    {
+      hostname: parsed.hostname,
+      port: parsed.port,
+      path: apiPath,
+      method: "GET",
+      timeout: 10000,
+    },
+    (res) => {
+      let data = "";
+      res.on("data", (chunk) => { data += chunk; });
+      res.on("end", () => {
+        let json = null;
+        try {
+          json = data ? JSON.parse(data) : {};
+        } catch (_) {}
+        callback(null, { statusCode: res.statusCode, data: json });
+      });
+    }
+  );
+  req.on("error", (err) => callback(err, null));
+  req.setTimeout(10000, () => req.destroy());
+  req.end();
+}
+
+function parseAdminHost(adminHost) {
+  if (!adminHost || typeof adminHost !== "string") return null;
+  const withProtocol = adminHost.indexOf("://") === -1 ? `https://${adminHost}` : adminHost;
+  try {
+    const u = new URL(withProtocol);
+    return {
+      hostname: u.hostname,
+      port: u.port ? parseInt(u.port, 10) : (u.protocol === "https:" ? 443 : 80),
+      protocol: u.protocol,
+      isHttps: u.protocol === "https:",
+    };
+  } catch (_) {
+    const idx = adminHost.indexOf(":");
+    return {
+      hostname: idx === -1 ? adminHost : adminHost.slice(0, idx),
+      port: idx === -1 ? 443 : parseInt(adminHost.slice(idx + 1), 10) || 443,
+      isHttps: true,
+    };
+  }
+}
+
+function fetchControlPlaneConfigAndApplyTelemetry(adminHost, userConfigPath, updateUserConfigFn, logger) {
+  const parsed = parseAdminHost(adminHost);
+  if (!parsed) return;
+  const lib = parsed.isHttps ? https : http;
+  const hostUuid = getHostUuidForConfig();
+  const configPath = hostUuid ? `/api/v1/config?host_uuid=${encodeURIComponent(hostUuid)}` : "/api/v1/config";
+  const req = lib.request(
+    {
+      hostname: parsed.hostname,
+      port: parsed.port,
+      path: configPath,
+      method: "GET",
+      timeout: 3000,
+    },
+    (res) => {
+      let body = "";
+      res.on("data", (chunk) => { body += chunk; });
+      res.on("end", () => {
+        try {
+          const data = JSON.parse(body);
+          controlPlaneConfigCache = {
+            license: data.license || {},
+            activation: data.activation || {},
+            telemetry: data.telemetry || {},
+            subscription: data.subscription || null,
+            account_id: data.account_id || null,
+            account_email: data.account_email || null,
+          };
+          if (!data.telemetry || typeof data.telemetry.default_enabled === "undefined") return;
+          fs.readFile(userConfigPath, "utf8")
+            .then((raw) => {
+              const userConfig = JSON.parse(raw);
+              if (userConfig.control_plane_telemetry_default_applied) return;
+              userConfig.telemetry_enabled = !!data.telemetry.default_enabled;
+              userConfig.control_plane_telemetry_default_applied = true;
+              return updateUserConfigFn(userConfigPath, userConfig);
+            })
+            .then(() => {
+              if (logger) logger.info("control plane config applied", { telemetry_default: true });
+            })
+            .catch(() => {});
+        } catch (_) {}
+      });
+    }
+  );
+  req.on("error", () => {});
+  req.setTimeout(3000, () => req.destroy());
+  req.end();
+}
+
+function getControlPlaneConfig() {
+  return controlPlaneConfigCache;
 }
 
 function toPosixPath(input) {
@@ -482,6 +739,13 @@ async function bootstrap() {
     logger,
   });
   telemetrySync.start();
+
+  fetchControlPlaneConfigAndApplyTelemetry(
+    config.telemetry.adminHost,
+    config.storage.userConfigPath,
+    updateUserConfig,
+    logger
+  );
   const uptimeTimer = startUptimeTracker(telemetry);
 
   const ownerServer = createOwnerServer({
@@ -513,12 +777,30 @@ async function bootstrap() {
     logger,
   });
 
+  const runtimeTelemetry = new RuntimeTelemetryStore({
+    storagePath: config.storage.runtimeTelemetryPath,
+  });
+  await runtimeTelemetry.init();
+  runtimeTelemetry.increment("total_app_starts");
+
+  const usageAggregation = createUsageAggregation({
+    userDataPath: process.env.JOINCLOUD_USER_DATA,
+    adminHost: config.telemetry.adminHost,
+    getTelemetryStore: () => telemetry,
+    getRuntimeTelemetry: () => runtimeTelemetry.getSummary(),
+    getUptimeSeconds: () => Math.floor(process.uptime()),
+    logger,
+  });
+  usageAggregation.start();
+
   const handler = createMountManager({
     ownerServer,
     shareService,
     shareServerFactory: createShareServer,
     config,
     telemetry,
+    runtimeTelemetry,
+    usageAggregation,
     logger,
   });
 
@@ -529,11 +811,6 @@ async function bootstrap() {
     logger,
   });
   await accessControl.init();
-  const runtimeTelemetry = new RuntimeTelemetryStore({
-    storagePath: config.storage.runtimeTelemetryPath,
-  });
-  await runtimeTelemetry.init();
-  runtimeTelemetry.increment("total_app_starts");
   let sharingEnabled = true;
 
   async function ensureDeviceFolderForSession(session) {
@@ -587,6 +864,181 @@ async function bootstrap() {
   }
   app.get("/api/v1/cloud/url", (_req, res) => {
     res.json({ url: getCloudUrl() });
+  });
+
+  app.post("/api/auth/register", async (req, res) => {
+    const adminHost = config.telemetry.adminHost;
+    if (!adminHost) {
+      res.status(503).json({ message: "Control Plane not configured. Set JOINCLOUD_ADMIN_HOST." });
+      return;
+    }
+    const paths = getActivationPaths();
+    if (!paths) {
+      res.status(503).json({ message: "Activation not available in this environment." });
+      return;
+    }
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      res.status(400).json({ message: "Email and password required" });
+      return;
+    }
+    controlPlanePost(adminHost, "/api/v1/auth/register", { email, password }, null, async (err, result) => {
+      if (err) {
+        logger.warn("auth register proxy error", { error: err.message });
+        res.status(502).json({ message: "Could not reach Control Plane" });
+        return;
+      }
+      if (result.statusCode !== 201 || !result.data.token) {
+        res.status(result.statusCode || 400).json(result.data || { message: "Registration failed" });
+        return;
+      }
+      try {
+        await fs.mkdir(paths.systemDir, { recursive: true });
+        await fs.writeFile(paths.authPath, JSON.stringify({ token: result.data.token }, null, 2), "utf8");
+      } catch (e) {
+        logger.error("write auth.json failed", { error: e.message });
+        res.status(500).json({ message: "Failed to save session" });
+        return;
+      }
+      res.status(201).json(result.data);
+    });
+  });
+
+  app.post("/api/auth/login", async (req, res) => {
+    const adminHost = config.telemetry.adminHost;
+    if (!adminHost) {
+      res.status(503).json({ message: "Control Plane not configured. Set JOINCLOUD_ADMIN_HOST." });
+      return;
+    }
+    const paths = getActivationPaths();
+    if (!paths) {
+      res.status(503).json({ message: "Activation not available in this environment." });
+      return;
+    }
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      res.status(400).json({ message: "Email and password required" });
+      return;
+    }
+    controlPlanePost(adminHost, "/api/v1/auth/login", { email, password }, null, async (err, result) => {
+      if (err) {
+        logger.warn("auth login proxy error", { error: err.message });
+        res.status(502).json({ message: "Could not reach Control Plane" });
+        return;
+      }
+      if (result.statusCode !== 200 || !result.data.token) {
+        res.status(result.statusCode || 401).json(result.data || { message: "Login failed" });
+        return;
+      }
+      try {
+        await fs.mkdir(paths.systemDir, { recursive: true });
+        await fs.writeFile(paths.authPath, JSON.stringify({ token: result.data.token }, null, 2), "utf8");
+      } catch (e) {
+        logger.error("write auth.json failed", { error: e.message });
+        res.status(500).json({ message: "Failed to save session" });
+        return;
+      }
+      res.json(result.data);
+    });
+  });
+
+  app.post("/api/license/activate", async (req, res) => {
+    const adminHost = config.telemetry.adminHost;
+    if (!adminHost) {
+      res.status(503).json({ message: "Control Plane not configured. Set JOINCLOUD_ADMIN_HOST." });
+      return;
+    }
+    const paths = getActivationPaths();
+    if (!paths) {
+      res.status(503).json({ message: "Activation not available in this environment." });
+      return;
+    }
+    const hostUuid = getHostUuidForConfig();
+    if (!hostUuid) {
+      res.status(400).json({ message: "Device not registered. Restart the app and try again." });
+      return;
+    }
+    controlPlanePost(adminHost, "/api/v1/license/activate-device", { host_uuid: hostUuid }, null, async (err, result) => {
+      if (err) {
+        logger.warn("license activate proxy error", { error: err.message });
+        res.status(502).json({ message: "Could not reach Control Plane" });
+        return;
+      }
+      if (result.statusCode !== 200) {
+        res.status(result.statusCode || 403).json(result.data || { message: "Activation failed" });
+        return;
+      }
+      const license = result.data;
+      if (!license || !license.license_id) {
+        res.status(502).json({ message: "Invalid license response" });
+        return;
+      }
+      try {
+        await fs.writeFile(paths.licensePath, JSON.stringify(license, null, 2), "utf8");
+      } catch (e) {
+        logger.error("write license.json failed", { error: e.message });
+        res.status(500).json({ message: "Failed to save license" });
+        return;
+      }
+      controlPlaneConfigCache = {
+        license: { state: license.state || "active", ...license },
+        activation: { required: false },
+        telemetry: (controlPlaneConfigCache && controlPlaneConfigCache.telemetry) || {},
+      };
+      res.json(license);
+    });
+  });
+
+  app.get("/api/support/messages", (req, res) => {
+    const adminHost = config.telemetry.adminHost;
+    if (!adminHost) {
+      res.status(503).json({ message: "Control Plane not configured.", messages: [] });
+      return;
+    }
+    const deviceUUID = userConfig.user_id;
+    if (!deviceUUID) {
+      res.status(400).json({ message: "Device not identified.", messages: [] });
+      return;
+    }
+    controlPlaneGet(adminHost, `/api/messages/${encodeURIComponent(deviceUUID)}`, (err, result) => {
+      if (err) {
+        logger.warn("support messages proxy error", { error: err.message });
+        res.status(502).json({ message: "Could not reach Control Plane.", messages: [] });
+        return;
+      }
+      const messages = result.data?.messages ?? [];
+      res.json({ messages });
+    });
+  });
+
+  app.post("/api/support/send", (req, res) => {
+    const adminHost = config.telemetry.adminHost;
+    if (!adminHost) {
+      res.status(503).json({ message: "Control Plane not configured." });
+      return;
+    }
+    const deviceUUID = userConfig.user_id;
+    if (!deviceUUID) {
+      res.status(400).json({ message: "Device not identified." });
+      return;
+    }
+    const text = req.body?.text != null ? String(req.body.text).trim() : "";
+    if (!text) {
+      res.status(400).json({ message: "Message text required." });
+      return;
+    }
+    controlPlanePost(adminHost, `/api/messages/${encodeURIComponent(deviceUUID)}/reply`, { sender: "device", text }, null, (err, result) => {
+      if (err) {
+        logger.warn("support send proxy error", { error: err.message });
+        res.status(502).json({ message: "Could not reach Control Plane." });
+        return;
+      }
+      if (result.statusCode < 200 || result.statusCode >= 300) {
+        res.status(result.statusCode || 500).json(result.data || { message: "Send failed." });
+        return;
+      }
+      res.status(201).json(result.data || {});
+    });
   });
 
   app.get("/api/v1/build", (_req, res) => {
@@ -1258,6 +1710,38 @@ async function bootstrap() {
     }
   });
 
+  app.delete("/api/files", async (req, res) => {
+    try {
+      const access = getRequestContext(req);
+      if (access.role !== "host" && !access.is_admin) {
+        res.status(403).json({ error: "Only the host can delete files." });
+        return;
+      }
+      const requestedPath = req.query.path || req.body?.path;
+      if (requestedPath == null || String(requestedPath).trim() === "") {
+        res.status(400).json({ error: "path is required" });
+        return;
+      }
+      const resolvedPath = resolveOwnerPath(config.storage.ownerRoot, toPosixPath(String(requestedPath).trim()));
+      const stats = await fs.stat(resolvedPath);
+      if (stats.isFile()) {
+        await fs.unlink(resolvedPath);
+      } else if (stats.isDirectory()) {
+        await fs.rm(resolvedPath, { recursive: true, force: true });
+      } else {
+        res.status(400).json({ error: "Unsupported entry type" });
+        return;
+      }
+      res.status(200).json({ success: true });
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        res.status(404).json({ error: "Not found" });
+        return;
+      }
+      res.status(400).json({ error: error.message || "Delete failed" });
+    }
+  });
+
   app.get("/api/v1/file/content", async (req, res) => {
     try {
       const requestedPath = req.query.path || "/";
@@ -1506,6 +1990,10 @@ async function bootstrap() {
             accessControl.incrementDeviceStat(access.fingerprint, "uploads", stored.length).catch(() => {});
           }
           runtimeTelemetry.increment("total_uploads", stored.length);
+          runtimeTelemetry.increment("bytes_uploaded", totalBytes);
+          if (usageAggregation && typeof usageAggregation.recordTransferActivity === "function") {
+            usageAggregation.recordTransferActivity();
+          }
           telemetry.trackEvent("file_uploaded", {
             user_id: userConfig.user_id,
             count: stored.length,
@@ -1708,13 +2196,239 @@ async function bootstrap() {
   });
 
   app.get("/api/v1/telemetry/settings", (_req, res) => {
-    res.json({ enabled: !!userConfig.telemetry_enabled });
+    const cp = getControlPlaneConfig();
+    const configurableByUser = cp?.telemetry?.configurable_by_user !== false;
+    res.json({
+      enabled: !!userConfig.telemetry_enabled,
+      configurable_by_user: configurableByUser,
+    });
+  });
+
+  app.get("/api/v1/control-plane-config", (req, res) => {
+    const hostUuidForCfg = getHostUuidForConfig ? getHostUuidForConfig() : null;
+    const adminHost = config.telemetry?.adminHost;
+
+    function sendResponse(cp) {
+      const out = cp || { license: {}, activation: {}, telemetry: {} };
+      out.upgrade_url = process.env.JOINCLOUD_UPGRADE_URL || "";
+      out.web_url = process.env.JOINCLOUD_WEB_URL || "https://joincloud.com";
+      const cached = getControlPlaneConfig();
+      if (cached && cached.subscription) out.subscription = cached.subscription;
+      if (hostUuidForCfg) out.host_uuid = hostUuidForCfg;
+      if (out.license && out.license.account_id) out.account_id = out.license.account_id;
+      if (out.license && out.license.account_email) out.account_email = out.license.account_email;
+      if (cached && cached.account_email) out.account_email = out.account_email || cached.account_email;
+      if (cached && cached.account_id) out.account_id = out.account_id || cached.account_id;
+      tryRefreshLicense();
+      refreshLicenseFromControlPlane(hostUuidForCfg);
+      res.json(out);
+    }
+
+    function applyConfigFromControlPlane() {
+      let cp = getControlPlaneConfig();
+      if (!cp || !cp.license || !cp.license.state) {
+        const paths = getActivationPaths();
+        if (paths && fsSync.existsSync(paths.licensePath)) {
+          try {
+            const raw = fsSync.readFileSync(paths.licensePath, "utf8");
+            const license = JSON.parse(raw);
+            cp = {
+              license: { state: license.state || "active", ...license },
+              activation: { required: false },
+              telemetry: (cp && cp.telemetry) || {},
+            };
+          } catch (_) {}
+        }
+      }
+      return cp;
+    }
+
+    // When we have host_uuid and Control Plane, fetch config on-demand so activation persists across restarts
+    if (adminHost && hostUuidForCfg && hostUuidForCfg.length >= 8 && hostUuidForCfg.length <= 128) {
+      controlPlaneGet(adminHost, `/api/v1/config?host_uuid=${encodeURIComponent(hostUuidForCfg)}`, (err, result) => {
+        if (!err && result && result.statusCode === 200 && result.data) {
+          if (result.data.logout_requested) {
+            const paths = getActivationPaths();
+            if (paths) {
+              try {
+                if (fsSync.existsSync(paths.authPath)) fsSync.unlinkSync(paths.authPath);
+                if (fsSync.existsSync(paths.licensePath)) fsSync.unlinkSync(paths.licensePath);
+              } catch (e) {
+                logger && logger.warn("logout_requested cleanup failed", { error: e.message });
+              }
+            }
+            controlPlaneConfigCache = null;
+            sendResponse({ license: {}, activation: { required: true }, telemetry: {} });
+            return;
+          }
+          if (result.data.license && result.data.license.state && result.data.license.state !== "UNREGISTERED") {
+            controlPlaneConfigCache = {
+              license: result.data.license || {},
+              activation: result.data.activation || {},
+              telemetry: result.data.telemetry || {},
+              subscription: result.data.subscription || null,
+              account_id: result.data.account_id || null,
+              account_email: result.data.account_email || null,
+            };
+            sendResponse(controlPlaneConfigCache);
+            return;
+          }
+        }
+        const cp = applyConfigFromControlPlane();
+        sendResponse(cp);
+      });
+      return;
+    }
+
+    let cp = getControlPlaneConfig();
+    if (!cp || !cp.license || !cp.license.state) {
+      const paths = getActivationPaths();
+      if (paths && fsSync.existsSync(paths.licensePath)) {
+        try {
+          const raw = fsSync.readFileSync(paths.licensePath, "utf8");
+          const license = JSON.parse(raw);
+          cp = {
+            license: { state: license.state || "active", ...license },
+            activation: { required: false },
+            telemetry: (cp && cp.telemetry) || {},
+          };
+        } catch (_) {}
+      }
+    }
+    sendResponse(cp);
+  });
+
+  // Desktop auth: verify one-time token from website deep-link flow
+  app.post("/api/desktop/verify", (req, res) => {
+    const adminHost = config.telemetry.adminHost;
+    if (!adminHost) {
+      res.status(503).json({ message: "Control Plane not configured" });
+      return;
+    }
+    const token = req.body && typeof req.body.token === "string" ? req.body.token : null;
+    if (!token) {
+      res.status(400).json({ message: "token required" });
+      return;
+    }
+    controlPlanePost(adminHost, "/api/desktop/verify", { token }, null, (err, result) => {
+      if (err) {
+        res.status(502).json({ message: "Could not reach Control Plane" });
+        return;
+      }
+      if (result.statusCode !== 200) {
+        res.status(result.statusCode || 401).json(result.data || { message: "Token invalid or expired" });
+        return;
+      }
+      const data = result.data || {};
+      try {
+        const systemDir = require("path").join(
+          process.env.JOINCLOUD_USER_DATA || require("os").homedir(),
+          "JoinCloud", "system"
+        );
+        const fsSync = require("fs");
+        if (!fsSync.existsSync(systemDir)) fsSync.mkdirSync(systemDir, { recursive: true });
+        if (data.jwt) {
+          fsSync.writeFileSync(require("path").join(systemDir, "auth.json"), JSON.stringify({ token: data.jwt }, null, 2), "utf8");
+        }
+        if (data.license && typeof data.license === "object") {
+          const licenseToSave = { ...data.license };
+          if (data.email) licenseToSave.account_email = data.email;
+          fsSync.writeFileSync(require("path").join(systemDir, "license.json"), JSON.stringify(licenseToSave, null, 2), "utf8");
+          controlPlaneConfigCache = {
+            license: { state: data.license.state || "active", ...licenseToSave },
+            activation: { required: false },
+            telemetry: (controlPlaneConfigCache && controlPlaneConfigCache.telemetry) || {},
+            account_email: data.email || (controlPlaneConfigCache && controlPlaneConfigCache.account_email) || null,
+            account_id: data.account_id || (controlPlaneConfigCache && controlPlaneConfigCache.account_id) || null,
+          };
+        }
+      } catch (_) {}
+      res.json(data);
+    });
+  });
+
+  app.post("/api/v1/auth/logout", (req, res) => {
+    const fromLocalhost = isLocalhostRequest(req);
+    const hostHeader = (req.get && req.get("host")) || (req.headers && req.headers.host) || "";
+    const hostIsLocal = typeof hostHeader === "string" && (hostHeader.includes("127.0.0.1") || hostHeader.includes("localhost"));
+    if (!fromLocalhost && !hostIsLocal) {
+      res.status(403).json({ message: "Logout is only allowed from the local app" });
+      return;
+    }
+    const paths = getActivationPaths();
+    if (paths) {
+      try {
+        const fsSync = require("fs");
+        if (fsSync.existsSync(paths.authPath)) fsSync.unlinkSync(paths.authPath);
+        if (fsSync.existsSync(paths.licensePath)) fsSync.unlinkSync(paths.licensePath);
+      } catch (e) {
+        logger && logger.warn("logout file cleanup failed", { error: e.message });
+      }
+    }
+    controlPlaneConfigCache = null;
+    res.json({ success: true });
+  });
+
+  app.get("/api/v1/billing/invoices", (req, res) => {
+    const adminHost = config.telemetry.adminHost;
+    if (!adminHost) {
+      res.status(503).json({ message: "Control Plane not configured" });
+      return;
+    }
+    const hostUuid = getHostUuidForConfig();
+    if (!hostUuid) {
+      res.status(400).json({ message: "Device not registered" });
+      return;
+    }
+    const path = `/api/v1/billing/invoices?host_uuid=${encodeURIComponent(hostUuid)}`;
+    controlPlaneGet(adminHost, path, (err, result) => {
+      if (err) {
+        res.status(502).json({ message: "Could not reach Control Plane" });
+        return;
+      }
+      if (result.statusCode !== 200) {
+        res.status(result.statusCode || 502).json(result.data || { message: "Failed to load invoice history" });
+        return;
+      }
+      res.json(Array.isArray(result.data) ? result.data : []);
+    });
+  });
+
+  app.post("/api/v1/billing/portal", (req, res) => {
+    const adminHost = config.telemetry.adminHost;
+    if (!adminHost) {
+      res.status(503).json({ message: "Control Plane not configured" });
+      return;
+    }
+    const hostUuid = getHostUuidForConfig();
+    if (!hostUuid) {
+      res.status(400).json({ message: "Device not registered" });
+      return;
+    }
+    const returnUrl = req.body && typeof req.body.return_url === "string" ? req.body.return_url : undefined;
+    const body = returnUrl ? { host_uuid: hostUuid, return_url: returnUrl } : { host_uuid: hostUuid };
+    controlPlanePost(adminHost, "/api/v1/billing/portal", body, null, (err, result) => {
+      if (err) {
+        res.status(502).json({ message: "Could not reach Control Plane" });
+        return;
+      }
+      if (result.statusCode !== 200) {
+        res.status(result.statusCode || 400).json(result.data || { message: "Billing portal unavailable" });
+        return;
+      }
+      res.json(result.data || {});
+    });
   });
 
   app.post("/api/v1/telemetry/settings", async (req, res) => {
     const access = getRequestContext(req);
     if (access.role !== "host") {
       res.status(403).json({ error: "remote_devices_cannot_modify_host_settings" });
+      return;
+    }
+    const cp = getControlPlaneConfig();
+    if (cp?.telemetry?.configurable_by_user === false) {
+      res.status(403).json({ error: "telemetry_setting_controlled_by_admin" });
       return;
     }
     const enabled = !!req.body?.enabled;
@@ -1825,11 +2539,14 @@ async function bootstrap() {
     }
   });
 
-  const shutdown = () => {
+  const shutdown = async () => {
     expiryManager.stop();
     tunnelManager.stop();
     telemetrySync.flush().catch(() => {});
     telemetrySync.stop();
+    if (usageAggregation && typeof usageAggregation.stop === "function") {
+      await usageAggregation.stop().catch(() => {});
+    }
     stopDiscovery();
     stopBroadcast();
     bonjour.destroy();

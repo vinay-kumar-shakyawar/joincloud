@@ -17,6 +17,7 @@
     "prebuild:win": "npm run rebuild:server && npm run build:icon:win"
   },
   "dependencies": {
+    "dotenv": "^16.4.5",
     "archiver": "^7.0.1",
     "busboy": "^1.6.0",
     "bonjour": "^3.5.1",

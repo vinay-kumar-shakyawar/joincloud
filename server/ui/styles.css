@@ -34,6 +34,58 @@ body {
   background: var(--surface);
 }
 
+.grace-banner {
+  padding: 10px 24px;
+  background: rgba(245, 158, 11, 0.15);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.4);
+  color: var(--foreground);
+  font-size: 14px;
+}
+
+#settings-profile-email {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.subscription-card {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.subscription-card .subscription-title {
+  margin: 0 0 4px 0;
+  font-size: 1rem;
+}
+
+.billing-summary { }
+.billing-invoices-wrap { }
+.billing-invoices-title {
+  margin: 0 0 12px 0;
+  font-size: 1rem;
+}
+.billing-invoices-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.billing-invoices-table th,
+.billing-invoices-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.billing-invoices-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+.billing-invoices-table tbody tr:hover {
+  background: var(--surface-elevated);
+}
+.billing-invoices-empty {
+  padding: 16px 0;
+}
+
 .menu-toggle {
   display: none;
   min-width: 40px;
@@ -688,6 +740,74 @@ body {
   word-break: break-all;
 }
 
+.activation-block {
+  margin-bottom: 20px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.activation-block .label { margin-top: 12px; }
+.activation-block .label:first-of-type { margin-top: 0; }
+
+.activation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.support-chat {
+  margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 280px;
+}
+
+.support-messages {
+  flex: 1;
+  min-height: 220px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.support-message {
+  padding: 10px 12px;
+  border-radius: 10px;
+  max-width: 85%;
+  word-break: break-word;
+  font-size: 14px;
+}
+
+.support-message.device {
+  align-self: flex-end;
+  background: var(--primary);
+  color: var(--bg);
+}
+
+.support-message.admin {
+  align-self: flex-start;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+}
+
+.support-send-row {
+  display: flex;
+  gap: 10px;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.support-send-row .input {
+  flex: 1;
+}
+
 #share-ttl-custom {
   display: none;
 }
@@ -931,4 +1051,33 @@ h3 {
   .name-input-group {
     grid-template-columns: 72px minmax(0, 1fr);
   }
+}
+
+/* Settings profile card status badges */
+.settings-profile-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: 99px;
+  background: rgba(161, 161, 170, 0.18);
+  color: var(--muted, #888);
+}
+.settings-profile-badge.badge-active {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+}
+.settings-profile-badge.badge-trial {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+.settings-profile-badge.badge-grace {
+  background: rgba(234, 179, 8, 0.15);
+  color: #ca8a04;
+}
+.settings-profile-badge.badge-expired {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
 }

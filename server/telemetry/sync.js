@@ -1,14 +1,18 @@
 const https = require("https");
+const http = require("http");
 const { URL } = require("url");
 
 function postTelemetry(adminHost, payload) {
   return new Promise((resolve, reject) => {
-    const url = new URL(`https://${adminHost}/api/v1/telemetry`);
+    const base = adminHost.indexOf("://") === -1 ? `https://${adminHost}` : adminHost;
+    const url = new URL("/api/v1/telemetry", base);
     const data = JSON.stringify(payload);
-    const req = https.request(
+    const lib = url.protocol === "https:" ? https : http;
+    const req = lib.request(
       {
         method: "POST",
         hostname: url.hostname,
+        port: url.port || (url.protocol === "https:" ? 443 : 80),
         path: url.pathname,
         headers: {
           "Content-Type": "application/json",
@@ -54,12 +58,13 @@ function createTelemetrySync({
     const rows = await telemetryStore.listDailyMetrics(sinceDate);
     if (!rows.length) return;
 
+    const platform = process.platform === "win32" ? "Windows" : process.platform === "darwin" ? "macOS" : process.platform === "linux" ? "Linux" : process.platform;
     for (const row of rows) {
       const payload = {
         user_id: userConfig.user_id,
         date: row.date,
         app_version: appVersion,
-        os: "macOS",
+        os: platform,
         uptime_seconds: row.uptime_seconds || 0,
         metrics: {
           files_uploaded: row.files_uploaded || 0,

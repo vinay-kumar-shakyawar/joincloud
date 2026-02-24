@@ -16,10 +16,16 @@ console.log(`[joincloud-electron-launcher] binary=${electronBinary}`);
 console.log(`[joincloud-electron-launcher] appRoot=${appRoot}`);
 console.log(`[joincloud-electron-launcher] args=${JSON.stringify(args)}`);
 
-const proc = spawn(electronBinary, args, {
+const spawnOptions = {
   stdio: "inherit",
   env,
-});
+};
+// On Windows, .cmd files must be run in a shell or spawn fails with EINVAL
+if (process.platform === "win32") {
+  spawnOptions.shell = true;
+}
+
+const proc = spawn(electronBinary, args, spawnOptions);
 
 proc.on("exit", (code, signal) => {
   if (signal) {

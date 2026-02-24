@@ -15,11 +15,29 @@ const state = {
   deviceId: null,
   deviceName: null,
   deviceFolderRel: null,
+  licenseState: null,
+  licenseGraceEndsAt: null,
+  licenseTier: null,
+  licenseExpiresAt: null,
+  licenseDeviceLimit: null,
+  activationRequired: false,
+  upgradeUrl: "",
+  subscription: null,
+  supportMessages: [],
+  accountId: null,
+  hostUuidFromConfig: null,
+  accountEmail: null,
+  displayName: "Join",
 };
 
 const els = {
   appLayout: document.getElementById("app-layout"),
   accessGate: document.getElementById("access-gate"),
+  activationGate: document.getElementById("activation-gate"),
+  activationGateSigninWeb: document.getElementById("activation-gate-signin-web"),
+  activationGateMessage: document.getElementById("activation-gate-message"),
+  activationGateUpgradeWrap: document.getElementById("activation-gate-upgrade-wrap"),
+  activationGateUpgradeLink: document.getElementById("activation-gate-upgrade-link"),
   accessDeviceNameInput: document.getElementById("access-device-name-input"),
   accessFingerprint: document.getElementById("access-fingerprint"),
   accessStatus: document.getElementById("access-status"),
@@ -100,10 +118,42 @@ const els = {
   downloadPrivacyPolicy: document.getElementById("download-privacy-policy"),
   privacyPolicyContent: document.getElementById("privacy-policy-content"),
   buildId: document.getElementById("build-id"),
+  graceBanner: document.getElementById("grace-banner"),
+  graceEndsDate: document.getElementById("grace-ends-date"),
+  settingsProfileRow: document.getElementById("settings-profile-row"),
+  settingsProfileValue: document.getElementById("settings-profile-value"),
+  settingsProfileCard: document.getElementById("settings-profile-card"),
+  settingsProfileEmail: document.getElementById("settings-profile-email"),
+  settingsProfilePlan: document.getElementById("settings-profile-plan"),
+  settingsProfileStatus: document.getElementById("settings-profile-status"),
+  settingsProfileDeviceLimit: document.getElementById("settings-profile-device-limit"),
+  settingsProfileExpiry: document.getElementById("settings-profile-expiry"),
+  subscriptionCard: document.getElementById("subscription-card"),
+  subscriptionPlan: document.getElementById("subscription-plan"),
+  subscriptionStatus: document.getElementById("subscription-status"),
+  subscriptionRenewal: document.getElementById("subscription-renewal"),
+  subscriptionManageBtn: document.getElementById("subscription-manage-btn"),
+  subscriptionUpgradeLink: document.getElementById("subscription-upgrade-link"),
+  subscriptionOpenDashboardLink: document.getElementById("subscription-open-dashboard-link"),
+  settingsOpenDashboardLink: document.getElementById("settings-open-dashboard-link"),
+  settingsLogout: document.getElementById("settings-logout"),
   previewModal: document.getElementById("preview-modal"),
   closePreviewModal: document.getElementById("close-preview-modal"),
   previewTitle: document.getElementById("preview-title"),
   previewBody: document.getElementById("preview-body"),
+  activationBlock: document.getElementById("activation-block"),
+  activationEmail: document.getElementById("activation-email"),
+  activationPassword: document.getElementById("activation-password"),
+  activationRegister: document.getElementById("activation-register"),
+  activationLogin: document.getElementById("activation-login"),
+  activationActivate: document.getElementById("activation-activate"),
+  activationSigninWeb: document.getElementById("activation-signin-web"),
+  activationMessage: document.getElementById("activation-message"),
+  activationUpgradeWrap: document.getElementById("activation-upgrade-wrap"),
+  activationUpgradeLink: document.getElementById("activation-upgrade-link"),
+  supportMessages: document.getElementById("support-messages"),
+  supportMessageInput: document.getElementById("support-message-input"),
+  supportSend: document.getElementById("support-send"),
 };
 
 const stateMeta = {
@@ -127,6 +177,18 @@ function getOrCreateFingerprint() {
 
 function setHeaderDisplayName(value) {
   els.headerDisplayName.textContent = value && value.trim() ? value : "Join";
+}
+
+function updateHeaderProfile() {
+  if (!els.headerDisplayName) return;
+  if (state.accountEmail && state.accountEmail.trim()) {
+    els.headerDisplayName.textContent = state.accountEmail.trim();
+    els.headerDisplayName.title = "Signed in as " + state.accountEmail.trim();
+  } else {
+    const name = (state.displayName && state.displayName.trim()) ? state.displayName.trim() : "Join";
+    els.headerDisplayName.textContent = name;
+    els.headerDisplayName.title = state.accountId ? "Account: " + (state.accountId || "").slice(0, 16) + "…" : "";
+  }
 }
 
 function displayNameToSuffix(fullName) {
@@ -194,14 +256,40 @@ async function apiFetch(url, options = {}, allowUnauthorized = false) {
 
 function showAccessGate(statusText) {
   els.appLayout.style.display = "none";
+  if (els.activationGate) els.activationGate.style.display = "none";
   els.accessGate.style.display = "grid";
   els.accessStatus.textContent = statusText || "Waiting to request access.";
   state.accessRole = "pending";
   updateAdminUi();
 }
 
+function showActivationGate() {
+  els.accessGate.style.display = "none";
+  els.appLayout.style.display = "none";
+  if (els.activationGate) els.activationGate.style.display = "grid";
+  setActivationGateMessage("");
+  var webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+  var deviceId = state.hostUuidFromConfig || state.deviceId || "";
+  var accountId = state.accountId || "";
+  var billingParams = new URLSearchParams();
+  if (accountId) billingParams.set("accountId", accountId);
+  if (deviceId) billingParams.set("deviceId", deviceId);
+  var billingUrl = billingParams.toString() ? `${webUrl}/billing?${billingParams.toString()}` : (state.upgradeUrl || `${webUrl}/billing`);
+  if (els.activationGateUpgradeWrap) {
+    els.activationGateUpgradeWrap.style.display = "block";
+    if (els.activationGateUpgradeLink) els.activationGateUpgradeLink.href = billingUrl;
+  }
+}
+
+function setActivationGateMessage(text, isError) {
+  if (!els.activationGateMessage) return;
+  els.activationGateMessage.textContent = text || "";
+  els.activationGateMessage.style.color = isError ? "#ef4444" : "";
+}
+
 function showMainApp() {
   els.accessGate.style.display = "none";
+  if (els.activationGate) els.activationGate.style.display = "none";
   els.appLayout.style.display = "grid";
 }
 
@@ -396,6 +484,27 @@ function renderFiles() {
       shareButton.textContent = "Share";
       shareButton.onclick = () => openShareModal(item.path);
       row.appendChild(shareButton);
+    }
+    if (isHostRole()) {
+      const deleteButton = document.createElement("button");
+      deleteButton.className = "button secondary";
+      deleteButton.textContent = "Delete";
+      deleteButton.onclick = async () => {
+        const label = item.type === "folder" ? "folder" : "file";
+        if (!confirm(`Delete this ${label} "${item.name}"? This cannot be undone.`)) return;
+        try {
+          const res = await apiFetch(`/api/files?path=${encodeURIComponent(item.path)}`, { method: "DELETE" });
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            alert(data.error || "Delete failed.");
+            return;
+          }
+          await loadFiles(state.path);
+        } catch (_) {
+          alert("Delete failed.");
+        }
+      };
+      row.appendChild(deleteButton);
     }
     els.fileList.appendChild(row);
   });
@@ -718,6 +827,236 @@ async function loadBuildInfo() {
   }
 }
 
+async function loadControlPlaneConfig() {
+  try {
+    const res = await fetch("/api/v1/control-plane-config");
+    if (!res.ok) return;
+    const data = await res.json();
+    state.licenseState = data.license?.state || null;
+    state.licenseGraceEndsAt = data.license?.grace_ends_at ?? null;
+    state.licenseTier = data.license?.tier ?? null;
+    state.licenseExpiresAt = data.license?.expires_at ?? null;
+    state.licenseDeviceLimit = data.license?.device_limit ?? null;
+    state.activationRequired = data.activation?.required === true;
+    state.upgradeUrl = data.upgrade_url || "";
+    state.subscription = data.subscription || null;
+    if (data.web_url) window.__JOINCLOUD_WEB_URL__ = data.web_url;
+    if (data.account_id) state.accountId = data.account_id;
+    if (data.host_uuid) state.hostUuidFromConfig = data.host_uuid;
+    if (data.account_email) state.accountEmail = data.account_email;
+    updateGraceBanner();
+    updateSubscriptionSection();
+    updateHeaderProfile();
+  } catch (_) {}
+}
+
+function updateGraceBanner() {
+  if (!els.graceBanner) return;
+  var bannerText = document.getElementById("grace-banner-text");
+  var bannerUpgrade = document.getElementById("grace-banner-upgrade");
+
+  if (state.licenseState === "grace" && state.licenseGraceEndsAt) {
+    els.graceBanner.style.display = "block";
+    var d = new Date(state.licenseGraceEndsAt * 1000);
+    if (els.graceEndsDate) els.graceEndsDate.textContent = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    if (bannerText) bannerText.innerHTML = "Payment issue \u2013 please update your payment method. Full access until <span id=\"grace-ends-date\">" + d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) + "</span>.";
+    if (bannerUpgrade) bannerUpgrade.style.display = "none";
+    return;
+  }
+
+  if (state.licenseState === "trial_active" && state.licenseExpiresAt) {
+    var now = Math.floor(Date.now() / 1000);
+    var remaining = state.licenseExpiresAt - now;
+    var daysLeft = Math.ceil(remaining / 86400);
+    if (daysLeft <= 3 && daysLeft > 0) {
+      els.graceBanner.style.display = "block";
+      if (bannerText) bannerText.textContent = "Your free trial expires in " + daysLeft + " day" + (daysLeft !== 1 ? "s" : "") + ". Upgrade to keep using JoinCloud.";
+      if (bannerUpgrade) {
+        bannerUpgrade.style.display = "inline";
+        var webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+        var params = new URLSearchParams();
+        if (state.accountId) params.set("accountId", state.accountId);
+        if (state.hostUuidFromConfig || state.deviceId) params.set("deviceId", state.hostUuidFromConfig || state.deviceId);
+        bannerUpgrade.href = webUrl + "/billing?" + params.toString();
+      }
+      return;
+    }
+  }
+
+  if (state.licenseState === "expired") {
+    els.graceBanner.style.display = "block";
+    if (bannerText) bannerText.textContent = "Your plan has expired. Upgrade to restore full access.";
+    if (bannerUpgrade) {
+      bannerUpgrade.style.display = "inline";
+      var webUrl2 = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+      var params2 = new URLSearchParams();
+      if (state.accountId) params2.set("accountId", state.accountId);
+      if (state.hostUuidFromConfig || state.deviceId) params2.set("deviceId", state.hostUuidFromConfig || state.deviceId);
+      bannerUpgrade.href = webUrl2 + "/billing?" + params2.toString();
+    }
+    return;
+  }
+
+  els.graceBanner.style.display = "none";
+}
+
+function updateSubscriptionSection() {
+  const hasLicense = state.licenseState && state.licenseState !== "UNREGISTERED";
+
+  // Populate the richer profile card in Settings
+  if (els.settingsProfileCard) {
+    if (hasLicense) {
+      els.settingsProfileCard.style.display = "block";
+      const emailDisplay = (state.accountEmail && state.accountEmail.trim())
+        ? state.accountEmail.trim()
+        : (state.accountId ? "Account: " + state.accountId.slice(0, 16) + "…" : "Device account");
+      if (els.settingsProfileEmail) els.settingsProfileEmail.textContent = emailDisplay;
+
+      const planDisplay = (state.licenseTier || "trial").replace(/^./, (c) => c.toUpperCase());
+      if (els.settingsProfilePlan) els.settingsProfilePlan.textContent = planDisplay;
+
+      const rawStatus = state.licenseState || "—";
+      const statusDisplay = String(rawStatus).replace(/_/g, " ");
+      if (els.settingsProfileStatus) {
+        els.settingsProfileStatus.textContent = statusDisplay;
+        els.settingsProfileStatus.className = "settings-profile-badge " + (
+          rawStatus === "active" ? "badge-active" :
+          rawStatus === "trial_active" ? "badge-trial" :
+          rawStatus === "grace" ? "badge-grace" : "badge-expired"
+        );
+      }
+
+      const limit = state.licenseDeviceLimit;
+      if (els.settingsProfileDeviceLimit) {
+        els.settingsProfileDeviceLimit.textContent = limit ? `${limit} device${limit !== 1 ? "s" : ""}` : "—";
+      }
+
+      let expiryDisplay = "—";
+      if (state.licenseExpiresAt) {
+        try {
+          const d = new Date(state.licenseExpiresAt * 1000);
+          expiryDisplay = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+        } catch (_) {}
+      }
+      if (els.settingsProfileExpiry) els.settingsProfileExpiry.textContent = expiryDisplay;
+    } else {
+      els.settingsProfileCard.style.display = "none";
+    }
+  }
+
+  // Legacy single-row profile — hide when the rich card is shown
+  if (els.settingsProfileRow && els.settingsProfileValue) {
+    if (hasLicense && !els.settingsProfileCard) {
+      els.settingsProfileRow.style.display = "block";
+      if (state.accountEmail && state.accountEmail.trim()) {
+        els.settingsProfileValue.textContent = "Signed in as " + state.accountEmail.trim();
+      } else {
+        const id = (state.accountId || state.hostUuidFromConfig || state.deviceId || "").slice(0, 24);
+        els.settingsProfileValue.textContent = id ? "Account: " + id + "…" : "Device account";
+      }
+    } else {
+      els.settingsProfileRow.style.display = "none";
+    }
+  }
+
+  if (!els.subscriptionCard) return;
+  if (!hasLicense) {
+    els.subscriptionCard.style.display = "none";
+    return;
+  }
+  els.subscriptionCard.style.display = "block";
+  const plan = (state.licenseTier || "trial").replace(/^./, (c) => c.toUpperCase());
+  if (els.subscriptionPlan) els.subscriptionPlan.textContent = plan;
+  const status = state.subscription?.status || state.licenseState || "—";
+  if (els.subscriptionStatus) els.subscriptionStatus.textContent = String(status).replace(/_/g, " ");
+  let renewalText = "—";
+  if (state.subscription?.renewal_at) {
+    try {
+      const r = state.subscription.renewal_at;
+      const d = typeof r === "string" ? new Date(r) : new Date(r * 1000);
+      renewalText = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    } catch (_) {}
+  } else if (state.licenseExpiresAt) {
+    try {
+      const d = new Date(state.licenseExpiresAt * 1000);
+      renewalText = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) + " (expires)";
+    } catch (_) {}
+  }
+  if (els.subscriptionRenewal) els.subscriptionRenewal.textContent = renewalText;
+  const showManage = !!(state.subscription && (state.subscription.status === "active" || state.subscription.status === "trialing" || state.subscription.status === "past_due"));
+  if (els.subscriptionManageBtn) {
+    els.subscriptionManageBtn.style.display = showManage ? "inline-flex" : "none";
+  }
+  const webUrlSub = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+  const accountIdSub = state.accountId || "";
+  const deviceIdSub = state.hostUuidFromConfig || state.deviceId || "";
+  const billingParamsSub = new URLSearchParams();
+  if (accountIdSub) billingParamsSub.set("accountId", accountIdSub);
+  if (deviceIdSub) billingParamsSub.set("deviceId", deviceIdSub);
+  const billingQuerySub = billingParamsSub.toString() ? `?${billingParamsSub.toString()}` : "";
+  const billingWebUrlSub = `${webUrlSub}/billing${billingQuerySub}`;
+  const showUpgrade = !!(state.licenseTier === "trial" || !state.subscription?.status);
+  if (els.subscriptionUpgradeLink) {
+    els.subscriptionUpgradeLink.style.display = showUpgrade ? "inline" : "none";
+    els.subscriptionUpgradeLink.href = accountIdSub ? billingWebUrlSub : (state.upgradeUrl || billingWebUrlSub);
+    els.subscriptionUpgradeLink.target = "_blank";
+    els.subscriptionUpgradeLink.rel = "noopener noreferrer";
+  }
+  const webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+  const accountIdSub2 = state.accountId || "";
+  const deviceIdSub2 = state.hostUuidFromConfig || state.deviceId || "";
+  const dashboardParams = new URLSearchParams();
+  if (accountIdSub2) dashboardParams.set("accountId", accountIdSub2);
+  if (deviceIdSub2) dashboardParams.set("deviceId", deviceIdSub2);
+  const dashboardUrl = `${webUrl}/dashboard${dashboardParams.toString() ? "?" + dashboardParams.toString() : ""}`;
+  if (els.subscriptionOpenDashboardLink) {
+    els.subscriptionOpenDashboardLink.style.display = hasLicense ? "inline" : "none";
+    els.subscriptionOpenDashboardLink.href = dashboardUrl;
+    els.subscriptionOpenDashboardLink.target = "_blank";
+    els.subscriptionOpenDashboardLink.rel = "noopener noreferrer";
+  }
+  if (els.settingsOpenDashboardLink) {
+    els.settingsOpenDashboardLink.href = dashboardUrl;
+    els.settingsOpenDashboardLink.target = "_blank";
+    els.settingsOpenDashboardLink.rel = "noopener noreferrer";
+  }
+}
+
+async function openBillingPortal() {
+  const btn = els.subscriptionManageBtn;
+  if (btn) btn.disabled = true;
+  try {
+    const returnUrl = window.location.origin + window.location.pathname;
+    const res = await apiFetch("/api/v1/billing/portal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ return_url: returnUrl }),
+    });
+    const data = await res.json();
+    if (res.ok && data.url) {
+      window.open(data.url, "_blank", "noopener,noreferrer");
+    } else {
+      const msg = data.message || "Could not open billing portal";
+      if (els.activationMessage) {
+        els.activationMessage.textContent = msg;
+        els.activationMessage.style.color = "#c00";
+      }
+    }
+  } catch (_) {
+    if (els.activationMessage) {
+      els.activationMessage.textContent = "Network error. Try again.";
+      els.activationMessage.style.color = "#c00";
+    }
+  }
+  if (els.subscriptionManageBtn) els.subscriptionManageBtn.disabled = false;
+}
+
+function canAddDeviceOrCreateShare() {
+  if (state.activationRequired || state.licenseState === "UNREGISTERED") return false;
+  if (state.licenseState === "expired" || state.licenseState === "revoked") return false;
+  return true;
+}
+
 async function fetchStatus() {
   const res = await apiFetch("/api/status");
   const data = await res.json();
@@ -726,6 +1065,7 @@ async function fetchStatus() {
   els.storageLabel.textContent = data.storageLabel || "Local storage";
   els.ownerMount.textContent = data.ownerBasePath;
   if (data.lanBaseUrl) stateMeta.lanBaseUrl = data.lanBaseUrl;
+  await loadControlPlaneConfig();
 }
 
 function updateHeaderStatus(running) {
@@ -810,7 +1150,8 @@ async function loadNetworkSettings() {
       body: JSON.stringify({ display_name: normalized }),
     });
   }
-  setHeaderDisplayName(normalized);
+  state.displayName = normalized;
+  updateHeaderProfile();
   els.networkNameSuffix.value = displayNameToSuffix(normalized);
   els.networkVisibility.checked = false;
   els.networkVisibility.disabled = true;
@@ -829,7 +1170,8 @@ async function saveNetworkName() {
   });
   const data = await res.json();
   const savedName = String(data.display_name || "Join");
-  setHeaderDisplayName(savedName);
+  state.displayName = savedName;
+  updateHeaderProfile();
   els.networkNameSuffix.value = displayNameToSuffix(savedName);
 }
 
@@ -837,6 +1179,18 @@ function openShareModal(pathValue) {
   els.shareResult.textContent = "";
   els.copyShare.style.display = "none";
   els.sharePath.value = pathValue;
+  const needActivation = !canAddDeviceOrCreateShare();
+  if (els.activationBlock) {
+    els.activationBlock.style.display = needActivation ? "block" : "none";
+  }
+  if (els.activationMessage) els.activationMessage.textContent = "";
+  const upgradeUrl = (state.upgradeUrl || "").trim();
+  if (els.activationUpgradeWrap) {
+    els.activationUpgradeWrap.style.display = needActivation && upgradeUrl ? "block" : "none";
+  }
+  if (els.activationUpgradeLink && upgradeUrl) {
+    els.activationUpgradeLink.href = upgradeUrl;
+  }
   els.shareModal.classList.add("active");
 }
 
@@ -844,7 +1198,92 @@ function closeShareModal() {
   els.shareModal.classList.remove("active");
 }
 
+function setActivationMessage(msg, isError) {
+  if (!els.activationMessage) return;
+  els.activationMessage.textContent = msg || "";
+  els.activationMessage.style.color = isError ? "#c00" : "";
+}
+
+async function activationRegister() {
+  const email = (els.activationEmail && els.activationEmail.value || "").trim();
+  const password = els.activationPassword && els.activationPassword.value;
+  if (!email || !password) {
+    setActivationMessage("Enter email and password.", true);
+    return;
+  }
+  setActivationMessage("Registering…");
+  try {
+    const res = await apiFetch("/api/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setActivationMessage(data.message || "Registration failed", true);
+      return;
+    }
+    setActivationMessage("Registered. Sign in on the web to link this device.");
+  } catch (e) {
+    setActivationMessage("Network error. Try again.", true);
+  }
+}
+
+async function activationLogin() {
+  const email = (els.activationEmail && els.activationEmail.value || "").trim();
+  const password = els.activationPassword && els.activationPassword.value;
+  if (!email || !password) {
+    setActivationMessage("Enter email and password.", true);
+    return;
+  }
+  setActivationMessage("Logging in…");
+  try {
+    const res = await apiFetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setActivationMessage(data.message || "Login failed", true);
+      return;
+    }
+    setActivationMessage("Logged in. Sign in on the web to link this device.");
+  } catch (e) {
+    setActivationMessage("Network error. Try again.", true);
+  }
+}
+
+async function activationActivate() {
+  setActivationMessage("Activating…");
+  try {
+    const res = await apiFetch("/api/license/activate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setActivationMessage(data.message || "Activation failed", true);
+      return;
+    }
+    setActivationMessage("Device activated. You can create shares now.");
+    await loadControlPlaneConfig();
+    if (els.activationBlock) els.activationBlock.style.display = "none";
+  } catch (e) {
+    setActivationMessage("Network error. Try again.", true);
+  }
+}
+
 async function createShare() {
+  if (!canAddDeviceOrCreateShare()) {
+    if (els.shareResult) {
+      els.shareResult.textContent = state.activationRequired || state.licenseState === "UNREGISTERED"
+        ? "Activate your account to create shares. You can still browse and use existing shares."
+        : "License expired. You can still use existing shares and LAN transfer.";
+    }
+    return;
+  }
   const pathValue = els.sharePath.value;
   const ttlSelection = els.shareTtl.value;
   if (ttlSelection === "custom" && !els.shareTtlCustom.value) {
@@ -1034,8 +1473,11 @@ async function loadPendingAccessRequests() {
     `;
     const approveBtn = document.createElement("button");
     approveBtn.className = "button";
-    approveBtn.textContent = "Approve";
+    const canApprove = canAddDeviceOrCreateShare();
+    approveBtn.disabled = !canApprove;
+    approveBtn.textContent = canApprove ? "Approve" : (state.licenseState === "expired" ? "License expired" : "Activate required");
     approveBtn.onclick = async () => {
+      if (!canAddDeviceOrCreateShare()) return;
       await apiFetch("/api/v1/access/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1206,6 +1648,61 @@ async function checkSessionAccess() {
   return res.json();
 }
 
+async function loadSupportMessages() {
+  try {
+    const res = await apiFetch("/api/support/messages");
+    const data = await res.json().catch(() => ({}));
+    state.supportMessages = Array.isArray(data.messages) ? data.messages : [];
+    renderSupportMessages();
+  } catch (_) {
+    state.supportMessages = [];
+    renderSupportMessages();
+  }
+}
+
+function renderSupportMessages() {
+  if (!els.supportMessages) return;
+  const list = state.supportMessages || [];
+  els.supportMessages.innerHTML = list.length === 0
+    ? "<div class=\"value value-muted\">No messages yet. Send a message to start the conversation.</div>"
+    : list.map((m) => {
+        const isDevice = (m.sender || "").toLowerCase() === "device";
+        const label = isDevice ? "You" : "Support";
+        const cls = isDevice ? "support-message device" : "support-message admin";
+        const time = m.timestamp ? new Date(m.timestamp).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "";
+        return `<div class="${cls}"><span class="value value-muted" style="font-size:11px">${label} ${time}</span><br/>${escapeHtml(m.text || "")}</div>`;
+      }).join("");
+  els.supportMessages.scrollTop = els.supportMessages.scrollHeight;
+}
+
+function escapeHtml(s) {
+  const div = document.createElement("div");
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+async function sendSupportMessage() {
+  if (!els.supportMessageInput) return;
+  const text = (els.supportMessageInput.value || "").trim();
+  if (!text) return;
+  try {
+    const res = await apiFetch("/api/support/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.message || "Failed to send message.");
+      return;
+    }
+    els.supportMessageInput.value = "";
+    await loadSupportMessages();
+  } catch (_) {
+    alert("Network error. Try again.");
+  }
+}
+
 async function bootstrapApp() {
   const session = await checkSessionAccess();
   if (!session || !session.authorized) {
@@ -1219,12 +1716,18 @@ async function bootstrapApp() {
   }
   state.isAdmin = session.role === "admin";
   state.accessRole = state.isAdmin ? "host" : "remote";
-  showMainApp();
   await loadAccessMe();
   updateAdminUi();
   await loadBuildInfo();
-
   await fetchStatus();
+
+  var needsActivation = state.activationRequired || state.licenseState === "UNREGISTERED";
+  if (needsActivation) {
+    showActivationGate();
+    return;
+  }
+
+  showMainApp();
   await loadRuntimeStatus();
   await loadCloudUrl();
   await loadFiles("/");
@@ -1241,6 +1744,32 @@ async function bootstrapApp() {
 
   const initial = window.location.hash.replace("#", "") || "home";
   setActiveSection(initial);
+
+  setInterval(() => {
+    if (document.querySelector(".section.active")?.dataset.section === "support") loadSupportMessages();
+  }, 8000);
+}
+
+async function continueBootstrapAfterActivation() {
+  showMainApp();
+  await loadRuntimeStatus();
+  await loadCloudUrl();
+  await loadFiles("/");
+  await loadShares();
+  await loadLogs();
+  await loadNetwork();
+  await loadTelemetrySettings();
+  await loadNetworkSettings();
+  await loadPrivacyPolicy();
+  await loadPendingAccessRequests();
+  await loadApprovedDevices();
+  await loadShareVisitSummary();
+  await loadActivitySummary();
+  const initial = window.location.hash.replace("#", "") || "home";
+  setActiveSection(initial);
+  setInterval(() => {
+    if (document.querySelector(".section.active")?.dataset.section === "support") loadSupportMessages();
+  }, 8000);
 }
 
 function setActiveSection(sectionId) {
@@ -1249,6 +1778,7 @@ function setActiveSection(sectionId) {
   if (window.location.hash !== `#${safeSection}`) window.location.hash = safeSection;
   els.sections.forEach((section) => section.classList.toggle("active", section.dataset.section === safeSection));
   els.navButtons.forEach((button) => button.classList.toggle("active", button.dataset.section === safeSection));
+  if (safeSection === "support") loadSupportMessages();
 }
 
 function updateAdminUi() {
@@ -1388,6 +1918,85 @@ if (els.refreshActivity) {
 els.closeModal.onclick = closeShareModal;
 els.cancelShare.onclick = closeShareModal;
 els.createShare.onclick = createShare;
+if (els.activationRegister) els.activationRegister.onclick = activationRegister;
+if (els.activationLogin) els.activationLogin.onclick = activationLogin;
+function getHostUuidForDesktopAuth() {
+  // Use real host UUID from config; never use "host" (that's the session role from access/me)
+  if (state.hostUuidFromConfig && state.hostUuidFromConfig.length >= 8 && state.hostUuidFromConfig.length <= 128) {
+    return state.hostUuidFromConfig;
+  }
+  if (state.deviceId && state.deviceId !== "host" && state.deviceId.length >= 8) {
+    return state.deviceId;
+  }
+  return "";
+}
+if (els.activationSigninWeb) {
+  els.activationSigninWeb.onclick = () => {
+    const hostUuid = getHostUuidForDesktopAuth();
+    const webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+    const loginUrl = hostUuid ? `${webUrl}/auth/desktop?deviceId=${encodeURIComponent(hostUuid)}` : `${webUrl}/auth/desktop`;
+    window.open(loginUrl, "_blank", "noopener,noreferrer");
+  };
+}
+if (els.activationGateSigninWeb) {
+  els.activationGateSigninWeb.onclick = () => {
+    const hostUuid = getHostUuidForDesktopAuth();
+    if (!hostUuid) {
+      setActivationGateMessage("Loading device ID… Try again in a moment, or restart the app.");
+      loadControlPlaneConfig().then(() => {
+        const retry = getHostUuidForDesktopAuth();
+        if (retry) {
+          setActivationGateMessage("Opening browser — sign in or create an account…");
+          const webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+          window.open(`${webUrl}/auth/desktop?deviceId=${encodeURIComponent(retry)}`, "_blank", "noopener,noreferrer");
+        }
+      });
+      return;
+    }
+    const webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+    const loginUrl = `${webUrl}/auth/desktop?deviceId=${encodeURIComponent(hostUuid)}`;
+    setActivationGateMessage("Opening browser — sign in or create an account…");
+    window.open(loginUrl, "_blank", "noopener,noreferrer");
+  };
+}
+if (typeof window !== "undefined" && window.joincloud && window.joincloud.onLicenseUpdated) {
+  window.joincloud.onLicenseUpdated(async () => {
+    await loadControlPlaneConfig();
+    var hasLicense = state.licenseState && state.licenseState !== "UNREGISTERED";
+    if (els.activationGate && els.activationGate.style.display !== "none" && hasLicense) {
+      await continueBootstrapAfterActivation();
+    } else {
+      updateGraceBanner();
+      updateSubscriptionSection();
+      updateHeaderProfile();
+      if (typeof updateBillingSection === "function") updateBillingSection();
+    }
+  });
+}
+if (els.subscriptionManageBtn) els.subscriptionManageBtn.onclick = openBillingPortal;
+if (els.settingsLogout) {
+  els.settingsLogout.onclick = async () => {
+    try {
+      const res = await apiFetch("/api/v1/auth/logout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (res.ok) {
+        window.location.reload();
+      }
+    } catch (_) {
+      // reload anyway to clear UI state
+      window.location.reload();
+    }
+  };
+}
+if (els.supportSend) els.supportSend.onclick = sendSupportMessage;
+if (els.supportMessageInput) {
+  els.supportMessageInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); sendSupportMessage(); }
+  });
+}
 els.shareTtl.onchange = () => {
   els.shareTtlCustom.style.display = els.shareTtl.value === "custom" ? "block" : "none";
 };
@@ -1477,6 +2086,20 @@ if (els.accessDeviceNameInput) {
 }
 els.accessFingerprint.textContent = stateMeta.fingerprint;
 bootstrapApp();
+
+setInterval(async () => {
+  if (els.appLayout.style.display === "none") return;
+  try {
+    var prevTier = state.licenseTier;
+    var prevState = state.licenseState;
+    await loadControlPlaneConfig();
+    if (state.licenseTier !== prevTier || state.licenseState !== prevState) {
+      updateGraceBanner();
+      updateSubscriptionSection();
+      updateHeaderProfile();
+    }
+  } catch (_) {}
+}, 60 * 1000);
 
 setInterval(async () => {
   if (els.appLayout.style.display !== "none") {

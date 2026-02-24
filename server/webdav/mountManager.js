@@ -1,4 +1,4 @@
-function createMountManager({ ownerServer, shareService, shareServerFactory, config, telemetry, logger }) {
+function createMountManager({ ownerServer, shareService, shareServerFactory, config, telemetry, runtimeTelemetry, usageAggregation, logger }) {
   const shareCache = new Map();
 
   const { ownerBasePath, shareBasePath } = config.server;
@@ -9,6 +9,8 @@ function createMountManager({ ownerServer, shareService, shareServerFactory, con
         share,
         realm: config.auth.realm,
         telemetry,
+        runtimeTelemetry,
+        usageAggregation,
         logger,
       });
       shareCache.set(share.shareId, server.webdavServer);
