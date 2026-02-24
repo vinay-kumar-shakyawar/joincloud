@@ -3,7 +3,8 @@ const os = require("os");
 
 const ROOT_DIR = path.resolve(__dirname, "..");
 const HOME_DIR = os.homedir();
-const APP_SUPPORT_DIR = path.join(HOME_DIR, "Library", "Application Support", "JoinCloud");
+const APP_SUPPORT_DIR = process.env.JOINCLOUD_APP_SUPPORT_DIR ||
+  path.join(HOME_DIR, "Library", "Application Support", "JoinCloud");
 
 module.exports = {
   server: {

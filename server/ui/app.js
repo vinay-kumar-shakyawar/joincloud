@@ -97,6 +97,9 @@ const els = {
   closeModal: document.getElementById("close-modal"),
   cancelShare: document.getElementById("cancel-share"),
   shareResult: document.getElementById("share-result"),
+  shareExtraActions: document.getElementById("share-extra-actions"),
+  shareWithUserBtn: document.getElementById("share-with-user-btn"),
+  shareWithTeamBtn: document.getElementById("share-with-team-btn"),
   copyShare: document.getElementById("copy-share"),
   stopModal: document.getElementById("sharing-stop-modal"),
   closeStopModal: document.getElementById("close-stop-modal"),
@@ -120,14 +123,36 @@ const els = {
   shareQrModal: document.getElementById("share-qr-modal"),
   closeShareQrModal: document.getElementById("close-share-qr-modal"),
   technicalConfigContent: document.getElementById("technical-config-content"),
-  mdnsHostname: document.getElementById("mdns-hostname"),
-  mdnsIpFallback: document.getElementById("mdns-ip-fallback"),
-  mdnsStatusBadge: document.getElementById("mdns-status-badge"),
-  mdnsOpenBtn: document.getElementById("mdns-open-btn"),
+  networkDiscoveryHostname: document.getElementById("network-discovery-hostname"),
+  networkDiscoveryIp: document.getElementById("network-discovery-ip"),
+  networkDiscoveryBadge: document.getElementById("network-discovery-badge"),
+  networkDiscoveryOpenBtn: document.getElementById("network-discovery-open-btn"),
+  networkSearchBtnText: document.getElementById("network-search-btn-text"),
   manualConnectIp: document.getElementById("manual-connect-ip"),
   manualConnectPort: document.getElementById("manual-connect-port"),
   manualConnectBtn: document.getElementById("manual-connect-btn"),
   manualConnectStatus: document.getElementById("manual-connect-status"),
+  networkSearchBtn: document.getElementById("network-search-btn"),
+  connectedUsersList: document.getElementById("connected-users-list"),
+  createTeamModal: document.getElementById("create-team-modal"),
+  createTeamName: document.getElementById("create-team-name"),
+  createTeamDepartment: document.getElementById("create-team-department"),
+  createTeamModalClose: document.getElementById("create-team-modal-close"),
+  createTeamModalCancel: document.getElementById("create-team-modal-cancel"),
+  createTeamModalSubmit: document.getElementById("create-team-modal-submit"),
+  addMembersModal: document.getElementById("add-members-modal"),
+  addMembersList: document.getElementById("add-members-list"),
+  addMembersModalClose: document.getElementById("add-members-modal-close"),
+  addMembersModalCancel: document.getElementById("add-members-modal-cancel"),
+  addMembersModalSend: document.getElementById("add-members-modal-send"),
+  shareTeamPickerModal: document.getElementById("share-team-picker-modal"),
+  shareTeamPickerList: document.getElementById("share-team-picker-list"),
+  shareTeamPickerClose: document.getElementById("share-team-picker-close"),
+  notificationsUnreadBadge: document.getElementById("notifications-unread-badge"),
+  notificationsList: document.getElementById("notifications-list"),
+  notificationsClearAll: document.getElementById("notifications-clear-all"),
+  muteNotificationsBtn: document.getElementById("mute-notifications-btn"),
+  muteIcon: document.getElementById("mute-icon"),
 };
 
 const stateMeta = {
@@ -135,13 +160,15 @@ const stateMeta = {
   cloudUrl: window.location.origin,
   shareLinkUrls: { ip: "" },
   lastNetworkChangedAt: 0,
-  mdnsUnresolvableToastShown: false,
+  networkDiscoveryUnresolvableToastShown: false,
   fingerprint: getOrCreateFingerprint(),
   sessionToken: localStorage.getItem("joincloud:session-token") || "",
   privacyPolicyRaw: "",
   buildId: "",
   lastPendingCount: 0,
   lastNetworkHash: "",
+  notificationsMuted: localStorage.getItem("joincloud:mute-notifications") === "1",
+  lastNotificationIds: new Set(),
 };
 
 function getOrCreateFingerprint() {
@@ -484,7 +511,7 @@ function renderShares() {
       <div style="flex:1;min-width:0">
         <div class="item-title">${escapeHtml(share.path)}</div>
         <div class="item-sub">${share.permission} · expires ${new Date(share.expiresAt).toLocaleString()}</div>
-        <div class="share-link-box" style="margin-top:8px;padding:8px 10px;border:1px solid var(--stroke);border-radius:6px;background:var(--bg);font-size:12px;font-family:ui-monospace,monospace;word-break:break-all">${escapeHtml(shareUrl)}</div>
+        <div class="share-link-box share-url-secondary">${escapeHtml(shareUrl)}</div>
       </div>
       <span class="badge badge-active">Active</span>
     `;
@@ -555,7 +582,7 @@ function renderLogs(entries) {
 }
 
 function renderNetwork() {
-  els.networkList.innerHTML = '<div class="empty-state"><div class="empty-state-title">Coming Soon</div><div class="empty-state-sub">Network discovery will be available in a future release.</div></div>';
+  if (els.networkList) loadNetwork();
 }
 
 function closePreviewModal() {
@@ -835,7 +862,11 @@ async function loadBuildInfo() {
     if (diagRes?.ok && els.uptimeDisplay) {
       const diag = await diagRes.json();
       const sec = Number(diag.uptime_seconds) || 0;
-      if (sec > 0) els.uptimeDisplay.textContent = `Uptime: ${formatUptime(sec)}`;
+      const avgSec = Number(diag.uptime_daily_average_seconds);
+      if (sec > 0) {
+        const avg = Number.isFinite(avgSec) && avgSec > 0 ? formatUptime(avgSec) : "";
+        els.uptimeDisplay.textContent = avg ? `Uptime: ${formatUptime(sec)} (avg ${avg}/day)` : `Uptime: ${formatUptime(sec)}`;
+      }
     }
   } catch (_error) {
     if (els.buildId) els.buildId.textContent = "BUILD: unavailable";
@@ -873,33 +904,37 @@ async function fetchStatus() {
     showNetworkToast();
   }
   stateMeta.lastNetworkHash = networkHash;
-  if (els.mdnsHostname) els.mdnsHostname.textContent = data.mdns_hostname || "--";
-  if (els.mdnsIpFallback) {
+  if (els.networkDiscoveryHostname) els.networkDiscoveryHostname.textContent = data.mdns_hostname || "--";
+  if (els.networkDiscoveryIp) {
     const port = data.port || (data.lanBaseUrl && data.lanBaseUrl.match(/:(\d+)/)?.[1]) || "8787";
-    els.mdnsIpFallback.textContent = data.bestLanIp ? `IP fallback: ${data.bestLanIp}:${port}` : "--";
+    els.networkDiscoveryIp.textContent = data.bestLanIp ? `IP fallback: ${data.bestLanIp}:${port}` : "--";
   }
-  if (els.mdnsStatusBadge) {
+  if (els.networkDiscoveryBadge) {
     const resolvable = !!data.mdns_resolvable;
-    els.mdnsStatusBadge.textContent = running ? (resolvable ? "Resolvable" : "IP fallback") : "Inactive";
-    els.mdnsStatusBadge.className = "badge " + (running ? (resolvable ? "badge-active" : "badge-private") : "badge-private");
-    els.mdnsStatusBadge.title = resolvable ? "mDNS hostname resolves" : "mDNS hostname not resolvable; use IP fallback";
+    els.networkDiscoveryBadge.textContent = running ? (resolvable ? "Resolvable" : "IP fallback") : "Inactive";
+    els.networkDiscoveryBadge.className = "badge " + (running ? (resolvable ? "badge-active" : "badge-private") : "badge-private");
+    els.networkDiscoveryBadge.title = resolvable ? "Hostname resolves" : "Hostname not resolvable; use IP fallback";
   }
-  if (els.mdnsOpenBtn) {
+  if (els.networkDiscoveryOpenBtn) {
     const port = data.port || "8787";
     const resolvable = !!data.mdns_resolvable;
     const openUrl = resolvable && data.mdns_hostname
       ? `http://${data.mdns_hostname}:${port}/`
       : data.lanBaseUrl || (data.bestLanIp ? `http://${data.bestLanIp}:${port}/` : null);
-    els.mdnsOpenBtn.href = openUrl || "#";
-    els.mdnsOpenBtn.style.display = openUrl && running ? "" : "none";
+    els.networkDiscoveryOpenBtn.href = openUrl || "#";
+    els.networkDiscoveryOpenBtn.style.display = openUrl && running ? "" : "none";
   }
-  if (running && !data.mdns_resolvable && !stateMeta.mdnsUnresolvableToastShown) {
-    stateMeta.mdnsUnresolvableToastShown = true;
-    showUploadBanner("mDNS hostname not resolvable; using IP fallback.", "loading");
+  if (running && !data.mdns_resolvable && !stateMeta.networkDiscoveryUnresolvableToastShown) {
+    stateMeta.networkDiscoveryUnresolvableToastShown = true;
+    showUploadBanner("Hostname not resolvable; using IP fallback.", "loading");
     setTimeout(() => hideUploadBanner(), 3000);
   }
-  if (els.uptimeDisplay && Number.isFinite(data.uptime_seconds)) {
-    els.uptimeDisplay.textContent = `Uptime: ${formatUptime(data.uptime_seconds)}`;
+  if (els.uptimeDisplay) {
+    const current = Number.isFinite(data.uptime_seconds) ? formatUptime(data.uptime_seconds) : "";
+    const avg = Number.isFinite(data.uptime_daily_average_seconds) ? formatUptime(data.uptime_daily_average_seconds) : "";
+    if (current) {
+      els.uptimeDisplay.textContent = avg ? `Uptime: ${current} (avg ${avg}/day)` : `Uptime: ${current}`;
+    }
   }
 }
 
@@ -966,10 +1001,6 @@ async function loadShareVisitSummary() {
   els.shareVisitToday.textContent = `Downloads: ${Number(data.total_downloads || 0)}`;
 }
 
-async function loadNetwork() {
-  renderNetwork();
-}
-
 async function loadTelemetrySettings() {
   const res = await apiFetch("/api/v1/telemetry/settings");
   const data = await res.json();
@@ -1024,61 +1055,274 @@ async function loadNetworkSettings() {
   if (els.networkVisibilityNetwork) els.networkVisibilityNetwork.checked = visibility;
 }
 
-async function loadNetwork() {
+const stateNetwork = { searching: false, lastPeers: [] };
+
+function renderNetworkSearchSkeleton() {
   if (!els.networkList) return;
-  try {
-    const res = await apiFetch("/api/v1/network");
-    const peers = await res.json();
-    if (!peers.length) {
-      els.networkList.innerHTML = '<div class="value value-muted">No peers discovered. Use Manual Connect if mDNS is unavailable.</div>';
-      return;
+  els.networkList.innerHTML = `
+    <div class="network-search-skeleton">
+      <div class="skeleton-row"></div>
+      <div class="skeleton-row"></div>
+      <div class="skeleton-row"></div>
+    </div>
+  `;
+}
+
+function renderNetworkResults(peers, approvedIds) {
+  if (!els.networkList) return;
+  if (!peers.length) {
+    els.networkList.innerHTML = `
+      <div class="network-empty-state">
+        <div class="network-empty-title">No users found</div>
+        <div class="network-empty-sub">No nearby devices discovered. Try again or use Manual Connect.</div>
+        <button class="button secondary" id="network-try-again-btn">Try again</button>
+      </div>
+    `;
+    const tryBtn = document.getElementById("network-try-again-btn");
+    if (tryBtn) tryBtn.onclick = () => discoverySearch();
+    return;
+  }
+  els.networkList.innerHTML = "";
+  peers.forEach((p) => {
+    const row = document.createElement("div");
+    row.className = "pending-item network-peer-item";
+    const friendlyName = p.display_name || p.displayName || "Unknown";
+    const shortId = (p.deviceId || "").replace(/^jc_|^dev_/i, "").slice(0, 8).toLowerCase() || "-";
+    const addr = p.bestIp ? `${p.bestIp}:${p.port || 8787}` : "-";
+    const status = approvedIds.has(p.deviceId) ? "Connected" : "Available";
+    row.innerHTML = `
+      <div class="pending-item-meta">
+        <div class="item-title">${escapeHtml(friendlyName)}</div>
+        <div class="item-sub mono">${escapeHtml(shortId)} · ${escapeHtml(addr)}</div>
+        <div class="item-sub">${status} ${p.source === "manual" ? "(manual)" : ""}</div>
+      </div>
+    `;
+    if (p.bestIp) {
+      const connectBtn = document.createElement("button");
+      connectBtn.className = "button";
+      connectBtn.textContent = "Connect";
+      connectBtn.onclick = () => sendConnectRequest(p);
+      row.appendChild(connectBtn);
+      const openBtn = document.createElement("button");
+      openBtn.className = "button secondary";
+      openBtn.textContent = "Open";
+      openBtn.onclick = () => window.open(`http://${p.bestIp}:${p.port || 8787}`, "_blank");
+      row.appendChild(openBtn);
     }
-    els.networkList.innerHTML = "";
-    peers.forEach((p) => {
-      const row = document.createElement("div");
-      row.className = "pending-item";
-      const addr = p.bestIp ? `${p.bestIp}:${p.port || 8787}` : (p.hostname || "-");
-      row.innerHTML = `
-        <div class="pending-item-meta">
-          <div class="item-title">${escapeHtml(p.display_name || "Unknown")}</div>
-          <div class="item-sub mono">${escapeHtml(addr)}</div>
-          <div class="item-sub">${p.hostname ? escapeHtml(p.hostname) + " · " : ""}${p.status || "online"} ${p.source === "manual" ? "(manual)" : ""}</div>
-        </div>
-      `;
-      if (p.bestIp) {
-        const openBtn = document.createElement("button");
-        openBtn.className = "button secondary";
-        openBtn.textContent = "Open";
-        openBtn.onclick = () => window.open(`http://${p.bestIp}:${p.port || 8787}`, "_blank");
-        row.appendChild(openBtn);
-      }
-      els.networkList.appendChild(row);
-    });
+    els.networkList.appendChild(row);
+  });
+}
+
+async function discoverySearch() {
+  if (!els.networkList || stateNetwork.searching) return;
+  stateNetwork.searching = true;
+  if (els.networkSearchBtn) {
+    els.networkSearchBtn.disabled = true;
+    if (els.networkSearchBtnText) els.networkSearchBtnText.textContent = "Searching nearby devices…";
+    const spinner = document.createElement("span");
+    spinner.className = "btn-spinner";
+    spinner.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="animation:spin 1s linear infinite"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>';
+    if (!els.networkSearchBtn.querySelector(".btn-spinner")) {
+      els.networkSearchBtn.insertBefore(spinner, els.networkSearchBtn.firstChild);
+    }
+  }
+  renderNetworkSearchSkeleton();
+  try {
+    const searchRes = await apiFetch("/api/v1/network/search?wait=4", { method: "POST" });
+    const peers = await searchRes.json();
+    stateNetwork.lastPeers = peers;
+    const approvedRes = isHostRole() ? await apiFetch("/api/v1/access/devices") : { ok: false };
+    const approvedDevices = approvedRes.ok ? await approvedRes.json() : [];
+    const approvedIds = new Set(approvedDevices.map((d) => d.device_id || d.fingerprint));
+    renderNetworkResults(peers, approvedIds);
+    await loadConnectedUsers();
   } catch (_) {
-    els.networkList.innerHTML = '<div class="value value-muted">Failed to load peers.</div>';
+    els.networkList.innerHTML = '<div class="value value-muted">Search failed. <button class="button secondary" onclick="discoverySearch()">Try again</button></div>';
+  } finally {
+    stateNetwork.searching = false;
+    if (els.networkSearchBtn) {
+      els.networkSearchBtn.disabled = false;
+      if (els.networkSearchBtnText) els.networkSearchBtnText.textContent = "Search";
+      const sp = els.networkSearchBtn.querySelector(".btn-spinner");
+      if (sp) sp.remove();
+    }
   }
 }
 
-const stateTeams = { teams: [], invites: [], currentTeamId: null };
+async function loadNetwork() {
+  if (!els.networkList) return;
+  try {
+    const [networkRes, approvedRes] = await Promise.all([
+      apiFetch("/api/v1/network"),
+      isHostRole() ? apiFetch("/api/v1/access/devices") : Promise.resolve({ ok: false }),
+    ]);
+    const peers = await networkRes.json();
+    const approvedDevices = approvedRes.ok ? await approvedRes.json() : [];
+    const approvedIds = new Set(approvedDevices.map((d) => d.device_id || d.fingerprint));
+    renderNetworkResults(peers, approvedIds);
+    await loadConnectedUsers();
+  } catch (_) {
+    els.networkList.innerHTML = '<div class="network-empty-state"><div class="network-empty-title">No users found</div><button class="button secondary" id="network-try-again-btn">Try again</button></div>';
+    const tryBtn = document.getElementById("network-try-again-btn");
+    if (tryBtn) tryBtn.onclick = () => discoverySearch();
+  }
+}
+
+async function sendConnectRequest(peer) {
+  const baseUrl = `http://${peer.bestIp}:${peer.port || 8787}`;
+  const displayName = els.headerDisplayName?.textContent?.trim() || getSuggestedDeviceName();
+  try {
+    const res = await fetch(`${baseUrl}/api/v1/access/request`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-JoinCloud-Fingerprint": stateMeta.fingerprint },
+      body: JSON.stringify({ device_name: displayName, fingerprint: stateMeta.fingerprint }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showUploadBanner("Request sent. Opening host... Accept on the host to connect.", "success");
+      setTimeout(() => window.open(baseUrl, "_blank"), 500);
+      setTimeout(hideUploadBanner, 2500);
+    } else {
+      showUploadBanner(data.error || data.message || "Request failed.");
+      setTimeout(hideUploadBanner, 3000);
+    }
+  } catch (err) {
+    showUploadBanner(err.message || "Could not reach host.");
+    setTimeout(hideUploadBanner, 3000);
+  }
+}
+
+async function loadConnectedUsers() {
+  if (!els.connectedUsersList || !isHostRole()) return;
+  try {
+    const res = await apiFetch("/api/v1/access/devices");
+    const devices = await res.json();
+    if (!devices.length) {
+      els.connectedUsersList.innerHTML = '<div class="value value-muted">No connected users yet.</div>';
+      return;
+    }
+    els.connectedUsersList.innerHTML = "";
+    devices.forEach((d) => {
+      const row = document.createElement("div");
+      row.className = "pending-item";
+      const lastSeen = d.last_seen_at ? new Date(d.last_seen_at).toLocaleString() : "-";
+      row.innerHTML = `
+        <div class="pending-item-meta">
+          <div class="item-title">${escapeHtml(d.device_name || "Unknown")}</div>
+          <div class="item-sub mono">${escapeHtml((d.device_id || "").slice(0, 12))}</div>
+          <div class="item-sub">Last seen: ${escapeHtml(lastSeen)}</div>
+        </div>
+      `;
+      const removeBtn = document.createElement("button");
+      removeBtn.className = "button danger";
+      removeBtn.textContent = "Remove";
+      removeBtn.onclick = async () => {
+        await apiFetch("/api/v1/access/devices/remove", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fingerprint: d.fingerprint }),
+        });
+        await loadNetwork();
+      };
+      row.appendChild(removeBtn);
+      els.connectedUsersList.appendChild(row);
+    });
+  } catch (_) {
+    els.connectedUsersList.innerHTML = '<div class="value value-muted">Failed to load.</div>';
+  }
+}
+
+const stateTeams = {
+  teams: [],
+  invites: [],
+  currentTeamId: null,
+  currentThreadId: null,
+  projectChats: {},
+  chatHistoryExpanded: false,
+  leftOpen: true,
+  rightOpen: true,
+  searchQuery: "",
+  attachmentFilter: "all",
+  teamMessages: [],
+};
+
+function setupCollapsibles() {
+  document.querySelectorAll(".collapsible-header").forEach((btn) => {
+    if (btn.dataset.collapsibleSetup) return;
+    btn.dataset.collapsibleSetup = "1";
+    const contentId = btn.dataset.collapsibleTarget || btn.id?.replace("-header", "-content") || btn.id?.replace("-header", "-list");
+    const content = document.getElementById(contentId) || btn.nextElementSibling;
+    if (!content) return;
+    const isInitiallyCollapsed = content.classList.contains("collapsed");
+    if (isInitiallyCollapsed) {
+      btn.setAttribute("aria-expanded", "false");
+      const chevron = btn.querySelector(".collapsible-chevron");
+      if (chevron) chevron.textContent = "▶";
+    }
+    btn.addEventListener("click", () => {
+      const expanded = btn.getAttribute("aria-expanded") !== "false";
+      btn.setAttribute("aria-expanded", expanded ? "false" : "true");
+      content.classList.toggle("collapsed", expanded);
+      const chevron = btn.querySelector(".collapsible-chevron");
+      if (chevron) chevron.textContent = expanded ? "▶" : "▼";
+    });
+  });
+}
+
+function applyTeamsLayoutState() {
+  const layout = document.getElementById("teams-layout");
+  const expandLeftBtn = document.getElementById("teams-expand-left-btn");
+  const hasTeam = !!stateTeams.currentTeamId;
+  if (layout) {
+    layout.classList.toggle("teams-has-team", hasTeam);
+    layout.classList.toggle("left-open", stateTeams.leftOpen);
+    layout.classList.toggle("left-collapsed", !stateTeams.leftOpen);
+    layout.classList.toggle("right-open", stateTeams.rightOpen && hasTeam);
+    layout.classList.toggle("right-collapsed", !stateTeams.rightOpen || !hasTeam);
+  }
+  if (expandLeftBtn) expandLeftBtn.style.display = !stateTeams.leftOpen ? "" : "none";
+}
 
 async function loadTeams() {
   if (!els.teamsList) return;
+  const displayName = els.headerDisplayName?.textContent?.trim() || "Join";
+  const teamsUserName = document.getElementById("teams-user-name");
+  const teamsUserAvatar = document.getElementById("teams-user-avatar");
+  if (teamsUserName) teamsUserName.textContent = displayName;
+  if (teamsUserAvatar) teamsUserAvatar.textContent = displayName.charAt(0).toUpperCase();
   try {
     const res = await apiFetch("/api/v1/teams");
     const data = await res.json();
     stateTeams.teams = data.teams || [];
     stateTeams.invites = data.invites || [];
     renderTeams();
+    setupCollapsibles();
+    applyTeamsLayoutState();
   } catch (_) {
     els.teamsList.innerHTML = '<div class="value value-muted">Failed to load teams.</div>';
   }
 }
 
+function getFilteredTeams() {
+  const q = (stateTeams.searchQuery || "").trim().toLowerCase();
+  if (!q) return stateTeams.teams;
+  return stateTeams.teams.filter(
+    (t) =>
+      (t.teamName || "").toLowerCase().includes(q) ||
+      (t.department || "").toLowerCase().includes(q)
+  );
+}
+
 function renderTeams() {
   if (!els.teamsList) return;
-  if (stateTeams.currentTeamId) return;
   els.teamsList.style.display = "";
-  if (els.teamDetail) els.teamDetail.style.display = "none";
+  if (!stateTeams.currentTeamId && els.teamDetail) els.teamDetail.style.display = "none";
+  const searchEmpty = document.getElementById("teams-search-empty");
+  const searchEmptyQuery = document.getElementById("teams-search-empty-query");
+  const searchClear = document.getElementById("teams-search-clear");
+  const searchClearBtn = document.getElementById("teams-search-clear-btn");
+  if (searchEmpty) searchEmpty.style.display = "none";
+  if (searchClear) searchClear.style.display = stateTeams.searchQuery.trim() ? "" : "none";
   if (stateTeams.invites.length > 0) {
     const inviteHtml = stateTeams.invites.map((i) => {
       const teamName = i.teamName || stateTeams.teams.find((t) => t.teamId === i.teamId)?.teamName || "Unknown";
@@ -1098,41 +1342,236 @@ function renderTeams() {
     els.teamsList.innerHTML += '<div class="value value-muted">No teams yet. Create one to get started.</div>';
     return;
   }
-  stateTeams.teams.forEach((t) => {
-    const row = document.createElement("div");
-    row.className = "pending-item";
-    row.innerHTML = `<div class="item-title">${escapeHtml(t.teamName)}</div><div class="item-sub">${t.members?.length || 0} members</div>`;
-    const openBtn = document.createElement("button");
-    openBtn.className = "button secondary";
-    openBtn.textContent = "Open";
-    openBtn.onclick = () => showTeamDetail(t.teamId);
-    row.appendChild(openBtn);
+  const filtered = getFilteredTeams();
+  if (filtered.length === 0 && stateTeams.searchQuery.trim()) {
+    if (searchEmpty) {
+      searchEmpty.style.display = "flex";
+      if (searchEmptyQuery) searchEmptyQuery.textContent = stateTeams.searchQuery.trim();
+    }
+    if (searchClearBtn) searchClearBtn.onclick = () => { stateTeams.searchQuery = ""; const inp = document.getElementById("teams-search-input"); if (inp) inp.value = ""; renderTeams(); };
+    return;
+  }
+  filtered.forEach((t) => {
+    const hasUnread = stateMeta.unreadTeamIds?.has(t.teamId);
+    const initial = (t.teamName || "T").charAt(0).toUpperCase();
+    const memberCount = t.members?.length || 0;
+    const preview = memberCount ? `${memberCount} member${memberCount !== 1 ? "s" : ""}` : "No members yet";
+    const row = document.createElement("button");
+    row.className = "button ghost team-chat-entry";
+    row.dataset.teamId = t.teamId;
+    row.type = "button";
+    row.innerHTML = `
+      <div class="team-chat-entry-avatar">${escapeHtml(initial)}</div>
+      <div class="team-chat-entry-body">
+        <div class="team-chat-entry-top">
+          <span class="team-chat-entry-name">${escapeHtml(t.teamName)}</span>
+          ${hasUnread ? '<span class="team-chat-entry-unread">1</span>' : ""}
+        </div>
+        <div class="team-chat-entry-preview value-muted">${escapeHtml(preview)}</div>
+      </div>
+    `;
+    row.onclick = () => showTeamDetail(t.teamId);
     els.teamsList.appendChild(row);
   });
+  renderTeamsListActiveState();
 }
 
 async function showTeamDetail(teamId) {
   stateTeams.currentTeamId = teamId;
-  els.teamsList.style.display = "none";
-  if (els.teamDetail) els.teamDetail.style.display = "block";
+  const emptyState = document.getElementById("teams-empty-state");
+  if (emptyState) emptyState.style.display = "none";
+  if (els.teamDetail) els.teamDetail.style.display = "flex";
   const team = stateTeams.teams.find((t) => t.teamId === teamId);
+  const headerText = team ? (team.department ? `${team.teamName} · ${team.department}` : team.teamName) : "Team";
+  const initial = (team?.teamName || "T").charAt(0).toUpperCase();
   if (els.teamDetailName) els.teamDetailName.textContent = team?.teamName || "Team";
+  const chatAvatar = document.getElementById("team-chat-avatar");
+  if (chatAvatar) chatAvatar.textContent = initial;
+  const profileAvatar = document.getElementById("team-profile-avatar");
+  if (profileAvatar) profileAvatar.textContent = initial;
+  const profileName = document.getElementById("team-profile-name");
+  if (profileName) profileName.textContent = team?.teamName || "Team";
+  const profileRole = document.getElementById("team-profile-role");
+  if (profileRole) profileRole.textContent = team?.department || "Team chat";
+  await apiFetch(`/api/v1/notifications/mark-team-read/${teamId}`, { method: "POST" }).catch(() => {});
+  stateMeta.unreadTeamIds?.delete(teamId);
+  const teamsUnreadEl = document.getElementById("teams-nav-unread-dot");
+  if (teamsUnreadEl) teamsUnreadEl.style.display = stateMeta.unreadTeamIds?.size > 0 ? "block" : "none";
+  stateTeams.currentThreadId = null;
+  stateTeams.chatHistoryExpanded = false;
+  if (!stateTeams.projectChats[teamId]) stateTeams.projectChats[teamId] = [];
+  renderTeamsListActiveState();
+  renderChatHistoryList();
+  renderAttachmentsSection();
+  setupCollapsibles();
+  applyTeamsLayoutState();
   await loadTeamMessages(teamId);
+  await loadNotifications();
+}
+
+function renderChatHistoryList() {
+  const list = document.getElementById("chat-history-list");
+  const seeMoreBtn = document.getElementById("chat-history-see-more");
+  if (!list) return;
+  const teamId = stateTeams.currentTeamId;
+  if (!teamId) return;
+  const projects = stateTeams.projectChats[teamId] || [];
+  const allChats = [{ id: null, name: "General", isMain: true }, ...projects.map((p) => ({ id: p.id, name: p.name, isMain: false }))];
+  const maxVisible = 3;
+  const showAll = stateTeams.chatHistoryExpanded || allChats.length <= maxVisible;
+  const visibleChats = showAll ? allChats : allChats.slice(0, maxVisible);
+  const hasMore = allChats.length > maxVisible && !showAll;
+
+  list.innerHTML = visibleChats.map((c) => {
+    const isActive = c.id === stateTeams.currentThreadId;
+    return `<button class="button ghost chat-history-item ${isActive ? "active" : ""}" data-thread-id="${c.id || ""}" style="width:100%;justify-content:flex-start;text-align:left;padding:8px 10px;margin-bottom:4px;font-size:13px">
+      <span class="btn-icon" style="opacity:0.8">${c.isMain ? "<svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z\"/></svg>" : "<svg width=\"12\" height=\"12\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z\"/></svg>"}</span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(c.name)}</span>
+    </button>`;
+  }).join("");
+
+  list.querySelectorAll(".chat-history-item").forEach((btn) => {
+    const tid = btn.dataset.threadId;
+    btn.onclick = () => switchToThread(tid && tid !== "null" ? tid : null);
+  });
+
+  if (seeMoreBtn) {
+    seeMoreBtn.style.display = hasMore ? "flex" : "none";
+    seeMoreBtn.onclick = () => {
+      stateTeams.chatHistoryExpanded = true;
+      renderChatHistoryList();
+    };
+  }
+}
+
+function switchToThread(threadId) {
+  stateTeams.currentThreadId = threadId || null;
+  renderChatHistoryList();
+  const team = stateTeams.teams.find((t) => t.teamId === stateTeams.currentTeamId);
+  const thread = threadId ? (stateTeams.projectChats[stateTeams.currentTeamId] || []).find((p) => p.id === threadId) : null;
+  const headerText = thread ? `${team?.teamName || "Team"} · ${thread.name}` : (team ? (team.department ? `${team.teamName} · ${team.department}` : team.teamName) : "Team");
+  if (els.teamDetailName) els.teamDetailName.textContent = headerText;
+  loadTeamMessages(stateTeams.currentTeamId);
+}
+
+function renderTeamsListActiveState() {
+  document.querySelectorAll(".team-chat-entry").forEach((el) => {
+    el.classList.toggle("active", el.dataset.teamId === stateTeams.currentTeamId);
+  });
 }
 
 async function loadTeamMessages(teamId) {
   if (!els.teamChatFeed) return;
   try {
-    const res = await apiFetch(`/api/v1/teams/${teamId}/messages`);
-    const data = await res.json();
+    const [msgRes, namesRes] = await Promise.all([
+      apiFetch(`/api/v1/teams/${teamId}/messages`),
+      apiFetch("/api/v1/network/display-names").catch(() => ({ json: () => ({}) })),
+    ]);
+    const data = await msgRes.json();
     const messages = data.messages || [];
+    stateTeams.teamMessages = messages;
+    const displayNames = namesRes.ok ? await namesRes.json() : {};
+    const getSenderName = (deviceId) => {
+      if (!deviceId) return "Unknown device";
+      return displayNames[deviceId] || els.headerDisplayName?.textContent || "Unknown device";
+    };
+    const isOwn = (senderDeviceId) => {
+      if (!senderDeviceId) return false;
+      const mine = state.deviceId || "host";
+      return senderDeviceId === mine || (senderDeviceId === "host" && mine === "host");
+    };
     els.teamChatFeed.innerHTML = messages.map((m) => {
-      const text = m.type === "text" ? (m.payload?.text || "") : m.type === "file" ? `[File: ${m.payload?.filename || "?"}]` : m.type === "note" ? `[Note: ${m.payload?.text || ""}]` : "";
-      return `<div class="team-message"><span class="team-message-sender">${escapeHtml(m.senderDeviceId?.slice(0, 8) || "?")}</span>: ${escapeHtml(text)}</div>`;
+      const senderName = getSenderName(m.senderDeviceId);
+      const own = isOwn(m.senderDeviceId);
+      const bubbleClass = own ? "team-message-out" : "team-message-in";
+      const initial = (senderName || "?").charAt(0).toUpperCase();
+      if (m.type === "file" && m.payload?.shareUrl) {
+        const fn = m.payload.filename || "file";
+        return `<div class="team-message ${bubbleClass}">
+          <div class="team-message-avatar">${escapeHtml(initial)}</div>
+          <div class="team-message-content">
+            <div class="team-message-sender">${escapeHtml(senderName)}</div>
+            <a href="${escapeHtml(m.payload.shareUrl)}" target="_blank" rel="noopener" class="team-file-link">📎 ${escapeHtml(fn)}</a>
+          </div>
+        </div>`;
+      }
+      const text = m.type === "text" ? (m.payload?.text || "") : m.type === "note" ? `[Note: ${m.payload?.text || ""}]` : "";
+      return `<div class="team-message ${bubbleClass}">
+        <div class="team-message-avatar">${escapeHtml(initial)}</div>
+        <div class="team-message-content">
+          <div class="team-message-sender">${escapeHtml(senderName)}</div>
+          <div class="team-message-text">${escapeHtml(text)}</div>
+        </div>
+      </div>`;
     }).join("") || '<div class="value value-muted">No messages yet.</div>';
     els.teamChatFeed.scrollTop = els.teamChatFeed.scrollHeight;
   } catch (_) {
     els.teamChatFeed.innerHTML = '<div class="value value-muted">Failed to load messages.</div>';
+  }
+  renderAttachmentsSection();
+}
+
+function getAttachmentsFromMessages(messages) {
+  const list = [];
+  (messages || []).forEach((m) => {
+    if (m.type === "file" && m.payload?.shareUrl) {
+      const fn = (m.payload.filename || "file").toLowerCase();
+      let type = "other";
+      if (fn.endsWith(".pdf")) type = "pdf";
+      else if (/\.(mp4|webm|mov|avi|mkv)$/.test(fn)) type = "video";
+      else if (/\.(mp3|wav|ogg|m4a|aac)$/.test(fn)) type = "audio";
+      else if (/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/.test(fn)) type = "image";
+      list.push({ url: m.payload.shareUrl, filename: m.payload.filename || "file", type });
+    }
+  });
+  return list;
+}
+
+function renderAttachmentsSection() {
+  const listEl = document.getElementById("team-attachments-list");
+  const emptyEl = document.getElementById("team-attachments-empty");
+  const viewAllBtn = document.getElementById("team-attachments-view-all");
+  const tiles = document.querySelectorAll(".team-attachment-type[data-filter]");
+  if (!listEl || !emptyEl) return;
+  const attachments = getAttachmentsFromMessages(stateTeams.teamMessages || []);
+  const filter = stateTeams.attachmentFilter || "all";
+  const filtered =
+    filter === "all"
+      ? attachments
+      : attachments.filter((a) => a.type === filter);
+  listEl.innerHTML = "";
+  listEl.style.display = filtered.length ? "flex" : "none";
+  emptyEl.style.display = filtered.length ? "none" : "block";
+  emptyEl.textContent = attachments.length === 0 ? "No attachments yet" : `No ${filter === "all" ? "" : filter + " "}attachments`;
+  if (filtered.length) {
+    filtered.forEach((a) => {
+      const aEl = document.createElement("a");
+      aEl.href = a.url;
+      aEl.target = "_blank";
+      aEl.rel = "noopener";
+      aEl.textContent = a.filename;
+      aEl.title = a.filename;
+      listEl.appendChild(aEl);
+    });
+  }
+  tiles.forEach((t) => {
+    const f = t.dataset.filter;
+    const count = attachments.filter((a) => a.type === f).length;
+    t.disabled = count === 0;
+    t.classList.toggle("active", filter === f);
+    t.onclick = () => {
+      if (t.disabled) return;
+      stateTeams.attachmentFilter = f;
+      renderAttachmentsSection();
+    };
+  });
+  if (viewAllBtn) {
+    viewAllBtn.disabled = attachments.length === 0;
+    viewAllBtn.onclick = () => {
+      if (attachments.length === 0) return;
+      stateTeams.attachmentFilter = "all";
+      renderAttachmentsSection();
+    };
   }
 }
 
@@ -1143,13 +1582,21 @@ async function sendTeamMessage() {
   if (!text) return;
   els.teamMessageInput.value = "";
   try {
-    await apiFetch("/api/v1/teams/message", {
+    const res = await apiFetch("/api/v1/teams/message", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ teamId, type: "text", payload: { text } }),
     });
+    const data = await res.json().catch(() => ({}));
     await loadTeamMessages(teamId);
-  } catch (_) {}
+    if (data.offlineCount > 0) {
+      showUploadBanner(`${data.offlineCount} member(s) offline. Message stored locally.`, "info");
+      setTimeout(hideUploadBanner, 2500);
+    }
+  } catch (err) {
+    showUploadBanner(err.message || "Failed to send message.");
+    setTimeout(hideUploadBanner, 2500);
+  }
 }
 
 async function inviteToTeam() {
@@ -1187,18 +1634,114 @@ async function inviteToTeam() {
   }
 }
 
-async function createTeam() {
-  const name = prompt("Team name?", "My Team") || "My Team";
+function openCreateTeamModal() {
+  if (els.createTeamModal) {
+    if (els.createTeamName) els.createTeamName.value = "";
+    if (els.createTeamDepartment) els.createTeamDepartment.value = "";
+    els.createTeamModal.classList.add("active");
+  }
+}
+
+function closeCreateTeamModal() {
+  if (els.createTeamModal) els.createTeamModal.classList.remove("active");
+}
+
+function openAddMembersModal(teamId) {
+  stateTeams.addMembersTeamId = teamId;
+  if (els.addMembersModal) {
+    els.addMembersModal.classList.add("active");
+    renderAddMembersList(teamId);
+  }
+}
+
+function closeAddMembersModal() {
+  stateTeams.addMembersTeamId = null;
+  if (els.addMembersModal) els.addMembersModal.classList.remove("active");
+}
+
+async function renderAddMembersList(teamId) {
+  if (!els.addMembersList) return;
+  const team = stateTeams.teams.find((t) => t.teamId === teamId);
+  const existingIds = new Set(team?.members || []);
+  stateTeams.addMembersSelected = new Set();
   try {
-    await apiFetch("/api/v1/teams", {
+    const networkRes = await apiFetch("/api/v1/network");
+    const peers = await networkRes.json();
+    const candidates = peers.filter((p) => p.deviceId && p.bestIp && !existingIds.has(p.deviceId)).slice(0, 5);
+    if (!candidates.length) {
+      els.addMembersList.innerHTML = '<div class="value value-muted">No connected users available. Connect devices in the Network tab first.</div>';
+      return;
+    }
+    stateTeams.addMembersSelected = stateTeams.addMembersSelected || new Set();
+    els.addMembersList.innerHTML = candidates.map((c) => {
+      const name = c.display_name || c.displayName || c.deviceId?.slice(0, 8) || "Unknown";
+      return `<label class="pending-item" style="cursor:pointer"><input type="checkbox" data-device-id="${escapeHtml(c.deviceId)}" /> ${escapeHtml(name)} (${escapeHtml((c.deviceId || "").slice(0, 12))})</label>`;
+    }).join("");
+    els.addMembersList.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+      cb.onchange = () => {
+        if (cb.checked) stateTeams.addMembersSelected.add(cb.dataset.deviceId);
+        else stateTeams.addMembersSelected.delete(cb.dataset.deviceId);
+      };
+    });
+  } catch (_) {
+    els.addMembersList.innerHTML = '<div class="value value-muted">Failed to load.</div>';
+  }
+}
+
+async function createTeam() {
+  openCreateTeamModal();
+}
+
+async function submitCreateTeam() {
+  const name = els.createTeamName?.value?.trim();
+  const department = els.createTeamDepartment?.value?.trim();
+  if (!name) {
+    showUploadBanner("Team name is required.", "error");
+    setTimeout(hideUploadBanner, 2000);
+    return;
+  }
+  if (!department) {
+    showUploadBanner("Department / Purpose is required.", "error");
+    setTimeout(hideUploadBanner, 2000);
+    return;
+  }
+  try {
+    const res = await apiFetch("/api/v1/teams", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ teamName: name }),
+      body: JSON.stringify({ teamName: name, department }),
     });
+    const team = await res.json();
+    closeCreateTeamModal();
     await loadTeams();
+    openAddMembersModal(team.teamId);
   } catch (_) {
-    alert("Failed to create team.");
+    showUploadBanner("Failed to create team.");
+    setTimeout(hideUploadBanner, 2000);
   }
+}
+
+async function sendAddMembersInvites() {
+  const teamId = stateTeams.addMembersTeamId;
+  if (!teamId) return;
+  const selected = stateTeams.addMembersSelected ? Array.from(stateTeams.addMembersSelected) : [];
+  if (!selected.length) {
+    closeAddMembersModal();
+    return;
+  }
+  for (const toDeviceId of selected) {
+    try {
+      await apiFetch(`/api/v1/teams/${teamId}/invite`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ toDeviceId }),
+      });
+    } catch (_) {}
+  }
+  showUploadBanner(`Invites sent to ${selected.length} member(s).`, "success");
+  setTimeout(hideUploadBanner, 2500);
+  closeAddMembersModal();
+  await loadTeams();
 }
 
 async function manualConnect() {
@@ -1220,12 +1763,19 @@ async function manualConnect() {
     const data = await res.json();
     if (res.ok && data.success) {
       if (els.manualConnectStatus) els.manualConnectStatus.textContent = `Added ${data.displayName || data.deviceId}.`;
+      showUploadBanner("Connected successfully.", "success");
+      setTimeout(hideUploadBanner, 2000);
       await loadNetwork();
     } else {
-      if (els.manualConnectStatus) els.manualConnectStatus.textContent = data.message || data.error || "Connection failed.";
+      const msg = data.message || data.error || "Connection failed.";
+      if (els.manualConnectStatus) els.manualConnectStatus.textContent = msg;
+      showUploadBanner(msg, "error");
+      setTimeout(hideUploadBanner, 4000);
     }
-  } catch (_) {
+  } catch (err) {
     if (els.manualConnectStatus) els.manualConnectStatus.textContent = "Connection failed.";
+    showUploadBanner(err?.message || "Connection failed. Check IP and port.", "error");
+    setTimeout(hideUploadBanner, 4000);
   } finally {
     els.manualConnectBtn.disabled = false;
   }
@@ -1244,9 +1794,11 @@ async function saveNetworkName() {
   els.networkNameSuffix.value = displayNameToSuffix(savedName);
 }
 
+const stateShare = { lastShareUrl: null, lastShareId: null, lastPath: null };
+
 function openShareModal(pathValue) {
   els.shareResult.textContent = "";
-  els.copyShare.style.display = "none";
+  if (els.shareExtraActions) els.shareExtraActions.style.display = "none";
   els.sharePath.value = pathValue;
   els.shareModal.classList.add("active");
 }
@@ -1274,22 +1826,137 @@ async function createShare() {
     return;
   }
   const shareUrl = data.urlIp || data.url || `${stateMeta.lanBaseUrl}/share/${data.shareId}`;
+  stateShare.lastShareUrl = shareUrl;
+  stateShare.lastShareId = data.shareId;
+  stateShare.lastPath = pathValue;
+  const filename = pathValue.split("/").filter(Boolean).pop() || "file";
   els.shareResult.innerHTML = `
     <div>Share created.</div>
-    <div class="share-link-box" style="margin-top:10px;padding:12px;border:1px solid var(--stroke);border-radius:8px;background:var(--bg);word-break:break-all;font-size:13px;font-family:ui-monospace,monospace">${shareUrl}</div>
+    <div class="share-link-box share-url-secondary">${shareUrl}</div>
   `;
-  els.copyShare.style.display = "inline-flex";
-  els.copyShare.onclick = async () => {
-    const ok = await copyToClipboard(shareUrl);
-    if (ok) {
-      els.copyShare.textContent = "Copied!";
-      setTimeout(() => (els.copyShare.textContent = "Copy Link"), 2000);
-    } else {
-      showCopyFallback(shareUrl, els.shareResult);
-    }
-  };
+  if (els.shareExtraActions) els.shareExtraActions.style.display = "flex";
+  if (els.copyShare) {
+    els.copyShare.onclick = async () => {
+      const ok = await copyToClipboard(shareUrl);
+      if (ok) {
+        els.copyShare.textContent = "Copied!";
+        setTimeout(() => (els.copyShare.textContent = "Copy Link"), 2000);
+      } else {
+        showCopyFallback(shareUrl, els.shareResult);
+      }
+    };
+  }
   await loadShares();
   await loadLogs();
+}
+
+function openShareTeamPicker() {
+  if (!stateShare.lastShareUrl) {
+    showUploadBanner("Create a share first.");
+    setTimeout(hideUploadBanner, 2000);
+    return;
+  }
+  if (!stateTeams.teams.length) {
+    showUploadBanner("No teams found. Create a team first.", "error");
+    setTimeout(hideUploadBanner, 3000);
+    return;
+  }
+  if (!els.shareTeamPickerModal || !els.shareTeamPickerList) return;
+  els.shareTeamPickerList.innerHTML = stateTeams.teams.map((t) => {
+    const count = t.members?.length || 0;
+    return `<button class="button secondary share-team-pick-btn" data-team-id="${escapeHtml(t.teamId)}">
+      <span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg></span>
+      <div style="text-align:left;flex:1"><strong>${escapeHtml(t.teamName)}</strong><div class="item-sub" style="margin-top:2px">${count} member${count !== 1 ? "s" : ""}</div></div>
+    </button>`;
+  }).join("");
+  els.shareTeamPickerList.querySelectorAll(".share-team-pick-btn").forEach((btn) => {
+    btn.onclick = async () => {
+      const teamId = btn.dataset.teamId;
+      if (els.shareTeamPickerModal) els.shareTeamPickerModal.classList.remove("active");
+      await postShareToTeam(teamId);
+    };
+  });
+  els.shareTeamPickerModal.classList.add("active");
+}
+
+function closeShareTeamPicker() {
+  if (els.shareTeamPickerModal) els.shareTeamPickerModal.classList.remove("active");
+}
+
+async function shareWithTeam() {
+  openShareTeamPicker();
+}
+
+async function postShareToTeam(teamId) {
+  const filename = stateShare.lastPath?.split("/").filter(Boolean).pop() || "file";
+  try {
+    await apiFetch("/api/v1/teams/message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        teamId,
+        type: "file",
+        payload: { shareUrl: stateShare.lastShareUrl, filename, shareId: stateShare.lastShareId },
+      }),
+    });
+    showUploadBanner("Shared with team.", "success");
+    setTimeout(hideUploadBanner, 2000);
+  } catch (err) {
+    showUploadBanner(err.message || "Failed to share with team.");
+    setTimeout(hideUploadBanner, 2500);
+  }
+}
+
+async function shareWithUser() {
+  if (!stateShare.lastShareUrl) {
+    showUploadBanner("Create a share first.");
+    setTimeout(hideUploadBanner, 2000);
+    return;
+  }
+  try {
+    const networkRes = await apiFetch("/api/v1/network");
+    const peers = await networkRes.json();
+    const candidates = peers.filter((p) => p.deviceId && p.bestIp);
+    if (!candidates.length) {
+      showUploadBanner("No users available. Connect devices in Network first.");
+      setTimeout(hideUploadBanner, 2000);
+      return;
+    }
+    const list = candidates.map((c, i) => `${i + 1}. ${c.display_name || c.displayName || c.deviceId}`).join("\n");
+    const choice = prompt(`Select user to share with:\n${list}`);
+    if (!choice) return;
+    const num = parseInt(choice, 10);
+    const peer = Number.isFinite(num) && num >= 1 && num <= candidates.length
+      ? candidates[num - 1]
+      : candidates.find((c) => (c.display_name || c.displayName) === choice.trim());
+    if (!peer) {
+      showUploadBanner("User not found.");
+      setTimeout(hideUploadBanner, 2000);
+      return;
+    }
+    const filename = stateShare.lastPath?.split("/").filter(Boolean).pop() || "file";
+    const displayName = els.headerDisplayName?.textContent?.trim() || getSuggestedDeviceName();
+    const baseUrl = `http://${peer.bestIp}:${peer.port || 8787}`;
+    const res = await fetch(`${baseUrl}/api/v1/share/notify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fromDeviceId: stateMeta.fingerprint ? `dev_${stateMeta.fingerprint.slice(0, 16)}` : "host",
+        fromDisplayName: displayName,
+        shareUrl: stateShare.lastShareUrl,
+        filename,
+      }),
+    });
+    if (res.ok) {
+      showUploadBanner("Share sent to " + (peer.display_name || peer.displayName || "user") + ".", "success");
+    } else {
+      showUploadBanner("Failed to send. User may be offline.");
+    }
+    setTimeout(hideUploadBanner, 2000);
+  } catch (err) {
+    showUploadBanner(err.message || "Failed to share.");
+    setTimeout(hideUploadBanner, 2500);
+  }
 }
 
 async function revokeShare(shareId) {
@@ -1413,6 +2080,120 @@ async function uploadFiles(files) {
   }
 }
 
+function showToastBanner(text, targetRoute) {
+  const el = document.getElementById("notification-toast");
+  if (!el) return;
+  el.textContent = text;
+  el.dataset.targetRoute = targetRoute || "";
+  el.classList.remove("notification-toast-hidden");
+  el.setAttribute("aria-hidden", "false");
+  el.onclick = () => {
+    if (targetRoute) {
+      if (targetRoute.startsWith("teams")) {
+        const m = targetRoute.match(/team=([^&]+)/);
+        if (m) {
+          stateTeams.currentTeamId = m[1];
+          setActiveSection("teams");
+          loadTeams();
+        } else {
+          setActiveSection("teams");
+        }
+      } else {
+        setActiveSection(targetRoute);
+      }
+    }
+    el.classList.add("notification-toast-hidden");
+  };
+  setTimeout(() => {
+    el.classList.add("notification-toast-hidden");
+    el.setAttribute("aria-hidden", "true");
+  }, 4000);
+}
+
+function updateMuteButton() {
+  if (!els.muteIcon) return;
+  els.muteIcon.textContent = stateMeta.notificationsMuted ? "🔕" : "🔔";
+  if (els.muteNotificationsBtn) {
+    els.muteNotificationsBtn.title = stateMeta.notificationsMuted ? "Unmute notifications" : "Mute notifications";
+  }
+}
+
+async function loadNotifications() {
+  if (!els.notificationsList || !els.notificationsUnreadBadge) return;
+  try {
+    const res = await apiFetch("/api/v1/notifications");
+    if (!res.ok) return;
+    const data = await res.json();
+    const list = data.notifications || [];
+    const unreadCount = data.unreadCount ?? list.filter((n) => !n.read).length;
+
+    if (els.notificationsUnreadBadge) {
+      els.notificationsUnreadBadge.textContent = String(unreadCount);
+      els.notificationsUnreadBadge.style.display = unreadCount > 0 ? "inline-flex" : "none";
+    }
+
+    const knownIds = new Set(stateMeta.lastNotificationIds);
+    for (const n of list) {
+      if (!knownIds.has(n.id) && !n.read && document.visibilityState === "visible" && !stateMeta.notificationsMuted) {
+        showToastBanner(n.title + (n.body ? `: ${n.body}` : ""), n.targetRoute);
+      }
+      knownIds.add(n.id);
+    }
+    stateMeta.lastNotificationIds = new Set(list.slice(0, 20).map((x) => x.id));
+    stateMeta.unreadTeamIds = new Set(list.filter((n) => !n.read && n.teamId).map((n) => n.teamId));
+
+    const teamsUnreadEl = document.getElementById("teams-nav-unread-dot");
+    if (teamsUnreadEl) teamsUnreadEl.style.display = stateMeta.unreadTeamIds?.size > 0 ? "block" : "none";
+
+    const homeUnreadEl = document.getElementById("home-nav-unread-dot");
+    if (homeUnreadEl) homeUnreadEl.style.display = unreadCount > 0 ? "block" : "none";
+
+    if (!list.length) {
+      els.notificationsList.innerHTML = '<div class="value value-muted">No notifications.</div>';
+      return;
+    }
+    els.notificationsList.innerHTML = list
+      .map(
+        (n) =>
+          `<div class="pending-item notification-item ${n.read ? "" : "notification-unread"}" data-id="${escapeHtml(n.id)}">
+            <div class="pending-item-meta">
+              <div class="item-title">${escapeHtml(n.title)}</div>
+              ${n.body ? `<div class="item-sub">${escapeHtml(n.body)}</div>` : ""}
+              <div class="item-sub value-muted" style="font-size:11px">${new Date(n.timestamp).toLocaleString()}</div>
+            </div>
+            <button class="button ghost button-compact notification-delete" data-id="${escapeHtml(n.id)}" title="Delete">✕</button>
+          </div>`
+      )
+      .join("");
+
+    els.notificationsList.querySelectorAll(".notification-item").forEach((row) => {
+      row.addEventListener("click", (e) => {
+        if (e.target.closest(".notification-delete")) return;
+        const route = list.find((x) => x.id === row.dataset.id)?.targetRoute;
+        if (route) {
+          if (route.startsWith("teams")) {
+            const m = route.match(/team=([^&]+)/);
+            if (m) {
+              stateTeams.currentTeamId = m[1];
+              setActiveSection("teams");
+              loadTeams();
+            } else setActiveSection("teams");
+          } else setActiveSection(route);
+        }
+      });
+    });
+    els.notificationsList.querySelectorAll(".notification-delete").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await apiFetch(`/api/v1/notifications/${btn.dataset.id}`, { method: "DELETE" });
+        await loadNotifications();
+      });
+    });
+  } catch (_) {
+    if (els.notificationsList) els.notificationsList.innerHTML = '<div class="value value-muted">Failed to load.</div>';
+  }
+}
+
 async function loadPendingAccessRequests() {
   if (!state.isAdmin) {
     els.pendingAccessCount.textContent = "0";
@@ -1431,7 +2212,7 @@ async function loadPendingAccessRequests() {
       els.pendingBadge.style.display = "none";
     }
   }
-  if (pending.length > stateMeta.lastPendingCount && document.visibilityState === "visible") {
+  if (pending.length > stateMeta.lastPendingCount && document.visibilityState === "visible" && !stateMeta.notificationsMuted) {
     try {
       if ("Notification" in window) {
         if (Notification.permission === "granted") {
@@ -1679,6 +2460,8 @@ async function bootstrapApp() {
   await loadApprovedDevices();
   await loadShareVisitSummary();
   await loadActivitySummary();
+  await loadNotifications();
+  updateMuteButton();
 
   const initial = window.location.hash.replace("#", "") || "home";
   setActiveSection(initial);
@@ -1691,7 +2474,16 @@ function setActiveSection(sectionId) {
   els.sections.forEach((section) => section.classList.toggle("active", section.dataset.section === safeSection));
   els.navButtons.forEach((button) => button.classList.toggle("active", button.dataset.section === safeSection));
   if (safeSection === "network") loadNetwork();
-  if (safeSection === "teams") loadTeams();
+  if (safeSection === "teams") {
+    if (window.innerWidth < 900) {
+      stateTeams.leftOpen = false;
+      stateTeams.rightOpen = false;
+    } else {
+      stateTeams.leftOpen = true;
+      stateTeams.rightOpen = true;
+    }
+    loadTeams();
+  }
 }
 
 function updateAdminUi() {
@@ -1813,20 +2605,326 @@ els.copyCloudUrl.addEventListener("click", async () => {
 if (els.manualConnectBtn) {
   els.manualConnectBtn.addEventListener("click", manualConnect);
 }
+if (els.networkSearchBtn) {
+  els.networkSearchBtn.addEventListener("click", () => discoverySearch());
+}
 if (els.createTeamBtn) {
   els.createTeamBtn.addEventListener("click", createTeam);
+}
+if (els.createTeamModalSubmit) {
+  els.createTeamModalSubmit.addEventListener("click", submitCreateTeam);
+}
+if (els.createTeamModalClose) {
+  els.createTeamModalClose.addEventListener("click", closeCreateTeamModal);
+}
+if (els.createTeamModalCancel) {
+  els.createTeamModalCancel.addEventListener("click", closeCreateTeamModal);
+}
+if (els.addMembersModalSend) {
+  els.addMembersModalSend.addEventListener("click", sendAddMembersInvites);
+}
+if (els.addMembersModalClose) {
+  els.addMembersModalClose.addEventListener("click", closeAddMembersModal);
+}
+if (els.addMembersModalCancel) {
+  els.addMembersModalCancel.addEventListener("click", closeAddMembersModal);
 }
 if (els.teamDetailBack) {
   els.teamDetailBack.addEventListener("click", () => {
     stateTeams.currentTeamId = null;
+    const emptyState = document.getElementById("teams-empty-state");
+    if (emptyState) emptyState.style.display = "flex";
+    if (els.teamDetail) els.teamDetail.style.display = "none";
     loadTeams();
   });
+}
+function toggleTeamsLeftPanel() {
+  stateTeams.leftOpen = !stateTeams.leftOpen;
+  applyTeamsLayoutState();
+}
+function toggleTeamsRightPanel() {
+  stateTeams.rightOpen = !stateTeams.rightOpen;
+  applyTeamsLayoutState();
+}
+[document.getElementById("teams-left-collapse-btn"), document.getElementById("teams-expand-left-btn")].forEach((el) => {
+  if (el) el.addEventListener("click", toggleTeamsLeftPanel);
+});
+[document.getElementById("teams-right-collapse-btn"), document.getElementById("team-toggle-right")].forEach((el) => {
+  if (el) el.addEventListener("click", toggleTeamsRightPanel);
+});
+window.addEventListener("resize", () => {
+  if (document.querySelector(".section.active[data-section='teams']")) {
+    applyTeamsLayoutState();
+  }
+});
+const teamActionsMenuBtn = document.getElementById("team-actions-menu-btn");
+const teamActionsDropdown = document.getElementById("team-actions-dropdown");
+if (teamActionsMenuBtn && teamActionsDropdown) {
+  teamActionsMenuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    teamActionsDropdown.style.display = teamActionsDropdown.style.display === "none" ? "flex" : "none";
+  });
+  document.addEventListener("click", () => { teamActionsDropdown.style.display = "none"; });
+  const addFromMenu = document.getElementById("team-add-from-menu");
+  const addFileMenu = document.getElementById("team-add-file-menu");
+  const inviteMenu = document.getElementById("team-invite-menu");
+  if (addFromMenu) addFromMenu.addEventListener("click", () => { teamActionsDropdown.style.display = "none"; openAddFromCloudModal(); });
+  if (addFileMenu) addFileMenu.addEventListener("click", () => { teamActionsDropdown.style.display = "none"; document.getElementById("team-add-file")?.click(); });
+  if (inviteMenu) inviteMenu.addEventListener("click", () => { teamActionsDropdown.style.display = "none"; inviteToTeam(); });
 }
 if (els.teamSendBtn) {
   els.teamSendBtn.addEventListener("click", sendTeamMessage);
 }
 if (els.teamInviteBtn) {
   els.teamInviteBtn.addEventListener("click", inviteToTeam);
+}
+if (document.getElementById("start-new-peer-chat-btn")) {
+  document.getElementById("start-new-peer-chat-btn").addEventListener("click", () => {
+    setActiveSection("network");
+    showUploadBanner("Connect to peers in the Network tab, then start a chat.", "info");
+    setTimeout(hideUploadBanner, 3000);
+  });
+}
+function handleNewProjectChat() {
+  const name = prompt("Project / chat name:");
+  if (!name || !name.trim()) return;
+  const teamId = stateTeams.currentTeamId;
+  if (!teamId) {
+    showUploadBanner("Open a team first to create a project chat.", "error");
+    setTimeout(hideUploadBanner, 2500);
+    return;
+  }
+  const id = `thread_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  if (!stateTeams.projectChats[teamId]) stateTeams.projectChats[teamId] = [];
+  stateTeams.projectChats[teamId].push({ id, name: name.trim(), createdAt: new Date().toISOString() });
+  stateTeams.currentThreadId = id;
+  stateTeams.chatHistoryExpanded = stateTeams.projectChats[teamId].length > 3;
+  renderChatHistoryList();
+  switchToThread(id);
+  showUploadBanner(`Project chat "${name.trim()}" created.`, "success");
+  setTimeout(hideUploadBanner, 2000);
+}
+window.handleNewProjectChat = handleNewProjectChat;
+
+document.body.addEventListener("click", function (e) {
+  const btn = e.target.closest("#team-new-project-chat-btn");
+  if (!btn) return;
+  e.preventDefault();
+  e.stopPropagation();
+  e.stopImmediatePropagation();
+  handleNewProjectChat();
+}, true);
+
+function toggleTeamAddMenu() {
+  const menu = document.getElementById("team-add-menu");
+  if (menu) menu.style.display = menu.style.display === "none" ? "block" : "none";
+}
+if (document.getElementById("team-add-btn")) {
+  document.getElementById("team-add-btn").addEventListener("click", toggleTeamAddMenu);
+}
+if (document.getElementById("team-invite-btn")) {
+  document.getElementById("team-invite-btn").addEventListener("click", inviteToTeam);
+}
+const teamsSearchInput = document.getElementById("teams-search-input");
+if (teamsSearchInput) {
+  teamsSearchInput.addEventListener("input", () => {
+    stateTeams.searchQuery = teamsSearchInput.value || "";
+    const clearBtn = document.getElementById("teams-search-clear");
+    if (clearBtn) clearBtn.style.display = stateTeams.searchQuery.trim() ? "" : "none";
+    renderTeams();
+  });
+}
+const teamsSearchClear = document.getElementById("teams-search-clear");
+if (teamsSearchClear) {
+  teamsSearchClear.addEventListener("click", () => {
+    stateTeams.searchQuery = "";
+    if (teamsSearchInput) teamsSearchInput.value = "";
+    teamsSearchClear.style.display = "none";
+    renderTeams();
+  });
+}
+const stateAddFromCloud = { path: "/", selected: new Set(), items: [] };
+
+async function openAddFromCloudModal() {
+  document.getElementById("team-add-menu").style.display = "none";
+  stateAddFromCloud.path = "/";
+  stateAddFromCloud.selected.clear();
+  const modal = document.getElementById("add-from-cloud-modal");
+  const shareBtn = document.getElementById("add-from-cloud-share");
+  if (shareBtn) shareBtn.disabled = true;
+  if (modal) modal.classList.add("active");
+  await renderAddFromCloudList("/");
+}
+
+function closeAddFromCloudModal() {
+  const modal = document.getElementById("add-from-cloud-modal");
+  if (modal) modal.classList.remove("active");
+}
+
+async function renderAddFromCloudList(pathValue) {
+  const listEl = document.getElementById("add-from-cloud-list");
+  const bcEl = document.getElementById("add-from-cloud-breadcrumbs");
+  const shareBtn = document.getElementById("add-from-cloud-share");
+  if (!listEl) return;
+  try {
+    const res = await apiFetch(`/api/files?path=${encodeURIComponent(pathValue)}`);
+    const data = await res.json();
+    const items = data.items || [];
+    stateAddFromCloud.items = items;
+
+    if (bcEl) {
+      const parts = (pathValue || "/").replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
+      let html = '<button class="button secondary button-compact" data-path="/">Home</button>';
+      let acc = "";
+      parts.forEach((p) => {
+        acc += (acc ? "/" : "/") + p;
+        html += ` <span class="muted">/</span> <button class="button secondary button-compact" data-path="${escapeHtml(acc)}">${escapeHtml(p)}</button>`;
+      });
+      bcEl.innerHTML = html;
+      bcEl.querySelectorAll("button").forEach((b) => {
+        b.onclick = () => renderAddFromCloudList(b.dataset.path);
+      });
+    }
+
+    listEl.innerHTML = "";
+    if (pathValue !== "/") {
+      const parent = pathValue.replace(/\/[^/]+$/, "") || "/";
+      const row = document.createElement("div");
+      row.className = "add-from-cloud-item";
+      row.innerHTML = `<span class="btn-icon">📁</span><span class="item-name">..</span>`;
+      row.onclick = () => renderAddFromCloudList(parent);
+      listEl.appendChild(row);
+    }
+    items.forEach((item) => {
+      const row = document.createElement("div");
+      row.className = "add-from-cloud-item";
+      const relPath = pathValue === "/" ? item.name : pathValue + "/" + item.name;
+      if (item.type === "folder") {
+        row.innerHTML = `<span class="btn-icon">📁</span><span class="item-name">${escapeHtml(item.name)}</span>`;
+        row.onclick = () => renderAddFromCloudList(relPath);
+      } else {
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.dataset.path = relPath;
+        cb.onchange = (e) => {
+          e.stopPropagation();
+          if (cb.checked) stateAddFromCloud.selected.add(relPath);
+          else stateAddFromCloud.selected.delete(relPath);
+          if (shareBtn) shareBtn.disabled = stateAddFromCloud.selected.size === 0;
+        };
+        row.onclick = (e) => {
+          if (e.target !== cb) {
+            cb.checked = !cb.checked;
+            if (cb.checked) stateAddFromCloud.selected.add(relPath);
+            else stateAddFromCloud.selected.delete(relPath);
+            if (shareBtn) shareBtn.disabled = stateAddFromCloud.selected.size === 0;
+          }
+        };
+        row.appendChild(cb);
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "item-name";
+        nameSpan.textContent = item.name;
+        row.appendChild(nameSpan);
+        const sizeSpan = document.createElement("span");
+        sizeSpan.className = "item-size";
+        sizeSpan.textContent = formatBytes(item.size || 0);
+        row.appendChild(sizeSpan);
+      }
+      listEl.appendChild(row);
+    });
+  } catch (_) {
+    listEl.innerHTML = '<div class="value value-muted">Failed to load files.</div>';
+  }
+}
+
+async function shareSelectedFilesToTeam() {
+  const teamId = stateTeams.currentTeamId;
+  const selected = Array.from(stateAddFromCloud.selected);
+  if (!teamId || !selected.length) return;
+  for (const filePath of selected) {
+    try {
+      const shareRes = await apiFetch("/api/share", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: filePath, permission: "read-only", ttlMs: 86400000, scope: "local" }),
+      });
+      const data = await shareRes.json();
+      const shareUrl = `${stateMeta.lanBaseUrl || window.location.origin}/share/${data.shareId}`;
+      const filename = filePath.split("/").filter(Boolean).pop() || "file";
+      await apiFetch("/api/v1/teams/message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          teamId,
+          type: "file",
+          payload: { shareUrl, filename, shareId: data.shareId },
+        }),
+      });
+    } catch (_) {}
+  }
+  closeAddFromCloudModal();
+  showUploadBanner(`Shared ${selected.length} file(s) to team.`, "success");
+  setTimeout(hideUploadBanner, 2000);
+  await loadTeamMessages(teamId);
+}
+
+if (document.getElementById("team-add-from-cloud")) {
+  document.getElementById("team-add-from-cloud").addEventListener("click", openAddFromCloudModal);
+}
+if (document.getElementById("add-from-cloud-close")) {
+  document.getElementById("add-from-cloud-close").addEventListener("click", closeAddFromCloudModal);
+}
+if (document.getElementById("add-from-cloud-cancel")) {
+  document.getElementById("add-from-cloud-cancel").addEventListener("click", closeAddFromCloudModal);
+}
+if (document.getElementById("add-from-cloud-share")) {
+  document.getElementById("add-from-cloud-share").addEventListener("click", shareSelectedFilesToTeam);
+}
+if (document.getElementById("team-add-file")) {
+  document.getElementById("team-add-file").addEventListener("click", async () => {
+    document.getElementById("team-add-menu").style.display = "none";
+    if (els.uploadInput && !els.uploadInput.disabled) {
+      els.uploadInput.accept = "*";
+      els.uploadInput.onchange = async (e) => {
+        const files = e.target.files;
+        if (!files?.length) return;
+        const file = files[0];
+        const formData = new FormData();
+        formData.append("files", file);
+        formData.append("path", state.path || "/");
+        try {
+          const upRes = await apiFetch("/api/upload", { method: "POST", body: formData });
+          const upData = await upRes.json().catch(() => ({}));
+          if (!upRes.ok) throw new Error(upData.error || "Upload failed");
+          const path = (upData.saved_to || state.path || "/") + "/" + file.name;
+          const shareRes = await apiFetch("/api/share", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path, permission: "read-only", ttlMs: 86400000, scope: "local" }),
+          });
+          const shareData = await shareRes.json();
+          const shareUrl = `${stateMeta.lanBaseUrl || window.location.origin}/share/${shareData.shareId}`;
+          await apiFetch("/api/v1/teams/message", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              teamId: stateTeams.currentTeamId,
+              type: "file",
+              payload: { shareUrl, filename: file.name, shareId: shareData.shareId },
+            }),
+          });
+          showUploadBanner("File added to team chat.", "success");
+          setTimeout(hideUploadBanner, 2000);
+          await loadTeamMessages(stateTeams.currentTeamId);
+        } catch (err) {
+          showUploadBanner(err.message || "Failed.");
+          setTimeout(hideUploadBanner, 2500);
+        }
+        els.uploadInput.onchange = null;
+      };
+      els.uploadInput.click();
+    }
+  });
 }
 if (els.teamMessageInput) {
   els.teamMessageInput.addEventListener("keydown", (e) => {
@@ -1906,6 +3004,20 @@ if (els.shareQrModal) {
   });
 }
 
+if (els.notificationsClearAll) {
+  els.notificationsClearAll.addEventListener("click", async () => {
+    await apiFetch("/api/v1/notifications/clear", { method: "POST" });
+    await loadNotifications();
+  });
+}
+if (els.muteNotificationsBtn) {
+  els.muteNotificationsBtn.addEventListener("click", () => {
+    stateMeta.notificationsMuted = !stateMeta.notificationsMuted;
+    localStorage.setItem("joincloud:mute-notifications", stateMeta.notificationsMuted ? "1" : "0");
+    updateMuteButton();
+  });
+}
+
 els.refreshFiles.onclick = () => loadFiles(state.path);
 els.refreshShares.onclick = () => loadShares();
 els.revokeSelected.onclick = () => revokeSelectedShares();
@@ -1918,6 +3030,9 @@ if (els.refreshActivity) {
 els.closeModal.onclick = closeShareModal;
 els.cancelShare.onclick = closeShareModal;
 els.createShare.onclick = createShare;
+if (els.shareWithUserBtn) els.shareWithUserBtn.onclick = shareWithUser;
+if (els.shareWithTeamBtn) els.shareWithTeamBtn.onclick = shareWithTeam;
+if (els.shareTeamPickerClose) els.shareTeamPickerClose.onclick = closeShareTeamPicker;
 els.shareTtl.onchange = () => {
   els.shareTtlCustom.style.display = els.shareTtl.value === "custom" ? "block" : "none";
 };
@@ -2102,6 +3217,7 @@ setInterval(async () => {
   if (els.appLayout.style.display !== "none") {
     await loadRuntimeStatus();
     await loadLogs();
+    await loadNotifications();
     if (state.isAdmin) {
       await loadPendingAccessRequests();
       await loadApprovedDevices();

@@ -484,6 +484,21 @@ async function bootstrap() {
   });
 
   const app = express();
+  app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    const isPrivateOrigin = origin && (
+      origin.startsWith("http://127.0.0.1") ||
+      origin.startsWith("http://[::1]") ||
+      /^http:\/\/192\.168\.\d{1,3}\.\d{1,3}(:\d+)?$/.test(origin) ||
+      /^http:\/\/10\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?$/.test(origin) ||
+      /^http:\/\/172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}(:\d+)?$/.test(origin)
+    );
+    if (isPrivateOrigin) res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-JoinCloud-Fingerprint, X-JoinCloud-Token");
+    if (req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+  });
   app.use(express.json());
   const accessControl = new AccessControlStore({
     storagePath: config.storage.accessControlPath,
@@ -597,8 +612,17 @@ async function bootstrap() {
     randomStream.pipe(res);
   });
 
-  app.get("/api/v1/diagnostics/info", (_req, res) => {
+  app.get("/api/v1/diagnostics/info", async (_req, res) => {
     const uptimeMs = Date.now() - (global.SERVER_START_TIME || Date.now());
+    const currentUptimeSeconds = Math.floor(uptimeMs / 1000);
+    let dailyAverageSeconds = null;
+    try {
+      const sinceDate = new Date();
+      sinceDate.setDate(sinceDate.getDate() - 30);
+      const rows = await telemetry.listDailyMetrics(sinceDate.toISOString().slice(0, 10));
+      const total = rows.reduce((s, r) => s + (r.uptime_seconds || 0), 0);
+      dailyAverageSeconds = rows.length > 0 ? Math.round(total / rows.length) : null;
+    } catch (_) {}
     const displayName = userConfig?.display_name || "Join";
     const endpoints = getNetworkEndpoints(displayName, config.server.port, config.server.shareBasePath);
     res.json({
@@ -608,7 +632,8 @@ async function bootstrap() {
       best_lan_ip: endpoints.bestLanIp,
       port: config.server.port,
       share_port: config.server.sharePort,
-      uptime_seconds: Math.floor(uptimeMs / 1000),
+      uptime_seconds: currentUptimeSeconds,
+      uptime_daily_average_seconds: dailyAverageSeconds,
     });
   });
 
@@ -719,6 +744,13 @@ async function bootstrap() {
       fingerprint,
       user_agent: String(body.user_agent || req.headers["user-agent"] || ""),
       ip: getClientIp(req),
+    });
+    addServerNotification({
+      type: "connect_request",
+      title: "Connect request",
+      body: `${String(body.device_name || "Unknown").trim() || "A device"} wants to connect`,
+      deviceId: fingerprint,
+      targetRoute: "home",
     });
     logger.info("device access request created");
     runtimeTelemetry.increment("device_requests");
@@ -1067,29 +1099,80 @@ async function bootstrap() {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Cache-Control", "no-store");
 
-    const archive = archiver("zip", { zlib: { level: 9 } });
-    archive.on("error", () => {
+    const zipLevel = Number(process.env.JOINCLOUD_ZIP_LEVEL) || 0;
+    const archive = archiver("zip", { zlib: { level: zipLevel } });
+    const startTime = Date.now();
+    let bytesWritten = 0;
+    let lastLogAt = startTime;
+
+    const clientIp = getClientIp(req);
+    req.on("aborted", () => {
+      try {
+        if (typeof archive.abort === "function") archive.abort();
+        else archive.destroy();
+      } catch (_) {}
+      if (!res.destroyed) res.destroy();
+      const durationMs = Date.now() - startTime;
+      const mbPerSec = durationMs > 0 ? bytesWritten / (1024 * 1024) / (durationMs / 1000) : 0;
+      logger.info("zip download aborted", { client_ip: clientIp, bytes_written: bytesWritten, duration_ms: durationMs, mb_per_sec: mbPerSec.toFixed(2) });
+    });
+
+    res.on("drain", () => {
+      const now = Date.now();
+      if (now - lastLogAt > 10000 && bytesWritten > 0) {
+        lastLogAt = now;
+        const durationMs = now - startTime;
+        const mbPerSec = durationMs > 0 ? bytesWritten / (1024 * 1024) / (durationMs / 1000) : 0;
+        logger.info("zip download progress", { bytes_written: bytesWritten, duration_ms: durationMs, mb_per_sec: mbPerSec.toFixed(2) });
+      }
+    });
+
+    const countingStream = new stream.PassThrough({ highWaterMark: 2 * 1024 * 1024 });
+    countingStream.on("data", (chunk) => {
+      bytesWritten += chunk.length;
+    });
+
+    archive.on("error", (err) => {
+      logger.error("zip archive error", { error: err?.message });
       if (!res.headersSent) {
         res.status(500).end("zip_failed");
-      } else {
+      } else if (!res.destroyed) {
         res.destroy();
       }
     });
-    archive.pipe(res);
-    if (!selected.length) {
-      archive.directory(share.targetPath, false);
-    } else {
-      for (const relPath of selected) {
-        const fullPath = ensureWithinShareRoot(share.targetPath, path.join(share.targetPath, relPath));
-        const stats = await fs.stat(fullPath);
-        if (stats.isDirectory()) {
-          archive.directory(fullPath, relPath);
-        } else if (stats.isFile()) {
-          archive.file(fullPath, { name: relPath });
+
+    archive.pipe(countingStream);
+    pipeline(countingStream, res).catch((err) => {
+      const isAbort = err.code === "ERR_STREAM_PREMATURE_CLOSE" || err.message?.includes("aborted");
+      if (!isAbort) logger.error("zip download stream error", { error: err?.message });
+      if (!res.headersSent) res.status(500).end("zip_failed");
+      else if (!res.destroyed) res.destroy();
+    });
+
+    try {
+      if (!selected.length) {
+        archive.directory(share.targetPath, false);
+      } else {
+        for (const relPath of selected) {
+          if (req.destroyed || res.destroyed) break;
+          const fullPath = ensureWithinShareRoot(share.targetPath, path.join(share.targetPath, relPath));
+          const stats = await fs.stat(fullPath);
+          if (stats.isDirectory()) {
+            archive.directory(fullPath, relPath);
+          } else if (stats.isFile()) {
+            archive.file(fullPath, { name: relPath });
+          }
         }
       }
+      await archive.finalize();
+      const durationMs = Date.now() - startTime;
+      const mbPerSec = durationMs > 0 ? bytesWritten / (1024 * 1024) / (durationMs / 1000) : 0;
+      logger.info("zip download complete", { bytes_written: bytesWritten, duration_ms: durationMs, mb_per_sec: mbPerSec.toFixed(2), client_ip: clientIp });
+    } catch (err) {
+      logger.error("zip download error", { error: err?.message });
+      if (!res.headersSent) res.status(500).end("zip_failed");
+      else if (!res.destroyed) res.destroy();
     }
-    await archive.finalize();
   });
 
   app.get("/share/:shareId/download", async (req, res) => {
@@ -1339,6 +1422,15 @@ async function bootstrap() {
     const endpoints = getNetworkEndpoints(displayName, config.server.port, config.server.shareBasePath);
     const lanIp = endpoints.bestLanIp;
     const uptimeMs = Date.now() - (global.SERVER_START_TIME || Date.now());
+    const currentUptimeSeconds = Math.floor(uptimeMs / 1000);
+    let dailyAverageSeconds = null;
+    try {
+      const sinceDate = new Date();
+      sinceDate.setDate(sinceDate.getDate() - 30);
+      const rows = await telemetry.listDailyMetrics(sinceDate.toISOString().slice(0, 10));
+      const total = rows.reduce((s, r) => s + (r.uptime_seconds || 0), 0);
+      dailyAverageSeconds = rows.length > 0 ? Math.round(total / rows.length) : null;
+    } catch (_) {}
     const mdnsResolvable = sharingEnabled ? await checkMdnsResolvable(mdnsHostname) : false;
     res.json({
       status: sharingEnabled ? "running" : "stopped",
@@ -1353,7 +1445,8 @@ async function bootstrap() {
       storageLabel: "Local storage",
       bestLanIp: lanIp,
       port: config.server.port,
-      uptime_seconds: Math.floor(uptimeMs / 1000),
+      uptime_seconds: currentUptimeSeconds,
+      uptime_daily_average_seconds: dailyAverageSeconds,
       network_changed_at: lastNetworkChangeAt || null,
       mdns_hostname: mdnsHostname,
       mdns_resolvable: mdnsResolvable,
@@ -1975,6 +2068,34 @@ async function bootstrap() {
     res.json(peers);
   });
 
+  app.get("/api/v1/network/display-names", async (_req, res) => {
+    const map = {};
+    map[userConfig?.user_id || "host"] = userConfig?.display_name || "Join";
+    for (const p of discoveryManager.getPeers()) {
+      if (p.deviceId) map[p.deviceId] = p.displayName || p.display_name || "Unknown device";
+    }
+    const approved = await accessControl.listApprovedDevices();
+    for (const d of approved) {
+      if (d.device_id) map[d.device_id] = d.device_name || map[d.device_id] || "Unknown device";
+    }
+    res.json(map);
+  });
+
+  app.post("/api/v1/network/search", async (req, res) => {
+    const waitMs = Math.min(5000, Math.max(2000, Number(req.query.wait) || 4000));
+    await new Promise((r) => setTimeout(r, waitMs));
+    const peers = discoveryManager.getPeers().map((p) => ({
+      deviceId: p.deviceId,
+      display_name: p.displayName,
+      status: p.status,
+      bestIp: p.bestIp,
+      hostname: p.hostname,
+      port: p.port,
+      source: p.source,
+    }));
+    res.json(peers);
+  });
+
   app.post("/api/v1/network/manual-connect", async (req, res) => {
     const access = getRequestContext(req);
     if (access.role !== "host") {
@@ -2071,9 +2192,10 @@ async function bootstrap() {
 
   app.post("/api/v1/teams", async (req, res) => {
     const deviceId = getCurrentDeviceId(req);
-    const { teamName } = req.body || {};
+    const { teamName, department } = req.body || {};
     const team = teamsStore.createTeam({
       teamName: String(teamName || "").trim() || "Unnamed Team",
+      department: String(department || "").trim(),
       createdByDeviceId: deviceId,
     });
     res.json(team);
@@ -2174,7 +2296,33 @@ async function bootstrap() {
       return;
     }
     const team = teamsStore.getTeam(teamId);
-    const offlineCount = 0;
+    let offlineCount = 0;
+    const otherMembers = (team?.members || []).filter((m) => m !== deviceId);
+    for (const memberId of otherMembers) {
+      const peer = discoveryManager?.getPeer?.(memberId);
+      if (peer?.bestIp) {
+        const baseUrl = `http://${peer.bestIp}:${peer.port || config.server.port}`;
+        try {
+          const r = await fetch(`${baseUrl}/api/v1/teams/receive`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              teamId,
+              senderDeviceId: deviceId,
+              messageId: msg.messageId,
+              timestamp: msg.timestamp,
+              type: msg.type,
+              payload: msg.payload,
+            }),
+          });
+          if (!r.ok) offlineCount++;
+        } catch (_) {
+          offlineCount++;
+        }
+      } else {
+        offlineCount++;
+      }
+    }
     res.json({ message: msg, offlineCount });
   });
 
@@ -2204,8 +2352,94 @@ async function bootstrap() {
       payload: payload || {},
     });
     teamsStore.persist();
+    const teamName = team?.name || team?.teamName || "Team";
+    const fn = type === "file" && payload?.filename ? payload.filename : null;
+    const bodyText = fn ? `shared '${fn}'` : "sent a message";
+    addServerNotification({
+      type: "team_message",
+      title: `New message in ${teamName}`,
+      body: fn ? `${bodyText} in ${teamName}` : `New message in ${teamName}`,
+      teamId,
+      deviceId: senderDeviceId,
+      targetRoute: `teams?team=${teamId}`,
+    });
     res.json({ success: true });
   });
+
+  app.post("/api/v1/share/notify", async (req, res) => {
+    const { fromDeviceId, fromDisplayName, shareUrl, filename } = req.body || {};
+    if (!shareUrl) {
+      res.status(400).json({ error: "shareUrl required" });
+      return;
+    }
+    logger.info("share notification received", { from: fromDisplayName || fromDeviceId });
+    addServerNotification({
+      type: "share",
+      title: "File shared",
+      body: `${fromDisplayName || "Someone"} shared ${filename || "a file"}`,
+      deviceId: fromDeviceId,
+      targetRoute: "shares",
+    });
+    if (typeof global.__shareNotifications === "undefined") global.__shareNotifications = [];
+    global.__shareNotifications.push({
+      fromDeviceId,
+      fromDisplayName: fromDisplayName || "Unknown",
+      shareUrl,
+      filename: filename || "file",
+      receivedAt: new Date().toISOString(),
+    });
+    if (global.__shareNotifications.length > 50) global.__shareNotifications.shift();
+    res.json({ success: true });
+  });
+
+  app.get("/api/v1/share/notifications", (_req, res) => {
+    const list = global.__shareNotifications || [];
+    res.json(list);
+  });
+
+  if (typeof global.__notifications === "undefined") global.__notifications = [];
+  app.get("/api/v1/notifications", (_req, res) => {
+    const list = (global.__notifications || []).slice(0, 50);
+    res.json({ notifications: list, unreadCount: list.filter((n) => !n.read).length });
+  });
+  app.post("/api/v1/notifications/clear", (_req, res) => {
+    global.__notifications = [];
+    res.json({ cleared: true });
+  });
+  app.post("/api/v1/notifications/:id/read", (req, res) => {
+    const n = (global.__notifications || []).find((x) => x.id === req.params.id);
+    if (n) n.read = true;
+    res.json({ ok: true });
+  });
+  app.delete("/api/v1/notifications/:id", (req, res) => {
+    const list = global.__notifications || [];
+    const idx = list.findIndex((x) => x.id === req.params.id);
+    if (idx >= 0) list.splice(idx, 1);
+    res.json({ ok: true });
+  });
+  app.post("/api/v1/notifications/mark-team-read/:teamId", (req, res) => {
+    const teamId = req.params.teamId;
+    (global.__notifications || []).forEach((n) => {
+      if (n.teamId === teamId) n.read = true;
+    });
+    res.json({ ok: true });
+  });
+  function addServerNotification({ type, title, body, teamId, deviceId, targetRoute }) {
+    const list = global.__notifications || [];
+    list.unshift({
+      id: crypto.randomUUID(),
+      type: type || "info",
+      title: title || "Notification",
+      body: body || "",
+      timestamp: new Date().toISOString(),
+      read: false,
+      teamId: teamId || null,
+      deviceId: deviceId || null,
+      targetRoute: targetRoute || null,
+    });
+    if (list.length > 100) list.pop();
+    global.__notifications = list;
+  }
 
   app.get("/api/v1/teams/:teamId/messages", (req, res) => {
     const deviceId = getCurrentDeviceId(req);
@@ -2261,6 +2495,8 @@ async function bootstrap() {
   server.on("connection", (socket) => {
     socket.setNoDelay(true);
   });
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 66000;
 
   shareOnlyServer = http.createServer((req, res) => {
     const url = req.url || "/";
@@ -2275,6 +2511,8 @@ async function bootstrap() {
   shareOnlyServer.on("connection", (socket) => {
     socket.setNoDelay(true);
   });
+  shareOnlyServer.keepAliveTimeout = 65000;
+  shareOnlyServer.headersTimeout = 66000;
 
   function handleListenError(name, host, port, error) {
     if (error && error.code === "EADDRINUSE") {
