@@ -785,11 +785,6 @@ async function bootstrap() {
     return access.device_id || "unknown";
   }
 
-  const runtimeTelemetry = new RuntimeTelemetryStore({
-    storagePath: config.storage.runtimeTelemetryPath,
-  });
-  await runtimeTelemetry.init();
-  runtimeTelemetry.increment("total_app_starts");
   let sharingEnabled = true;
 
   async function ensureDeviceFolderForSession(session) {
