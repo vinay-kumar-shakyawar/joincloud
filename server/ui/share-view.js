@@ -238,6 +238,7 @@
     allLink.className = "button";
     allLink.href = `/share/${encodeURIComponent(shareId)}/download.zip`;
     allLink.textContent = "Download All (ZIP)";
+    allLink.title = "Streams ZIP directly. Large folders may take minutes. If download fails, click again to retry.";
     controls.appendChild(allLink);
 
     if (folderPath && folderPath !== "/") {
@@ -245,8 +246,17 @@
       folderZipLink.className = "button secondary";
       folderZipLink.href = `/share/${encodeURIComponent(shareId)}/download.zip?paths=${encodeURIComponent(folderPath.replace(/^\//, ""))}`;
       folderZipLink.textContent = "Download Folder (ZIP)";
+      folderZipLink.title = "Streams ZIP directly. If download fails, click again to retry.";
       controls.appendChild(folderZipLink);
     }
+
+    const zipHint = document.createElement("div");
+    zipHint.className = "muted";
+    zipHint.style.fontSize = "12px";
+    zipHint.style.marginTop = "6px";
+    zipHint.textContent = "Large folders stream directly. If download fails, click again to retry.";
+    controls.appendChild(zipHint);
+
 
     const selectedLink = document.createElement("button");
     selectedLink.className = "button secondary";

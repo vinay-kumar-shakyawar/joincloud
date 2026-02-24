@@ -17,6 +17,7 @@
         <span class="brand-user" id="header-display-name">Join</span>
       </div>
       <div class="header-actions">
+        <button class="button ghost" id="mute-notifications-btn" title="Mute notifications"><span id="mute-icon">🔔</span></button>
         <button class="button" id="add-file-header"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></span> Add File</button>
         <button class="button secondary" id="toggle-sharing">Stop</button>
         <div class="value value-muted" id="upload-destination-label"></div>
@@ -73,11 +74,11 @@
     <main class="layout" id="app-layout" style="display:none;">
       <aside class="sidebar">
         <nav class="nav-group">
-          <button class="nav-button active" data-section="home" title="Home"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></span><span class="nav-label">Home</span></button>
+          <button class="nav-button" data-section="home" title="Home"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></span><span class="nav-label">Home</span><span class="nav-unread-dot" id="home-nav-unread-dot" style="display:none"></span></button>
           <button class="nav-button" data-section="files" title="Files"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg></span><span class="nav-label">Files</span></button>
           <button class="nav-button" data-section="devices" title="Devices"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4V6zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1zm-1 9h-4v-7h4v7z"/></svg></span><span class="nav-label">Devices</span></button>
           <button class="nav-button" data-section="shares" title="Shares"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92c0-1.61-1.31-2.92-2.92-2.92z"/></svg></span><span class="nav-label">Shares</span></button>
-          <button class="nav-button" data-section="teams" title="Teams"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg></span><span class="nav-label">Teams</span></button>
+          <button class="nav-button nav-button-teams" data-section="teams" title="Teams"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg></span><span class="nav-label">Teams</span><span class="nav-unread-dot" id="teams-nav-unread-dot" style="display:none"></span></button>
           <button class="nav-button" data-section="activity" title="Activity"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></svg></span><span class="nav-label">Activity</span></button>
         </nav>
         <nav class="nav-group nav-group-bottom">
@@ -110,15 +111,22 @@
           </div>
         </div>
         <div class="home-section-divider">
-          <div class="label">mDNS (Cloud UI access)</div>
-          <div class="value mono" id="mdns-hostname" style="font-size:13px">--</div>
-          <div class="value value-muted" id="mdns-ip-fallback" style="font-size:12px;margin-top:2px">--</div>
-          <span class="badge" id="mdns-status-badge" style="margin-top:6px">--</span>
-          <a class="button secondary" id="mdns-open-btn" href="#" target="_blank" rel="noopener" style="margin-top:8px;display:inline-flex;text-decoration:none">Open Cloud UI</a>
+          <div class="label">Network Discovery (Cloud UI access)</div>
+          <div class="value mono" id="network-discovery-hostname" style="font-size:13px">--</div>
+          <div class="value value-muted" id="network-discovery-ip" style="font-size:12px;margin-top:2px">--</div>
+          <span class="badge" id="network-discovery-badge" style="margin-top:6px">--</span>
+          <a class="button secondary" id="network-discovery-open-btn" href="#" target="_blank" rel="noopener" style="margin-top:8px;display:inline-flex;text-decoration:none">Open Cloud UI</a>
         </div>
         <div class="home-section-divider">
           <div class="label">Public File Sharing</div>
           <div class="value value-muted" id="public-status">Coming soon</div>
+        </div>
+        <div class="home-section-divider">
+          <div class="row space-between">
+            <div class="label">Notifications <span class="badge" id="notifications-unread-badge" style="display:none">0</span></div>
+            <button class="button ghost button-compact" id="notifications-clear-all">Clear all</button>
+          </div>
+          <div class="notifications-list" id="notifications-list"></div>
         </div>
         <div class="home-section-divider">
           <div class="label">Pending Access Requests <span class="badge" id="pending-access-count">0</span></div>
@@ -183,23 +191,139 @@
         <div class="share-list" id="share-list"></div>
       </section>
 
-      <section class="card section" data-section="teams">
-        <div class="row space-between">
-          <h2>Teams</h2>
-          <button class="button" id="create-team-btn">Create Team</button>
-        </div>
-        <div class="teams-list" id="teams-list"></div>
-        <div class="team-detail" id="team-detail" style="display:none">
-          <div class="team-detail-header">
-            <button class="button secondary" id="team-detail-back">← Back</button>
-            <h3 id="team-detail-name"></h3>
-            <button class="button secondary" id="team-invite-btn">Invite</button>
+     <section class="card section teams-section" data-section="teams">
+        <div class="teams-layout" id="teams-layout">
+          <aside class="teams-left-panel" id="teams-left-panel">
+            <div class="teams-left-panel-header">
+              <button class="button ghost button-compact teams-collapse-btn" id="teams-left-collapse-btn" title="Collapse" aria-label="Collapse teams list"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg></button>
+            </div>
+            <div class="teams-left-header">
+              <div class="teams-user-card">
+                <div class="teams-avatar" id="teams-user-avatar">J</div>
+                <div class="teams-user-info">
+                  <div class="teams-user-name" id="teams-user-name">Join</div>
+                  <div class="teams-user-role value-muted">Team member</div>
+                </div>
+                <button class="button ghost button-compact" id="teams-new-chat-btn" title="New chat"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></button>
+              </div>
+              <div class="teams-search-wrap">
+                <svg class="teams-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.11-.59 4.27-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                <input class="input teams-search-input" id="teams-search-input" type="text" placeholder="Search teams..." autocomplete="off" />
+                <button class="teams-search-clear" id="teams-search-clear" type="button" title="Clear search" aria-label="Clear search" style="display:none">×</button>
+              </div>
+              <div class="teams-search-empty" id="teams-search-empty" style="display:none"><span class="value value-muted">No teams match '<span id="teams-search-empty-query"></span>'</span><button class="button ghost button-compact" id="teams-search-clear-btn">Clear search</button></div>
+            </div>
+            <div class="teams-menu-container" id="teams-menu-container">
+              <div class="teams-collapsible-section" data-section="peers">
+                <button class="collapsible-header" data-collapsible-target="peers-collapsible-content" aria-expanded="true">
+                  <span class="collapsible-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg></span>
+                  <span class="collapsible-label">Peers</span>
+                  <span class="collapsible-chevron">▼</span>
+                </button>
+                <div class="collapsible-content" id="peers-collapsible-content">
+                  <button class="button secondary teams-list-action-btn" id="start-new-peer-chat-btn">
+                    <span class="btn-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z"/></svg></span>
+                    Start a new Chat
+                  </button>
+                </div>
+              </div>
+              <div class="teams-collapsible-section" data-section="teams-list">
+                <button class="collapsible-header" data-collapsible-target="teams-collapsible-content" aria-expanded="true">
+                  <span class="collapsible-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5zm0 2.18l8 4v8.82c0 4.52-2.98 8.69-7 9.82-4.02-1.13-7-5.3-7-9.82V8.18l8-4z"/></svg></span>
+                  <span class="collapsible-label">Teams</span>
+                  <span class="collapsible-chevron">▼</span>
+                </button>
+                <div class="collapsible-content" id="teams-collapsible-content">
+                  <div class="teams-list" id="teams-list"></div>
+                </div>
+              </div>
+            </div>
+            <div class="teams-left-footer">
+              <button class="button" id="create-team-btn"><span class="btn-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></span> Create Team</button>
+            </div>
+          </aside>
+          <div class="teams-center-panel" id="teams-center-panel">
+            <div class="teams-empty-state" id="teams-empty-state">
+              <div class="teams-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor" opacity="0.4"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z"/></svg></div>
+              <div class="teams-empty-title">Select a team</div>
+              <div class="teams-empty-desc value-muted">Choose a team from the list to start chatting</div>
+            </div>
+            <div class="team-detail" id="team-detail" style="display:none">
+            <div class="team-detail-main">
+              <div class="team-chat-header">
+                <button class="button ghost button-compact teams-expand-left" id="teams-expand-left-btn" title="Teams" aria-label="Show teams list" style="display:none"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg></button>
+                <button class="button ghost button-compact" id="team-detail-back"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg></button>
+                <div class="team-chat-header-center">
+                  <div class="team-chat-avatar" id="team-chat-avatar">T</div>
+                  <div class="team-chat-header-title">
+                    <div class="team-chat-name" id="team-detail-name"></div>
+                    <div class="team-chat-status value-muted">Team chat</div>
+                  </div>
+                </div>
+                <div class="team-chat-header-actions">
+                  <button class="button ghost button-compact teams-panel-toggle" id="team-toggle-right" title="Info" aria-label="Toggle team info"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></button>
+                  <div class="team-header-actions-main">
+                    <button class="button secondary" id="team-add-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg> Add</button>
+                    <button class="button secondary" id="team-invite-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg> Invite</button>
+                  </div>
+                  <div class="team-header-actions-menu" style="display:none">
+                    <button class="button ghost button-compact" id="team-actions-menu-btn" title="More actions"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg></button>
+                    <div class="team-actions-dropdown" id="team-actions-dropdown" style="display:none">
+                      <button class="button ghost" id="team-add-from-menu"><span class="btn-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg></span> Add from Cloud</button>
+                      <button class="button ghost" id="team-add-file-menu"><span class="btn-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg></span> Add File</button>
+                      <button class="button ghost" id="team-invite-menu"><span class="btn-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg></span> Invite</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="team-add-menu" id="team-add-menu" style="display:none">
+                <button class="button secondary" id="team-add-from-cloud"><span class="btn-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg></span> Add from Cloud</button>
+                <button class="button secondary" id="team-add-file"><span class="btn-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg></span> Add File</button>
+              </div>
+              <div class="team-chat-feed" id="team-chat-feed"></div>
+              <div class="team-message-input-wrap">
+                <input class="input team-message-input-field" id="team-message-input" placeholder="Write something..." />
+                <button class="button team-send-btn" id="team-send-btn"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
+              </div>
+            </div>
           </div>
-          <div class="team-chat-feed" id="team-chat-feed"></div>
-          <div class="team-message-input">
-            <input class="input" id="team-message-input" placeholder="Type a message..." />
-            <button class="button secondary" id="team-send-btn">Send</button>
+         
           </div>
+          <aside class="team-detail-right-slot" id="team-detail-right-slot">
+            <div class="team-detail-right-header">
+              <button class="button ghost button-compact teams-collapse-btn" id="teams-right-collapse-btn" title="Collapse" aria-label="Collapse team info"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8.59 16.59L10 18l6-6-6-6-1.41 1.41L13.17 12z"/></svg></button>
+            </div>
+            <aside class="team-detail-right-panel" id="team-detail-right-panel">
+              <div class="team-profile-card">
+                <div class="team-profile-avatar" id="team-profile-avatar">T</div>
+                <div class="team-profile-name" id="team-profile-name">Team</div>
+                <div class="team-profile-role value-muted" id="team-profile-role">Team chat</div>
+              </div>
+              <div class="chat-history-section">
+                <div class="teams-panel-label">Chat History</div>
+                <div class="chat-history-list" id="chat-history-list"></div>
+                <button class="button ghost button-compact" id="chat-history-see-more" style="display:none;width:100%;margin-top:6px;font-size:12px">See more</button>
+                <button type="button" class="button secondary" id="team-new-project-chat-btn">
+                  <span class="btn-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></span>
+                  New Project Chat
+                </button>
+              </div>
+              <div class="team-attachments-section">
+                <div class="teams-panel-label">Attachments</div>
+                <div class="team-attachments-grid">
+                  <button type="button" class="team-attachment-type" data-filter="pdf" title="PDF files"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm-1 2l5 5h-5V4zm-1 11l-2-2 2-2 2 2-2 2z"/></svg><span>PDF</span></button>
+                  <button type="button" class="team-attachment-type" data-filter="video" title="Video files"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.89 2 1.99 2h16c1.1 0 2-.9 2-2V4h-3z"/></svg><span>VIDEO</span></button>
+                  <button type="button" class="team-attachment-type" data-filter="audio" title="Audio files"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg><span>MP3</span></button>
+                  <button type="button" class="team-attachment-type" data-filter="image" title="Image files"><svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg><span>IMAGE</span></button>
+                </div>
+                <div class="team-attachments-list-wrap">
+                  <div class="team-attachments-list" id="team-attachments-list"></div>
+                  <div class="team-attachments-empty" id="team-attachments-empty">No attachments yet</div>
+                </div>
+                <button type="button" class="button ghost button-compact" id="team-attachments-view-all" style="width:100%;margin-top:8px">View All</button>
+              </div>
+            </aside>
+          </aside>
         </div>
       </section>
       
@@ -325,8 +449,11 @@
       </section>
 
       <section class="card section" data-section="network">
-        <h2>Network</h2>
-        <p class="value value-muted" style="margin:0 0 12px">mDNS discovery and manual connect.</p>
+         <div class="row space-between">
+          <h2>Network</h2>
+          <button class="button secondary" id="network-search-btn"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.11-.59 4.27-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg></span><span id="network-search-btn-text">Search</span></button>
+        </div>
+        <p class="value value-muted" style="margin:0 0 12px">Network Discovery and Manual Connect.</p>
         <div class="network-settings">
           <div class="network-setting-row">
             <div>
@@ -348,8 +475,11 @@
           </div>
           <div class="value value-muted" id="manual-connect-status" style="margin-top:6px;font-size:12px"></div>
         </div>
-        <div class="label" style="margin-top:16px">Discovered Peers</div>
+        <div class="label" style="margin-top:16px">Nearby Devices</div>
         <div class="network-list" id="network-list"></div>
+        <div class="label" style="margin-top:20px">Connected Users</div>
+        <p class="value value-muted" style="margin:0 0 8px;font-size:12px">Devices that have been approved to access this JoinCloud.</p>
+        <div class="network-list" id="connected-users-list"></div>
       </section>
 
       <section class="card section" data-section="devices">
@@ -460,7 +590,75 @@
           <button class="button" id="create-share"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92c0-1.61-1.31-2.92-2.92-2.92z"/></svg></span>Create Share</button>
         </div>
         <div class="modal-result" id="share-result"></div>
-        <button class="button secondary" id="copy-share" style="display:none">Copy Link</button>
+        <div class="share-extra-actions" id="share-extra-actions" style="display:none;margin-top:12px;flex-wrap:wrap;gap:8px">
+          <button class="button secondary" id="copy-share">Copy Link</button>
+          <button class="button secondary" id="share-with-user-btn">Share with User</button>
+          <button class="button secondary" id="share-with-team-btn">Share with Team</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="create-team-modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Create Team</h3>
+          <button class="button ghost" id="create-team-modal-close">✕</button>
+        </div>
+        <div class="modal-body" id="create-team-modal-body">
+          <label class="label">Team Name (required)</label>
+          <input class="input" id="create-team-name" placeholder="My Team" />
+          <label class="label" style="margin-top:12px">Department / Purpose (required)</label>
+          <input class="input" id="create-team-department" placeholder="Engineering, Marketing, etc." />
+        </div>
+        <div class="modal-actions">
+          <button class="button secondary" id="create-team-modal-cancel">Cancel</button>
+          <button class="button" id="create-team-modal-submit">Create</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal" id="add-from-cloud-modal">
+      <div class="modal-content add-from-cloud-modal-content">
+        <div class="modal-header">
+          <h3>Add from Cloud</h3>
+          <button class="button ghost" id="add-from-cloud-close">✕</button>
+        </div>
+        <div class="modal-body add-from-cloud-body">
+          <p class="value value-muted" style="margin:0 0 12px">Select one or more files from your JoinCloud storage to share to the team.</p>
+          <div class="add-from-cloud-breadcrumbs" id="add-from-cloud-breadcrumbs"></div>
+          <div class="add-from-cloud-list file-browser-style" id="add-from-cloud-list"></div>
+        </div>
+        <div class="modal-actions">
+          <button class="button secondary" id="add-from-cloud-cancel">Cancel</button>
+          <button class="button" id="add-from-cloud-share" disabled>Share to Team</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal" id="share-team-picker-modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Share with Team</h3>
+          <button class="button ghost" id="share-team-picker-close">✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="value value-muted" style="margin:0 0 12px">Select a team to share with.</p>
+          <div id="share-team-picker-list"></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal" id="add-members-modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Add Members</h3>
+          <button class="button ghost" id="add-members-modal-close">✕</button>
+        </div>
+        <div class="modal-body">
+          <p class="value value-muted" style="margin:0 0 12px">Select up to 5 members from discovered devices. Connect to devices in Network first.</p>
+          <div id="add-members-list"></div>
+        </div>
+        <div class="modal-actions">
+          <button class="button secondary" id="add-members-modal-cancel">Cancel</button>
+          <button class="button" id="add-members-modal-send">Send Invites</button>
+        </div>
       </div>
     </div>
 
@@ -504,6 +702,7 @@
         </div>
       </div>
     </div>
+    <div id="notification-toast" class="notification-toast notification-toast-hidden" role="status" aria-live="polite" aria-hidden="true"></div>
 
     <div id="upload-banner" class="upload-banner upload-banner-hidden" role="status" aria-live="polite" aria-hidden="true">
       <span class="upload-banner-text"></span>

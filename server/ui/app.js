@@ -178,6 +178,35 @@ const els = {
   manualConnectPort: document.getElementById("manual-connect-port"),
   manualConnectBtn: document.getElementById("manual-connect-btn"),
   manualConnectStatus: document.getElementById("manual-connect-status"),
+  shareExtraActions: document.getElementById("share-extra-actions"),
+  shareWithUserBtn: document.getElementById("share-with-user-btn"),
+  shareWithTeamBtn: document.getElementById("share-with-team-btn"),
+  networkSearchBtn: document.getElementById("network-search-btn"),
+  networkSearchBtnText: document.getElementById("network-search-btn-text"),
+  connectedUsersList: document.getElementById("connected-users-list"),
+  createTeamModal: document.getElementById("create-team-modal"),
+  createTeamName: document.getElementById("create-team-name"),
+  createTeamDepartment: document.getElementById("create-team-department"),
+  createTeamModalClose: document.getElementById("create-team-modal-close"),
+  createTeamModalCancel: document.getElementById("create-team-modal-cancel"),
+  createTeamModalSubmit: document.getElementById("create-team-modal-submit"),
+  addMembersModal: document.getElementById("add-members-modal"),
+  addMembersList: document.getElementById("add-members-list"),
+  addMembersModalClose: document.getElementById("add-members-modal-close"),
+  addMembersModalCancel: document.getElementById("add-members-modal-cancel"),
+  addMembersModalSend: document.getElementById("add-members-modal-send"),
+  shareTeamPickerModal: document.getElementById("share-team-picker-modal"),
+  shareTeamPickerList: document.getElementById("share-team-picker-list"),
+  shareTeamPickerClose: document.getElementById("share-team-picker-close"),
+  notificationsUnreadBadge: document.getElementById("notifications-unread-badge"),
+  notificationsList: document.getElementById("notifications-list"),
+  notificationsClearAll: document.getElementById("notifications-clear-all"),
+  muteNotificationsBtn: document.getElementById("mute-notifications-btn"),
+  muteIcon: document.getElementById("mute-icon"),
+  networkDiscoveryHostname: document.getElementById("network-discovery-hostname"),
+  networkDiscoveryIp: document.getElementById("network-discovery-ip"),
+  networkDiscoveryBadge: document.getElementById("network-discovery-badge"),
+  networkDiscoveryOpenBtn: document.getElementById("network-discovery-open-btn"),
 };
 
 const stateMeta = {
@@ -186,12 +215,15 @@ const stateMeta = {
   shareLinkUrls: { ip: "" },
   lastNetworkChangedAt: 0,
   mdnsUnresolvableToastShown: false,
+  networkDiscoveryUnresolvableToastShown: false,
   fingerprint: getOrCreateFingerprint(),
   sessionToken: localStorage.getItem("joincloud:session-token") || "",
   privacyPolicyRaw: "",
   buildId: "",
   lastPendingCount: 0,
   lastNetworkHash: "",
+  notificationsMuted: localStorage.getItem("joincloud:mute-notifications") === "1",
+  lastNotificationIds: new Set(),
 };
 
 function getOrCreateFingerprint() {
@@ -1245,6 +1277,26 @@ async function fetchStatus() {
     showUploadBanner("mDNS hostname not resolvable; using IP fallback.", "loading");
     setTimeout(() => hideUploadBanner(), 3000);
   }
+  if (els.networkDiscoveryHostname) els.networkDiscoveryHostname.textContent = data.mdns_hostname || "--";
+  if (els.networkDiscoveryIp) {
+    const port = data.port || (data.lanBaseUrl && data.lanBaseUrl.match(/:(\d+)/)?.[1]) || "8787";
+    els.networkDiscoveryIp.textContent = data.bestLanIp ? "IP fallback: " + data.bestLanIp + ":" + port : "--";
+  }
+  if (els.networkDiscoveryBadge) {
+    const resolvable = !!data.mdns_resolvable;
+    els.networkDiscoveryBadge.textContent = running ? (resolvable ? "Resolvable" : "IP fallback") : "Inactive";
+    els.networkDiscoveryBadge.className = "badge " + (running ? (resolvable ? "badge-active" : "badge-private") : "badge-private");
+    els.networkDiscoveryBadge.title = resolvable ? "Hostname resolves" : "Hostname not resolvable; use IP fallback";
+  }
+  if (els.networkDiscoveryOpenBtn) {
+    const port = data.port || "8787";
+    const resolvable = !!data.mdns_resolvable;
+    const openUrl = resolvable && data.mdns_hostname
+      ? "http://" + data.mdns_hostname + ":" + port + "/"
+      : data.lanBaseUrl || (data.bestLanIp ? "http://" + data.bestLanIp + ":" + port + "/" : null);
+    els.networkDiscoveryOpenBtn.href = openUrl || "#";
+    els.networkDiscoveryOpenBtn.style.display = openUrl && running ? "" : "none";
+  }
   if (els.uptimeDisplay && Number.isFinite(data.uptime_seconds)) {
     els.uptimeDisplay.textContent = `Uptime: ${formatUptime(data.uptime_seconds)}`;
   }
@@ -1405,9 +1457,108 @@ async function loadNetwork() {
   } catch (_) {
     els.networkList.innerHTML = '<div class="value value-muted">Failed to load peers.</div>';
   }
+  await loadConnectedUsers();
 }
 
-const stateTeams = { teams: [], invites: [], currentTeamId: null };
+const stateNetwork = { searching: false, lastPeers: [] };
+
+async function loadConnectedUsers() {
+  if (!els.connectedUsersList || !isHostRole()) return;
+  try {
+    const res = await apiFetch("/api/v1/access/devices");
+    const devices = await res.json();
+    if (!devices.length) {
+      els.connectedUsersList.innerHTML = '<div class="value value-muted">No connected users yet.</div>';
+      return;
+    }
+    els.connectedUsersList.innerHTML = "";
+    devices.forEach((d) => {
+      const row = document.createElement("div");
+      row.className = "pending-item";
+      const lastSeen = d.last_seen_at ? new Date(d.last_seen_at).toLocaleString() : "-";
+      row.innerHTML = `
+        <div class="pending-item-meta">
+          <div class="item-title">${escapeHtml(d.device_name || "Unknown")}</div>
+          <div class="item-sub mono">${escapeHtml((d.device_id || "").slice(0, 12))}</div>
+          <div class="item-sub">Last seen: ${escapeHtml(lastSeen)}</div>
+        </div>
+      `;
+      const removeBtn = document.createElement("button");
+      removeBtn.className = "button danger";
+      removeBtn.textContent = "Remove";
+      removeBtn.onclick = async () => {
+        await apiFetch("/api/v1/access/devices/remove", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fingerprint: d.fingerprint }),
+        });
+        await loadNetwork();
+      };
+      row.appendChild(removeBtn);
+      els.connectedUsersList.appendChild(row);
+    });
+  } catch (_) {
+    if (els.connectedUsersList) els.connectedUsersList.innerHTML = '<div class="value value-muted">Failed to load.</div>';
+  }
+}
+
+async function discoverySearch() {
+  if (!els.networkList || stateNetwork.searching) return;
+  stateNetwork.searching = true;
+  if (els.networkSearchBtn) {
+    els.networkSearchBtn.disabled = true;
+    if (els.networkSearchBtnText) els.networkSearchBtnText.textContent = "Searching nearby devices…";
+  }
+  try {
+    const searchRes = await apiFetch("/api/v1/network/search?wait=4", { method: "POST" });
+    const peers = await searchRes.json();
+    stateNetwork.lastPeers = peers;
+    const approvedRes = isHostRole() ? await apiFetch("/api/v1/access/devices") : { ok: false };
+    const approvedDevices = approvedRes.ok ? await approvedRes.json() : [];
+    const approvedIds = new Set(approvedDevices.map((d) => d.device_id || d.fingerprint));
+    if (!peers.length) {
+      els.networkList.innerHTML = '<div class="network-empty-state"><div class="network-empty-title">No users found</div><div class="network-empty-sub">No nearby devices discovered. Try again or use Manual Connect.</div><button class="button secondary" id="network-try-again-btn">Try again</button></div>';
+      const tryBtn = document.getElementById("network-try-again-btn");
+      if (tryBtn) tryBtn.onclick = () => discoverySearch();
+    } else {
+      els.networkList.innerHTML = "";
+      peers.forEach((p) => {
+        const row = document.createElement("div");
+        row.className = "pending-item";
+        const friendlyName = p.display_name || p.displayName || "Unknown";
+        const shortId = (p.deviceId || "").replace(/^jc_|^dev_/i, "").slice(0, 8).toLowerCase() || "-";
+        const addr = p.bestIp ? p.bestIp + ":" + (p.port || 8787) : "-";
+        const status = approvedIds.has(p.deviceId) ? "Connected" : "Available";
+        row.innerHTML = `
+          <div class="pending-item-meta">
+            <div class="item-title">${escapeHtml(friendlyName)}</div>
+            <div class="item-sub mono">${escapeHtml(shortId)} · ${escapeHtml(addr)}</div>
+            <div class="item-sub">${status} ${p.source === "manual" ? "(manual)" : ""}</div>
+          </div>
+        `;
+        if (p.bestIp) {
+          const openBtn = document.createElement("button");
+          openBtn.className = "button secondary";
+          openBtn.textContent = "Open";
+          openBtn.onclick = () => window.open("http://" + p.bestIp + ":" + (p.port || 8787), "_blank");
+          row.appendChild(openBtn);
+        }
+        els.networkList.appendChild(row);
+      });
+    }
+    await loadConnectedUsers();
+  } catch (_) {
+    els.networkList.innerHTML = '<div class="value value-muted">Search failed. <button class="button secondary" onclick="discoverySearch()">Try again</button></div>';
+  } finally {
+    stateNetwork.searching = false;
+    if (els.networkSearchBtn) {
+      els.networkSearchBtn.disabled = false;
+      if (els.networkSearchBtnText) els.networkSearchBtnText.textContent = "Search";
+    }
+  }
+}
+
+const stateTeams = { teams: [], invites: [], currentTeamId: null, addMembersTeamId: null, addMembersSelected: new Set() };
 
 async function loadTeams() {
   if (!els.teamsList) return;
@@ -1535,18 +1686,108 @@ async function inviteToTeam() {
   }
 }
 
-async function createTeam() {
-  const name = prompt("Team name?", "My Team") || "My Team";
+function openCreateTeamModal() {
+  if (els.createTeamModal) {
+    if (els.createTeamName) els.createTeamName.value = "";
+    if (els.createTeamDepartment) els.createTeamDepartment.value = "";
+    els.createTeamModal.classList.add("active");
+  }
+}
+
+function closeCreateTeamModal() {
+  if (els.createTeamModal) els.createTeamModal.classList.remove("active");
+}
+
+function openAddMembersModal(teamId) {
+  stateTeams.addMembersTeamId = teamId;
+  if (els.addMembersModal) {
+    els.addMembersModal.classList.add("active");
+    renderAddMembersList(teamId);
+  }
+}
+
+function closeAddMembersModal() {
+  stateTeams.addMembersTeamId = null;
+  if (els.addMembersModal) els.addMembersModal.classList.remove("active");
+}
+
+async function renderAddMembersList(teamId) {
+  if (!els.addMembersList) return;
+  const team = stateTeams.teams.find((t) => t.teamId === teamId);
+  const existingIds = new Set(team?.members || []);
+  stateTeams.addMembersSelected = new Set();
   try {
-    await apiFetch("/api/v1/teams", {
+    const networkRes = await apiFetch("/api/v1/network");
+    const peers = await networkRes.json();
+    const candidates = peers.filter((p) => p.deviceId && p.bestIp && !existingIds.has(p.deviceId)).slice(0, 5);
+    if (!candidates.length) {
+      els.addMembersList.innerHTML = '<div class="value value-muted">No connected users available. Connect devices in the Network tab first.</div>';
+      return;
+    }
+    els.addMembersList.innerHTML = candidates.map((c) => {
+      const name = c.display_name || c.displayName || c.deviceId?.slice(0, 8) || "Unknown";
+      return `<label class="pending-item" style="cursor:pointer"><input type="checkbox" data-device-id="${escapeHtml(c.deviceId)}" /> ${escapeHtml(name)} (${escapeHtml((c.deviceId || "").slice(0, 12))})</label>`;
+    }).join("");
+    els.addMembersList.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+      cb.onchange = () => {
+        if (cb.checked) stateTeams.addMembersSelected.add(cb.dataset.deviceId);
+        else stateTeams.addMembersSelected.delete(cb.dataset.deviceId);
+      };
+    });
+  } catch (_) {
+    els.addMembersList.innerHTML = '<div class="value value-muted">Failed to load.</div>';
+  }
+}
+
+async function createTeam() {
+  openCreateTeamModal();
+}
+
+async function submitCreateTeam() {
+  const name = els.createTeamName?.value?.trim();
+  const department = els.createTeamDepartment?.value?.trim();
+  if (!name) {
+    showUploadBanner("Team name is required.", "error");
+    setTimeout(hideUploadBanner, 2000);
+    return;
+  }
+  try {
+    const res = await apiFetch("/api/v1/teams", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ teamName: name }),
+      body: JSON.stringify({ teamName: name, department: department || undefined }),
     });
+    const team = await res.json();
+    closeCreateTeamModal();
     await loadTeams();
+    if (team && team.teamId) openAddMembersModal(team.teamId);
   } catch (_) {
-    alert("Failed to create team.");
+    showUploadBanner("Failed to create team.");
+    setTimeout(hideUploadBanner, 2000);
   }
+}
+
+async function sendAddMembersInvites() {
+  const teamId = stateTeams.addMembersTeamId;
+  if (!teamId) return;
+  const selected = stateTeams.addMembersSelected ? Array.from(stateTeams.addMembersSelected) : [];
+  if (!selected.length) {
+    closeAddMembersModal();
+    return;
+  }
+  for (const toDeviceId of selected) {
+    try {
+      await apiFetch(`/api/v1/teams/${teamId}/invite`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ toDeviceId }),
+      });
+    } catch (_) {}
+  }
+  showUploadBanner("Invites sent to " + selected.length + " member(s).", "success");
+  setTimeout(hideUploadBanner, 2500);
+  closeAddMembersModal();
+  await loadTeams();
 }
 
 async function manualConnect() {
@@ -1593,9 +1834,12 @@ async function saveNetworkName() {
   els.networkNameSuffix.value = displayNameToSuffix(savedName);
 }
 
+const stateShare = { lastShareUrl: null, lastShareId: null, lastPath: null };
+
 function openShareModal(pathValue) {
   els.shareResult.textContent = "";
-  els.copyShare.style.display = "none";
+  if (els.shareExtraActions) els.shareExtraActions.style.display = "none";
+  if (els.copyShare) els.copyShare.style.display = "none";
   els.sharePath.value = pathValue;
   const needActivation = !canAddDeviceOrCreateShare();
   if (els.activationBlock) {
@@ -1720,20 +1964,26 @@ async function createShare() {
     return;
   }
   const shareUrl = data.urlIp || data.url || `${stateMeta.lanBaseUrl}/share/${data.shareId}`;
+  stateShare.lastShareUrl = shareUrl;
+  stateShare.lastShareId = data.shareId;
+  stateShare.lastPath = pathValue;
   els.shareResult.innerHTML = `
     <div>Share created.</div>
-    <div class="share-link-box" style="margin-top:10px;padding:12px;border:1px solid var(--stroke);border-radius:8px;background:var(--bg);word-break:break-all;font-size:13px;font-family:ui-monospace,monospace">${shareUrl}</div>
+    <div class="share-link-box share-url-secondary">${escapeHtml(shareUrl)}</div>
   `;
-  els.copyShare.style.display = "inline-flex";
-  els.copyShare.onclick = async () => {
-    const ok = await copyToClipboard(shareUrl);
-    if (ok) {
-      els.copyShare.textContent = "Copied!";
-      setTimeout(() => (els.copyShare.textContent = "Copy Link"), 2000);
-    } else {
-      showCopyFallback(shareUrl, els.shareResult);
-    }
-  };
+  if (els.shareExtraActions) els.shareExtraActions.style.display = "flex";
+  if (els.copyShare) {
+    els.copyShare.style.display = "inline-flex";
+    els.copyShare.onclick = async () => {
+      const ok = await copyToClipboard(shareUrl);
+      if (ok) {
+        els.copyShare.textContent = "Copied!";
+        setTimeout(() => (els.copyShare.textContent = "Copy Link"), 2000);
+      } else {
+        showCopyFallback(shareUrl, els.shareResult);
+      }
+    };
+  }
   await loadShares();
   await loadLogs();
 }
@@ -1768,6 +2018,115 @@ async function revokeAllShares() {
   state.selectedShares.clear();
   await loadShares();
   await loadLogs();
+}
+
+function openShareTeamPicker() {
+  if (!stateShare.lastShareUrl) {
+    showUploadBanner("Create a share first.");
+    setTimeout(hideUploadBanner, 2000);
+    return;
+  }
+  if (!stateTeams.teams.length) {
+    showUploadBanner("No teams found. Create a team first.", "error");
+    setTimeout(hideUploadBanner, 3000);
+    return;
+  }
+  if (!els.shareTeamPickerModal || !els.shareTeamPickerList) return;
+  els.shareTeamPickerList.innerHTML = stateTeams.teams.map((t) => {
+    const count = t.members?.length || 0;
+    return `<button class="button secondary share-team-pick-btn" data-team-id="${escapeHtml(t.teamId)}">
+      <span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg></span>
+      <div style="text-align:left;flex:1"><strong>${escapeHtml(t.teamName)}</strong><div class="item-sub" style="margin-top:2px">${count} member${count !== 1 ? "s" : ""}</div></div>
+    </button>`;
+  }).join("");
+  els.shareTeamPickerList.querySelectorAll(".share-team-pick-btn").forEach((btn) => {
+    btn.onclick = async () => {
+      const teamId = btn.dataset.teamId;
+      if (els.shareTeamPickerModal) els.shareTeamPickerModal.classList.remove("active");
+      await postShareToTeam(teamId);
+    };
+  });
+  els.shareTeamPickerModal.classList.add("active");
+}
+
+function closeShareTeamPicker() {
+  if (els.shareTeamPickerModal) els.shareTeamPickerModal.classList.remove("active");
+}
+
+async function shareWithTeam() {
+  openShareTeamPicker();
+}
+
+async function postShareToTeam(teamId) {
+  const filename = stateShare.lastPath?.split("/").filter(Boolean).pop() || "file";
+  try {
+    await apiFetch("/api/v1/teams/message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        teamId,
+        type: "file",
+        payload: { shareUrl: stateShare.lastShareUrl, filename, shareId: stateShare.lastShareId },
+      }),
+    });
+    showUploadBanner("Shared with team.", "success");
+    setTimeout(hideUploadBanner, 2000);
+  } catch (err) {
+    showUploadBanner(err.message || "Failed to share with team.");
+    setTimeout(hideUploadBanner, 2500);
+  }
+}
+
+async function shareWithUser() {
+  if (!stateShare.lastShareUrl) {
+    showUploadBanner("Create a share first.");
+    setTimeout(hideUploadBanner, 2000);
+    return;
+  }
+  try {
+    const networkRes = await apiFetch("/api/v1/network");
+    const peers = await networkRes.json();
+    const candidates = peers.filter((p) => p.deviceId && p.bestIp);
+    if (!candidates.length) {
+      showUploadBanner("No users available. Connect devices in Network first.");
+      setTimeout(hideUploadBanner, 2000);
+      return;
+    }
+    const list = candidates.map((c, i) => `${i + 1}. ${c.display_name || c.displayName || c.deviceId}`).join("\n");
+    const choice = prompt(`Select user to share with:\n${list}`);
+    if (!choice) return;
+    const num = parseInt(choice, 10);
+    const peer = Number.isFinite(num) && num >= 1 && num <= candidates.length
+      ? candidates[num - 1]
+      : candidates.find((c) => (c.display_name || c.displayName) === choice.trim());
+    if (!peer) {
+      showUploadBanner("User not found.");
+      setTimeout(hideUploadBanner, 2000);
+      return;
+    }
+    const filename = stateShare.lastPath?.split("/").filter(Boolean).pop() || "file";
+    const displayName = els.headerDisplayName?.textContent?.trim() || getSuggestedDeviceName();
+    const baseUrl = `http://${peer.bestIp}:${peer.port || 8787}`;
+    const res = await fetch(`${baseUrl}/api/v1/share/notify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fromDeviceId: stateMeta.fingerprint ? `dev_${stateMeta.fingerprint.slice(0, 16)}` : "host",
+        fromDisplayName: displayName,
+        shareUrl: stateShare.lastShareUrl,
+        filename,
+      }),
+    });
+    if (res.ok) {
+      showUploadBanner("Share sent to " + (peer.display_name || peer.displayName || "user") + ".", "success");
+    } else {
+      showUploadBanner("Failed to send. User may be offline.");
+    }
+    setTimeout(hideUploadBanner, 2000);
+  } catch (err) {
+    showUploadBanner(err.message || "Failed to share.");
+    setTimeout(hideUploadBanner, 2500);
+  }
 }
 
 function openStopModal() {
@@ -2045,6 +2404,80 @@ async function loadActivitySummary() {
   }
 }
 
+function showToastBanner(text, targetRoute) {
+  const el = document.getElementById("notification-toast");
+  if (!el) return;
+  el.textContent = text;
+  el.dataset.targetRoute = targetRoute || "";
+  el.classList.remove("notification-toast-hidden");
+  el.setAttribute("aria-hidden", "false");
+  el.onclick = () => {
+    if (targetRoute) {
+      setActiveSection(targetRoute.startsWith("teams") ? "teams" : targetRoute);
+    }
+    el.classList.add("notification-toast-hidden");
+  };
+  setTimeout(() => {
+    el.classList.add("notification-toast-hidden");
+    el.setAttribute("aria-hidden", "true");
+  }, 4000);
+}
+
+function updateMuteButton() {
+  if (!els.muteIcon) return;
+  els.muteIcon.textContent = stateMeta.notificationsMuted ? "\uD83D\uDD15" : "\uD83D\uDD14";
+  if (els.muteNotificationsBtn) {
+    els.muteNotificationsBtn.title = stateMeta.notificationsMuted ? "Unmute notifications" : "Mute notifications";
+  }
+}
+
+async function loadNotifications() {
+  if (!els.notificationsList) return;
+  try {
+    const res = await apiFetch("/api/v1/notifications", {}, true);
+    if (!res.ok) return;
+    const data = await res.json();
+    const list = data.notifications || [];
+    const unreadCount = data.unreadCount ?? list.filter((n) => !n.read).length;
+    if (els.notificationsUnreadBadge) {
+      els.notificationsUnreadBadge.textContent = String(unreadCount);
+      els.notificationsUnreadBadge.style.display = unreadCount > 0 ? "inline-flex" : "none";
+    }
+    const knownIds = new Set(stateMeta.lastNotificationIds);
+    for (const n of list) {
+      if (!knownIds.has(n.id) && !n.read && document.visibilityState === "visible" && !stateMeta.notificationsMuted) {
+        showToastBanner((n.title || "") + (n.body ? ": " + n.body : ""), n.targetRoute);
+      }
+      knownIds.add(n.id);
+    }
+    stateMeta.lastNotificationIds = new Set(list.slice(0, 20).map((x) => x.id));
+    stateMeta.unreadTeamIds = new Set(list.filter((n) => !n.read && n.teamId).map((n) => n.teamId));
+    if (!list.length) {
+      els.notificationsList.innerHTML = '<div class="value value-muted">No notifications.</div>';
+      return;
+    }
+    els.notificationsList.innerHTML = list.map((n) =>
+      `<div class="pending-item notification-item ${n.read ? "" : "notification-unread"}" data-id="${escapeHtml(n.id)}">
+        <div class="pending-item-meta">
+          <div class="item-title">${escapeHtml(n.title || "")}</div>
+          ${n.body ? "<div class=\"item-sub\">" + escapeHtml(n.body) + "</div>" : ""}
+          <div class="item-sub value-muted" style="font-size:11px">${new Date(n.timestamp).toLocaleString()}</div>
+        </div>
+        <button class="button ghost button-compact notification-delete" data-id="${escapeHtml(n.id)}" title="Delete">\u2715</button>
+      </div>`
+    ).join("");
+    els.notificationsList.querySelectorAll(".notification-delete").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await apiFetch("/api/v1/notifications/" + btn.dataset.id, { method: "DELETE" });
+        await loadNotifications();
+      });
+    });
+  } catch (_) {
+    if (els.notificationsList) els.notificationsList.innerHTML = '<div class="value value-muted">Failed to load.</div>';
+  }
+}
+
 async function pollAccessStatus(requestId) {
   const res = await apiFetch(`/api/v1/access/status?request_id=${encodeURIComponent(requestId)}`, {}, true);
   if (!res.ok) return;
@@ -2189,6 +2622,8 @@ async function bootstrapApp() {
   await loadApprovedDevices();
   await loadShareVisitSummary();
   await loadActivitySummary();
+  await loadNotifications();
+  updateMuteButton();
 
   const initial = window.location.hash.replace("#", "") || "home";
   setActiveSection(initial);
@@ -2213,6 +2648,8 @@ async function continueBootstrapAfterActivation() {
   await loadApprovedDevices();
   await loadShareVisitSummary();
   await loadActivitySummary();
+  await loadNotifications();
+  updateMuteButton();
   const initial = window.location.hash.replace("#", "") || "home";
   setActiveSection(initial);
   setInterval(() => {
@@ -2350,8 +2787,30 @@ els.copyCloudUrl.addEventListener("click", async () => {
 if (els.manualConnectBtn) {
   els.manualConnectBtn.addEventListener("click", manualConnect);
 }
+if (els.networkSearchBtn) {
+  els.networkSearchBtn.addEventListener("click", () => discoverySearch());
+}
 if (els.createTeamBtn) {
   els.createTeamBtn.addEventListener("click", createTeam);
+}
+if (els.createTeamModalSubmit) els.createTeamModalSubmit.addEventListener("click", submitCreateTeam);
+if (els.createTeamModalClose) els.createTeamModalClose.addEventListener("click", closeCreateTeamModal);
+if (els.createTeamModalCancel) els.createTeamModalCancel.addEventListener("click", closeCreateTeamModal);
+if (els.addMembersModalSend) els.addMembersModalSend.addEventListener("click", sendAddMembersInvites);
+if (els.addMembersModalClose) els.addMembersModalClose.addEventListener("click", closeAddMembersModal);
+if (els.addMembersModalCancel) els.addMembersModalCancel.addEventListener("click", closeAddMembersModal);
+if (els.notificationsClearAll) {
+  els.notificationsClearAll.addEventListener("click", async () => {
+    await apiFetch("/api/v1/notifications/clear", { method: "POST" });
+    await loadNotifications();
+  });
+}
+if (els.muteNotificationsBtn) {
+  els.muteNotificationsBtn.addEventListener("click", () => {
+    stateMeta.notificationsMuted = !stateMeta.notificationsMuted;
+    localStorage.setItem("joincloud:mute-notifications", stateMeta.notificationsMuted ? "1" : "0");
+    updateMuteButton();
+  });
 }
 if (els.teamDetailBack) {
   els.teamDetailBack.addEventListener("click", () => {
@@ -2455,6 +2914,9 @@ if (els.refreshActivity) {
 els.closeModal.onclick = closeShareModal;
 els.cancelShare.onclick = closeShareModal;
 els.createShare.onclick = createShare;
+if (els.shareWithUserBtn) els.shareWithUserBtn.onclick = shareWithUser;
+if (els.shareWithTeamBtn) els.shareWithTeamBtn.onclick = shareWithTeam;
+if (els.shareTeamPickerClose) els.shareTeamPickerClose.onclick = closeShareTeamPicker;
 if (els.activationRegister) els.activationRegister.onclick = activationRegister;
 if (els.activationLogin) els.activationLogin.onclick = activationLogin;
 function getHostUuidForDesktopAuth() {
@@ -2732,6 +3194,7 @@ setInterval(async () => {
   if (els.appLayout.style.display !== "none") {
     await loadRuntimeStatus();
     await loadLogs();
+    await loadNotifications();
     if (state.isAdmin) {
       await loadPendingAccessRequests();
       await loadApprovedDevices();

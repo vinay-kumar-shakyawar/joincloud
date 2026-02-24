@@ -40,12 +40,13 @@ class TeamsStore {
     await fs.writeFile(this.storagePath, JSON.stringify(this.state, null, 2));
   }
 
-  createTeam({ teamName, createdByDeviceId }) {
+  createTeam({ teamName, department, createdByDeviceId }) {
     const teamId = crypto.randomUUID();
     const now = nowIso();
     this.state.teams[teamId] = {
       teamId,
       teamName: teamName || "Unnamed Team",
+      department: department || "",
       members: [createdByDeviceId],
       createdByDeviceId,
       createdAt: now,
