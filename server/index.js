@@ -6,6 +6,7 @@ const fs = require("fs/promises");
 const fsSync = require("fs");
 const os = require("os");
 const stream = require("stream");
+const { pipeline } = require("stream/promises");
 const express = require("express");
 const mime = require("mime-types");
 const bonjour = require("bonjour")();
@@ -26,7 +27,11 @@ const { createTelemetrySync } = require("./telemetry/sync");
 const { createUsageAggregation } = require("./usage-aggregation");
 const { AccessControlStore } = require("./accessControl");
 const { RuntimeTelemetryStore } = require("./runtimeTelemetry");
+const { getBestLanIp, getNetworkEndpoints, getAllLanIps, createNetworkManager } = require("./network/networkManager");
+const { createDiscoveryManager, shortDeviceId } = require("./discovery/DiscoveryManager");
+const { TeamsStore } = require("./teams/TeamsStore");
 const crypto = require("crypto");
+const dns = require("dns");
 
 async function ensureOwnerStorage(rootPath) {
   await fs.mkdir(rootPath, { recursive: true });
@@ -57,7 +62,7 @@ async function ensureUserConfig(configPath) {
       changed = true;
     }
     if (typeof parsed.network_visibility !== "boolean") {
-      parsed.network_visibility = false;
+      parsed.network_visibility = true;
       changed = true;
     }
     if (changed) {
@@ -72,7 +77,7 @@ async function ensureUserConfig(configPath) {
       telemetry_enabled: true,
       telemetry_last_sync: null,
       display_name: normalizeDisplayName(generateDisplayName()),
-      network_visibility: false,
+      network_visibility: true,
     };
     await fs.writeFile(configPath, JSON.stringify(payload, null, 2));
     return payload;
@@ -370,42 +375,6 @@ function normalizeDisplayName(value) {
 
 
 
-function startPresenceService({ displayName, port }) {
-  const service = bonjour.publish({
-    name: displayName,
-    type: "joincloud",
-    protocol: "tcp",
-    port,
-    txt: {
-      display_name: displayName,
-      protocol: "v1",
-    },
-  });
-  return service;
-}
-
-function startPresenceBrowser(onUpdate) {
-  const peers = new Map();
-  const browser = bonjour.find({ type: "joincloud" });
-
-  function emit() {
-    onUpdate(Array.from(peers.values()));
-  }
-
-  browser.on("up", (service) => {
-    const displayName = service.txt?.display_name;
-    if (!displayName) return;
-    peers.set(service.fqdn, { display_name: displayName, status: "online" });
-    emit();
-  });
-
-  browser.on("down", (service) => {
-    peers.delete(service.fqdn);
-    emit();
-  });
-
-  return { browser, peers };
-}
 
 function isValidDisplayName(value) {
   if (!value || typeof value !== "string") return false;
@@ -431,15 +400,7 @@ function startUptimeTracker(telemetry) {
 }
 
 function getLanAddress() {
-  const interfaces = os.networkInterfaces();
-  for (const list of Object.values(interfaces)) {
-    for (const net of list || []) {
-      if (net.family === "IPv4" && !net.internal) {
-        return net.address;
-      }
-    }
-  }
-  return "127.0.0.1";
+  return getBestLanIp();
 }
 
 function getCloudUrl() {
@@ -811,6 +772,24 @@ async function bootstrap() {
     logger,
   });
   await accessControl.init();
+  const teamsStore = new TeamsStore({
+    storagePath: config.storage.teamsPath ||
+      path.join(path.dirname(config.storage.accessControlPath), "teams.json"),
+    logger,
+  });
+  await teamsStore.init();
+
+  function getCurrentDeviceId(req) {
+    const access = getRequestContext(req);
+    if (access.role === "host") return userConfig?.user_id || "host";
+    return access.device_id || "unknown";
+  }
+
+  const runtimeTelemetry = new RuntimeTelemetryStore({
+    storagePath: config.storage.runtimeTelemetryPath,
+  });
+  await runtimeTelemetry.init();
+  runtimeTelemetry.increment("total_app_starts");
   let sharingEnabled = true;
 
   async function ensureDeviceFolderForSession(session) {
@@ -1077,18 +1056,49 @@ async function bootstrap() {
 
   app.get("/api/v1/diagnostics/info", (_req, res) => {
     const uptimeMs = Date.now() - (global.SERVER_START_TIME || Date.now());
+    const displayName = userConfig?.display_name || "Join";
+    const endpoints = getNetworkEndpoints(displayName, config.server.port, config.server.shareBasePath);
     res.json({
       version: getAppVersion(),
       build_id: BUILD_ID,
       lan_ip: getLanAddress(),
+      best_lan_ip: endpoints.bestLanIp,
       port: config.server.port,
       share_port: config.server.sharePort,
       uptime_seconds: Math.floor(uptimeMs / 1000),
     });
   });
 
+  app.get("/api/v1/technical-config", (req, res) => {
+    if (!isLocalhostRequest(req)) {
+      res.status(403).json({ error: "host_only" });
+      return;
+    }
+    res.json({
+      host_id: userConfig?.user_id || null,
+      device_id: null,
+      local_ips: getAllLanIps(),
+      port: config.server.port,
+      share_port: config.server.sharePort,
+      app_version: getAppVersion(),
+      license_state: null,
+    });
+  });
+
   app.get("/api/v1/status", (_req, res) => {
     res.json({ running: !!sharingEnabled, sharing_enabled: !!sharingEnabled });
+  });
+
+  app.get("/api/v1/peer", (_req, res) => {
+    const hostId = userConfig?.user_id || "host";
+    const displayName = userConfig?.display_name || "Join";
+    res.json({
+      deviceId: hostId,
+      displayName,
+      port: config.server.port,
+      hostname: `join-${shortDeviceId(hostId)}.local`,
+      bestLanIp: getBestLanIp(),
+    });
   });
 
   app.get("/api/v1/access/session", async (req, res) => {
@@ -1214,6 +1224,7 @@ async function bootstrap() {
     sharingEnabled = false;
     logger.info("sharing stopped by admin");
     runtimeTelemetry.increment("sharing_stop_count");
+    stopDiscovery();
     res.json({ running: false, sharing_enabled: false });
   });
 
@@ -1221,6 +1232,7 @@ async function bootstrap() {
     sharingEnabled = true;
     logger.info("sharing started by admin");
     runtimeTelemetry.increment("sharing_start_count");
+    startDiscovery();
     res.json({ running: true, sharing_enabled: true });
   });
 
@@ -1375,6 +1387,7 @@ async function bootstrap() {
     res.json({
       shareId: share.shareId,
       targetType: share.targetType || "file",
+      permission: share.permission || "read-only",
       name,
       size,
       downloadUrl: isFile
@@ -1466,15 +1479,16 @@ async function bootstrap() {
       res.setHeader("Cache-Control", "no-store");
       res.setHeader("Accept-Ranges", "bytes");
       res.setHeader("Content-Length", String(stats.size));
-      const readStream = fsSync.createReadStream(filePath, { highWaterMark: 1024 * 1024 });
-      readStream.on("error", () => {
-        if (!res.headersSent) {
-          res.status(500).send("preview_failed");
-          return;
+      res.flushHeaders();
+      const readStream = fsSync.createReadStream(filePath, { highWaterMark: 2 * 1024 * 1024 });
+      const passThrough = new stream.PassThrough({ highWaterMark: 8 * 1024 * 1024 });
+      pipeline(readStream, passThrough, res).catch((err) => {
+        if (err.code !== "ERR_STREAM_PREMATURE_CLOSE" && !err.message?.includes("aborted")) {
+          logger.error("share preview error", { error: err.message });
         }
-        res.destroy();
+        if (!res.headersSent) res.status(500).send("preview_failed");
+        else res.destroy();
       });
-      readStream.pipe(res);
     } catch (error) {
       res.status(400).send(error.message || "preview_failed");
     }
@@ -1592,19 +1606,27 @@ async function bootstrap() {
       res.setHeader("X-Content-Type-Options", "nosniff");
       res.setHeader("Cache-Control", "no-store");
 
+      res.flushHeaders();
+
       const clientIp = getClientIp(req);
       const startTime = Date.now();
       logger.info("share download start", { path: filePath, size: fileSize, client_ip: clientIp });
 
-      const readStream = fsSync.createReadStream(filePath, { highWaterMark: 1024 * 1024 });
-      readStream.on("error", () => {
-        if (!res.headersSent) {
-          res.status(500).send("download_failed");
-          return;
-        }
-        res.destroy();
+      const READ_HWM = 2 * 1024 * 1024;
+      const PASS_HWM = 8 * 1024 * 1024;
+      const readStream = fsSync.createReadStream(filePath, { highWaterMark: READ_HWM });
+      const passThrough = new stream.PassThrough({ highWaterMark: PASS_HWM });
+
+      req.on("aborted", () => {
+        readStream.destroy();
+        passThrough.destroy();
+        if (!res.destroyed) res.destroy();
+        logger.info("share download aborted", { client_ip: clientIp });
       });
-      readStream.on("end", () => {
+
+      runtimeTelemetry.increment("total_downloads");
+
+      pipeline(readStream, passThrough, res).then(() => {
         const durationMs = Date.now() - startTime;
         const mbPerSec = durationMs > 0 ? (fileSize / (1024 * 1024)) / (durationMs / 1000) : 0;
         logger.info("share download end", {
@@ -1612,12 +1634,92 @@ async function bootstrap() {
           duration_ms: durationMs,
           mb_per_sec: mbPerSec.toFixed(2),
         });
+      }).catch((err) => {
+        const isAbort = err.code === "ERR_STREAM_PREMATURE_CLOSE" || err.message?.includes("aborted");
+        if (isAbort) {
+          logger.info("share download aborted", { client_ip: clientIp });
+        } else {
+          logger.error("share download error", { error: err.message });
+        }
+        if (!res.headersSent) {
+          res.status(500).send("download_failed");
+        } else {
+          res.destroy();
+        }
       });
-      readStream.pipe(res);
-      runtimeTelemetry.increment("total_downloads");
     } catch (error) {
       res.status(400).send(error.message || "download_failed");
     }
+  });
+
+  app.post("/share/:shareId/upload", async (req, res) => {
+    if (!sharingEnabled) {
+      res.status(423).json({ error: "sharing_stopped", message: "Sharing is currently stopped." });
+      return;
+    }
+    const share = shareService.getShare(req.params.shareId);
+    if (!share) {
+      res.status(404).json({ error: "share_not_found" });
+      return;
+    }
+    if ((share.targetType || "file") !== "folder") {
+      res.status(400).json({ error: "share_is_not_folder" });
+      return;
+    }
+    if ((share.permission || "read-only") !== "read-write") {
+      res.status(403).json({ error: "read_only_share", message: "This share is read-only." });
+      return;
+    }
+    const contentType = req.headers["content-type"] || "";
+    if (!contentType.includes("multipart/form-data")) {
+      res.status(400).json({ error: "multipart form data required" });
+      return;
+    }
+    const fields = {};
+    const stored = [];
+    let targetDir = share.targetPath;
+    const busboy = Busboy({ headers: { "content-type": contentType } });
+    busboy.on("field", (name, value) => {
+      fields[name] = value;
+      if (name === "path" && value) {
+        const parentRel = toSafeRelative(value) || "";
+        if (parentRel) {
+          try {
+            targetDir = ensureWithinShareRoot(share.targetPath, path.join(share.targetPath, parentRel));
+          } catch (_e) {
+            targetDir = null;
+          }
+        }
+      }
+    });
+    busboy.on("file", (fieldname, file, info) => {
+      if (!targetDir) {
+        file.resume();
+        return;
+      }
+      const { filename } = info;
+      const cleanName = (filename || "upload").replace(/[\\/:*?"<>|]/g, "_").trim() || "upload";
+      const dest = path.join(targetDir, cleanName);
+      const destDir = path.dirname(dest);
+      fs.mkdir(destDir, { recursive: true }).catch(() => {});
+      const writeStream = fsSync.createWriteStream(dest, { flags: "w" });
+      file.pipe(writeStream);
+      writeStream.on("finish", () => {
+        stored.push(cleanName);
+      });
+      writeStream.on("error", (err) => {
+        logger.error("share upload write failed", { file: cleanName, error: err.message });
+      });
+    });
+    busboy.on("finish", async () => {
+      const parentRel = toSafeRelative(fields.path || "") || "";
+      res.json({ success: true, saved_to: parentRel || "/", uploaded: stored.length, files: stored });
+    });
+    busboy.on("error", (err) => {
+      logger.error("share upload parse failed", { error: err.message });
+      if (!res.headersSent) res.status(400).json({ error: err.message || "upload_failed" });
+    });
+    req.pipe(busboy);
   });
 
   app.use("/api", async (req, res, next) => {
@@ -1632,6 +1734,8 @@ async function bootstrap() {
       "/v1/access/me",
       "/v1/access/request",
       "/v1/access/status",
+      "/v1/peer",
+      "/v1/teams/invite/receive",
     ]);
     if (publicApiPaths.has(req.path)) {
       next();
@@ -1675,16 +1779,41 @@ async function bootstrap() {
     res.sendFile(path.join(__dirname, "..", "docs", "privacy.md"));
   });
 
-  app.get("/api/status", (_req, res) => {
-    const lanIp = getLanAddress();
+  const mdnsHostname = `join-${shortDeviceId(userConfig?.user_id || "host")}.local`;
+
+  function checkMdnsResolvable(hostname) {
+    return new Promise((resolve) => {
+      const t = setTimeout(() => resolve(false), 3000);
+      dns.lookup(hostname, { all: false }, (err, addr) => {
+        clearTimeout(t);
+        resolve(!err && addr);
+      });
+    });
+  }
+
+  app.get("/api/status", async (_req, res) => {
+    const displayName = userConfig?.display_name || "Join";
+    const endpoints = getNetworkEndpoints(displayName, config.server.port, config.server.shareBasePath);
+    const lanIp = endpoints.bestLanIp;
+    const uptimeMs = Date.now() - (global.SERVER_START_TIME || Date.now());
+    const mdnsResolvable = sharingEnabled ? await checkMdnsResolvable(mdnsHostname) : false;
     res.json({
       status: sharingEnabled ? "running" : "stopped",
       sharing_enabled: !!sharingEnabled,
       ownerBasePath: config.server.ownerBasePath,
       shareBasePath: config.server.shareBasePath,
       lanBaseUrl: `http://${lanIp}:${config.server.port}`,
+      shareLinkUrls: {
+        ip: endpoints.ipUrl,
+      },
       publicBaseUrl: config.server.publicBaseUrl,
       storageLabel: "Local storage",
+      bestLanIp: lanIp,
+      port: config.server.port,
+      uptime_seconds: Math.floor(uptimeMs / 1000),
+      network_changed_at: lastNetworkChangeAt || null,
+      mdns_hostname: mdnsHostname,
+      mdns_resolvable: mdnsResolvable,
     });
   });
 
@@ -1710,35 +1839,41 @@ async function bootstrap() {
     }
   });
 
-  app.delete("/api/files", async (req, res) => {
+  app.delete("/api/v1/file", async (req, res) => {
+    const rawPath = req.query.path;
+    if (!rawPath || typeof rawPath !== "string") {
+      res.status(400).json({ error: "path query parameter required" });
+      return;
+    }
+    const requestedPath = toPosixPath(rawPath.trim() || "/");
+    const access = getRequestContext(req);
+    if (!canWritePathForContext(access, requestedPath)) {
+      res.status(403).json({ error: "write_outside_device_folder_denied" });
+      return;
+    }
+    let fullPath;
     try {
-      const access = getRequestContext(req);
-      if (access.role !== "host" && !access.is_admin) {
-        res.status(403).json({ error: "Only the host can delete files." });
-        return;
-      }
-      const requestedPath = req.query.path || req.body?.path;
-      if (requestedPath == null || String(requestedPath).trim() === "") {
-        res.status(400).json({ error: "path is required" });
-        return;
-      }
-      const resolvedPath = resolveOwnerPath(config.storage.ownerRoot, toPosixPath(String(requestedPath).trim()));
-      const stats = await fs.stat(resolvedPath);
-      if (stats.isFile()) {
-        await fs.unlink(resolvedPath);
-      } else if (stats.isDirectory()) {
-        await fs.rm(resolvedPath, { recursive: true, force: true });
+      fullPath = resolveOwnerPath(config.storage.ownerRoot, requestedPath);
+    } catch (err) {
+      res.status(400).json({ error: err.message || "invalid_path" });
+      return;
+    }
+    try {
+      const stats = await fs.stat(fullPath);
+      if (stats.isDirectory()) {
+        await fs.rm(fullPath, { recursive: true });
       } else {
-        res.status(400).json({ error: "Unsupported entry type" });
+        await fs.unlink(fullPath);
+      }
+      logger.info("file deleted", { path: requestedPath });
+      res.json({ success: true, path: requestedPath });
+    } catch (err) {
+      if (err.code === "ENOENT") {
+        res.status(404).json({ error: "not_found" });
         return;
       }
-      res.status(200).json({ success: true });
-    } catch (error) {
-      if (error.code === "ENOENT") {
-        res.status(404).json({ error: "Not found" });
-        return;
-      }
-      res.status(400).json({ error: error.message || "Delete failed" });
+      logger.error("delete failed", { path: requestedPath, error: err.message });
+      res.status(500).json({ error: err.message || "delete_failed" });
     }
   });
 
@@ -1767,18 +1902,16 @@ async function bootstrap() {
       if (access.role === "remote" && access.fingerprint) {
         await accessControl.incrementDeviceStat(access.fingerprint, "downloads", 1);
       }
+      res.flushHeaders();
+
       const clientIp = getClientIp(req);
       const startTime = Date.now();
       logger.info("file content download start", { path: resolvedPath, size: fileSize, client_ip: clientIp });
-      const readStream = fsSync.createReadStream(resolvedPath, { highWaterMark: 1024 * 1024 });
-      readStream.on("error", (err) => {
-        if (!res.headersSent) {
-          res.status(500).json({ error: "download_failed" });
-          return;
-        }
-        res.destroy();
-      });
-      readStream.on("end", () => {
+
+      const readStream = fsSync.createReadStream(resolvedPath, { highWaterMark: 2 * 1024 * 1024 });
+      const passThrough = new stream.PassThrough({ highWaterMark: 8 * 1024 * 1024 });
+
+      pipeline(readStream, passThrough, res).then(() => {
         const durationMs = Date.now() - startTime;
         const mbPerSec = durationMs > 0 ? (fileSize / (1024 * 1024)) / (durationMs / 1000) : 0;
         logger.info("file content download end", {
@@ -1786,8 +1919,13 @@ async function bootstrap() {
           duration_ms: durationMs,
           mb_per_sec: mbPerSec.toFixed(2),
         });
+      }).catch((err) => {
+        if (err.code !== "ERR_STREAM_PREMATURE_CLOSE" && !err.message?.includes("aborted")) {
+          logger.error("file content download error", { error: err.message });
+        }
+        if (!res.headersSent) res.status(500).json({ error: "download_failed" });
+        else res.destroy();
       });
-      readStream.pipe(res);
     } catch (error) {
       res.status(400).json({ error: error.message || "preview_failed" });
     }
@@ -1807,12 +1945,14 @@ async function bootstrap() {
       }
       const targetPath = resolveOwnerPath(config.storage.ownerRoot, toPosixPath(sharePath));
       const share = await shareService.createShare({ targetPath, permission, ttlMs, scope });
-      const host = req.headers.host || `127.0.0.1:${config.server.port}`;
+      const displayName = userConfig?.display_name || "Join";
+      const endpoints = getNetworkEndpoints(displayName, config.server.port, config.server.shareBasePath);
       logger.info("share link generated", { scope: share.scope });
       runtimeTelemetry.increment("total_shares_created");
       res.json({
         shareId: share.shareId,
-        url: `http://${host}${config.server.shareBasePath}/${share.shareId}`,
+        url: `${endpoints.ipUrl}/${share.shareId}`,
+        urlIp: `${endpoints.ipUrl}/${share.shareId}`,
         expiresAt: share.expiryTime,
       });
     } catch (error) {
@@ -1821,14 +1961,16 @@ async function bootstrap() {
   });
 
   app.get("/api/shares", (req, res) => {
-    const host = req.headers.host || `127.0.0.1:${config.server.port}`;
+    const displayName = userConfig?.display_name || "Join";
+    const endpoints = getNetworkEndpoints(displayName, config.server.port, config.server.shareBasePath);
+    const sharePath = config.server.shareBasePath;
     const shares = shareService.listShares().map((share) => {
       const relativePath = formatSharePath(config.storage.ownerRoot, share.targetPath);
       const fileName = path.posix.basename(relativePath || "/");
       const isActive = share.status === "active";
-      const url = isActive
-        ? `http://${host}${config.server.shareBasePath}/${share.shareId}`
-        : null;
+      const base = `${sharePath}/${share.shareId}`;
+      const url = isActive ? `${endpoints.ipUrl}/${share.shareId}` : null;
+      const urlIp = isActive ? `${endpoints.ipUrl}/${share.shareId}` : null;
       return {
         shareId: share.shareId,
         id: share.shareId,
@@ -1842,6 +1984,7 @@ async function bootstrap() {
         isActive,
         scope: share.scope || "local",
         url,
+        urlIp,
         tunnelUrl: url,
         downloadCount: 0,
         maxDownloads: null,
@@ -1889,7 +2032,15 @@ async function bootstrap() {
   });
 
   app.post("/api/upload", (req, res) => {
-    req.setTimeout(30 * 60 * 1000);
+    req.setTimeout(60 * 60 * 1000);
+    if (req.socket) {
+      req.socket.setNoDelay(true);
+      try {
+        if (typeof req.socket.setRecvBufferSize === "function") {
+          req.socket.setRecvBufferSize(1024 * 1024);
+        }
+      } catch (_e) {}
+    }
     const contentType = req.headers["content-type"] || "";
     if (!contentType.includes("multipart/form-data")) {
       res.status(400).json({ error: "multipart form data required" });
@@ -1898,16 +2049,26 @@ async function bootstrap() {
     const access = getRequestContext(req);
     const fields = {};
     let targetPath = null;
+    let lastFileRelPath = null;
     const stored = [];
     let totalBytes = 0;
     let uploadStartTime = null;
     const clientIp = getClientIp(req);
     let pendingWrites = 0;
+    const destCounts = new Map();
+
+    function sanitizeRelPath(rel) {
+      if (!rel || typeof rel !== "string") return "";
+      const parts = rel.replace(/\\/g, "/").split("/").filter(Boolean);
+      const safe = parts.map((p) => p.replace(/[\\/:*?"<>|]/g, "_").replace(/^\.+$/, "_")).filter(Boolean);
+      return safe.join("/");
+    }
 
     const busboy = Busboy({ headers: { "content-type": contentType } });
 
     busboy.on("field", (name, value) => {
       fields[name] = value;
+      if (name === "fileRelPath") lastFileRelPath = value;
       if ((name === "path" || name === "parentPath") && value) {
         try {
           const target = String(value || "/").trim() || "/";
@@ -1922,7 +2083,24 @@ async function bootstrap() {
 
     busboy.on("file", (fieldname, file, info) => {
       const { filename } = info;
-      const cleanName = (filename || "upload").replace(/[\\/:*?"<>|]/g, "_").trim() || "upload";
+      const relPath = lastFileRelPath ? sanitizeRelPath(lastFileRelPath) : null;
+      lastFileRelPath = null;
+      let cleanName = (filename || "upload").replace(/[\\/:*?"<>|]/g, "_").trim() || "upload";
+      const effectiveName = relPath || cleanName;
+      const count = (destCounts.get(effectiveName) || 0) + 1;
+      destCounts.set(effectiveName, count);
+      if (count > 1 && !relPath) {
+        const ext = path.extname(cleanName);
+        const base = path.basename(cleanName, ext) || cleanName;
+        cleanName = `${base} (${count})${ext}`;
+      } else if (count > 1 && relPath) {
+        const ext = path.extname(relPath);
+        const base = path.basename(relPath, ext) || relPath;
+        const dir = path.dirname(relPath);
+        cleanName = dir && dir !== "." ? `${dir}/${base} (${count})${ext}` : `${base} (${count})${ext}`;
+      } else if (relPath) {
+        cleanName = relPath;
+      }
       if (!targetPath) {
         const target = fields.path || fields.parentPath || "/";
         if (!canWritePathForContext(access, target)) {
@@ -1936,7 +2114,8 @@ async function bootstrap() {
           return;
         }
       }
-      fs.mkdir(targetPath, { recursive: true }).catch(() => {});
+      const destDir = path.dirname(path.join(targetPath, cleanName));
+      fs.mkdir(destDir, { recursive: true }).catch(() => {});
       if (!uploadStartTime) {
         uploadStartTime = Date.now();
         logger.info("upload start", {
@@ -1946,7 +2125,10 @@ async function bootstrap() {
       }
       pendingWrites += 1;
       const destination = path.join(targetPath, cleanName);
-      const writeStream = fsSync.createWriteStream(destination, { highWaterMark: 1024 * 1024 });
+      const writeStream = fsSync.createWriteStream(destination, {
+        flags: "w",
+        highWaterMark: 1024 * 1024,
+      });
       let bytesWritten = 0;
       file.on("data", (chunk) => {
         bytesWritten += chunk.length;
@@ -2023,6 +2205,90 @@ async function bootstrap() {
     req.pipe(busboy);
   });
 
+  app.put("/api/v1/file/raw", (req, res) => {
+    req.setTimeout(60 * 60 * 1000);
+    if (req.socket) {
+      req.socket.setNoDelay(true);
+      try {
+        if (typeof req.socket.setRecvBufferSize === "function") {
+          req.socket.setRecvBufferSize(1024 * 1024);
+        }
+      } catch (_e) {}
+    }
+    const rawPath = req.query.path;
+    if (!rawPath || typeof rawPath !== "string") {
+      res.status(400).json({ error: "path query parameter required" });
+      return;
+    }
+    const requestedPath = toPosixPath(rawPath.trim() || "/");
+    const access = getRequestContext(req);
+    if (!canWritePathForContext(access, requestedPath)) {
+      res.status(403).json({ error: "write_outside_device_folder_denied" });
+      return;
+    }
+    let fullPath;
+    try {
+      fullPath = resolveOwnerPath(config.storage.ownerRoot, requestedPath);
+    } catch (err) {
+      res.status(400).json({ error: err.message || "invalid_path" });
+      return;
+    }
+    const parentDir = path.dirname(fullPath);
+    const clientIp = getClientIp(req);
+    const startTime = Date.now();
+    let bytesReceived = 0;
+
+    const countStream = new stream.Transform({
+      transform(chunk, enc, cb) {
+        bytesReceived += chunk.length;
+        cb(null, chunk);
+      },
+    });
+
+    req.on("aborted", () => {
+      countStream.destroy();
+      logger.info("raw upload aborted", { client_ip: clientIp });
+    });
+
+    fs.mkdir(parentDir, { recursive: true })
+      .then(() => {
+        const writeStream = fsSync.createWriteStream(fullPath, {
+          flags: "w",
+          highWaterMark: 1024 * 1024,
+        });
+        return pipeline(req, countStream, writeStream);
+      })
+      .then(() => {
+        const durationMs = Date.now() - startTime;
+        const mbPerSec =
+          durationMs > 0 && bytesReceived > 0
+            ? (bytesReceived / (1024 * 1024)) / (durationMs / 1000)
+            : 0;
+        logger.info("raw upload complete", {
+          bytes_received: bytesReceived,
+          duration_ms: durationMs,
+          mb_per_sec: mbPerSec.toFixed(2),
+          path: requestedPath,
+          client_ip: clientIp,
+        });
+        if (access.role === "remote" && access.fingerprint) {
+          accessControl.incrementDeviceStat(access.fingerprint, "uploads", 1).catch(() => {});
+        }
+        runtimeTelemetry.increment("total_uploads", 1);
+        res.json({
+          success: true,
+          bytes: bytesReceived,
+          path: requestedPath,
+        });
+      })
+      .catch((err) => {
+        logger.error("raw upload failed", { error: err.message, path: requestedPath });
+        if (!res.headersSent) {
+          res.status(500).json({ error: err.message || "upload_failed" });
+        }
+      });
+  });
+
   app.post("/api/v1/files/import", ensureAdmin, async (req, res) => {
     try {
       const target = req.body?.path || "/";
@@ -2095,58 +2361,122 @@ async function bootstrap() {
     res.json({ status: "ok", build_id: BUILD_ID, version: getAppVersion() });
   });
 
+  const hostId = userConfig?.user_id || "host";
+  let lastNetworkChangeAt = null;
+  const discoveryManager = createDiscoveryManager({
+    bonjour,
+    hostId,
+    displayName: userConfig.display_name,
+    port: config.server.port,
+    appVersion: getAppVersion(),
+    logger,
+  });
+
   let presenceList = [];
-  let presenceService = null;
-  let presenceBrowser = null;
 
-  function updatePresenceList(list) {
-    presenceList = list.filter((peer) => peer.display_name !== userConfig.display_name);
-  }
-
-  function startBroadcast() {
-    if (presenceService) return;
-    presenceService = startPresenceService({
-      displayName: userConfig.display_name,
-      port: config.server.port,
-    });
-  }
-
-  function stopBroadcast() {
-    if (!presenceService) return;
-    presenceService.stop();
-    presenceService = null;
-  }
+  discoveryManager.on("peers", (peers) => {
+    presenceList = peers;
+  });
 
   function startDiscovery() {
-    if (presenceBrowser) return;
-    presenceBrowser = startPresenceBrowser(updatePresenceList);
+    if (sharingEnabled) {
+      discoveryManager.startAdvertise();
+      discoveryManager.startBrowse();
+    }
   }
 
   function stopDiscovery() {
-    if (!presenceBrowser) return;
-    presenceBrowser.browser.stop();
-    presenceBrowser = null;
-    presenceList = [];
+    discoveryManager.stopAdvertise();
+    discoveryManager.stopBrowse();
   }
 
   function updateDisplayName(newName) {
     const normalized = normalizeDisplayName(newName);
     if (!isValidDisplayName(normalized)) return false;
     userConfig.display_name = normalized;
-    stopBroadcast();
-    if (userConfig.network_visibility) {
-      startBroadcast();
+    try {
+      discoveryManager.restartAdvertise(normalized);
+    } catch (err) {
+      logger.warn("mDNS advertise restart failed, IP fallback available", { error: err?.message });
     }
     return true;
   }
 
-  if (userConfig.network_visibility) {
-    startBroadcast();
+  if (sharingEnabled) {
     startDiscovery();
   }
 
+  const networkManager = createNetworkManager({
+    displayName: userConfig.display_name,
+    port: config.server.port,
+    shareBasePath: config.server.shareBasePath,
+    pollIntervalMs: 5000,
+    logger,
+  });
+  networkManager.on("change", ({ changed }) => {
+    if (changed && discoveryManager && sharingEnabled) {
+      lastNetworkChangeAt = Date.now();
+      try {
+        discoveryManager.restartAdvertise();
+      } catch (_) {}
+      logger.info("network changed — discovery/links updated");
+    }
+  });
+
   app.get("/api/v1/network", (_req, res) => {
-    res.json(presenceList);
+    const peers = discoveryManager.getPeers().map((p) => ({
+      deviceId: p.deviceId,
+      display_name: p.displayName,
+      status: p.status,
+      bestIp: p.bestIp,
+      hostname: p.hostname,
+      port: p.port,
+      source: p.source,
+    }));
+    res.json(peers);
+  });
+
+  app.post("/api/v1/network/manual-connect", async (req, res) => {
+    const access = getRequestContext(req);
+    if (access.role !== "host") {
+      res.status(403).json({ error: "host_only" });
+      return;
+    }
+    const { ip, port: peerPort } = req.body || {};
+    const targetPort = peerPort || config.server.port;
+    if (!ip || typeof ip !== "string") {
+      res.status(400).json({ error: "ip required" });
+      return;
+    }
+    const trimmedIp = ip.trim();
+    if (!trimmedIp) {
+      res.status(400).json({ error: "ip required" });
+      return;
+    }
+    try {
+      const baseUrl = `http://${trimmedIp}:${targetPort}`;
+      const peerRes = await fetch(`${baseUrl}/api/v1/peer`, { signal: AbortSignal.timeout(5000) });
+      if (!peerRes.ok) {
+        res.status(502).json({ error: "peer_unreachable", message: "Could not fetch peer info" });
+        return;
+      }
+      const peerInfo = await peerRes.json();
+      const { deviceId, displayName: name } = peerInfo;
+      if (!deviceId) {
+        res.status(502).json({ error: "invalid_peer_response" });
+        return;
+      }
+      discoveryManager.addManualPeer({
+        deviceId,
+        displayName: name || "Manual",
+        ip: trimmedIp,
+        port: targetPort,
+      });
+      res.json({ success: true, deviceId, displayName: name });
+    } catch (err) {
+      logger.warn("manual connect failed", { ip: trimmedIp, error: err?.message });
+      res.status(502).json({ error: "peer_unreachable", message: err?.message || "Connection failed" });
+    }
   });
 
   app.get("/api/v1/network/settings", (_req, res) => {
@@ -2175,11 +2505,9 @@ async function bootstrap() {
 
     if (typeof requestedVisibility === "boolean") {
       userConfig.network_visibility = requestedVisibility;
-      if (requestedVisibility) {
-        startBroadcast();
+      if (requestedVisibility && sharingEnabled) {
         startDiscovery();
       } else {
-        stopBroadcast();
         stopDiscovery();
       }
       updated = true;
@@ -2193,6 +2521,162 @@ async function bootstrap() {
       display_name: userConfig.display_name,
       network_visibility: !!userConfig.network_visibility,
     });
+  });
+
+  app.get("/api/v1/teams", async (req, res) => {
+    const deviceId = getCurrentDeviceId(req);
+    const teams = teamsStore.listTeamsForDevice(deviceId);
+    const invites = teamsStore.getPendingInvitesForDevice(deviceId);
+    res.json({ teams, invites });
+  });
+
+  app.post("/api/v1/teams", async (req, res) => {
+    const deviceId = getCurrentDeviceId(req);
+    const { teamName } = req.body || {};
+    const team = teamsStore.createTeam({
+      teamName: String(teamName || "").trim() || "Unnamed Team",
+      createdByDeviceId: deviceId,
+    });
+    res.json(team);
+  });
+
+  app.get("/api/v1/teams/:teamId", (req, res) => {
+    const deviceId = getCurrentDeviceId(req);
+    const team = teamsStore.getTeam(req.params.teamId);
+    if (!team || !team.members.includes(deviceId)) {
+      res.status(404).json({ error: "team_not_found" });
+      return;
+    }
+    res.json(team);
+  });
+
+  app.post("/api/v1/teams/:teamId/invite", async (req, res) => {
+    const deviceId = getCurrentDeviceId(req);
+    const { toDeviceId } = req.body || {};
+    if (!toDeviceId) {
+      res.status(400).json({ error: "toDeviceId required" });
+      return;
+    }
+    const invite = teamsStore.createInvite({
+      teamId: req.params.teamId,
+      fromDeviceId: deviceId,
+      toDeviceId: String(toDeviceId).trim(),
+    });
+    if (!invite) {
+      res.status(400).json({ error: "invite_failed", message: "Team full or already a member" });
+      return;
+    }
+    const peer = discoveryManager?.getPeer?.(invite.toDeviceId);
+    if (peer?.bestIp) {
+      const baseUrl = `http://${peer.bestIp}:${peer.port || config.server.port}`;
+      try {
+        await fetch(`${baseUrl}/api/v1/teams/invite/receive`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(invite),
+        }).catch(() => {});
+      } catch (_) {}
+    }
+    res.json(invite);
+  });
+
+  app.post("/api/v1/teams/invite/receive", async (req, res) => {
+    const { inviteId, teamId, teamName, fromDeviceId, toDeviceId } = req.body || {};
+    if (!teamId || !fromDeviceId || !toDeviceId) {
+      res.status(400).json({ error: "invalid_invite" });
+      return;
+    }
+    const myDeviceId = userConfig?.user_id || "host";
+    if (toDeviceId !== myDeviceId) {
+      res.status(403).json({ error: "invite_not_for_you" });
+      return;
+    }
+    const id = inviteId || crypto.randomUUID();
+    if (!teamsStore.state.invites[id]) {
+      teamsStore.state.invites[id] = {
+        inviteId: id,
+        teamId,
+        teamName: teamName || "Team",
+        fromDeviceId,
+        toDeviceId,
+        status: "pending",
+        createdAt: req.body.createdAt || new Date().toISOString(),
+      };
+      teamsStore.persist();
+    }
+    res.json({ success: true });
+  });
+
+  app.post("/api/v1/teams/invites/:inviteId/accept", async (req, res) => {
+    const deviceId = getCurrentDeviceId(req);
+    const team = teamsStore.acceptInvite(req.params.inviteId, deviceId);
+    if (!team) {
+      res.status(404).json({ error: "invite_not_found" });
+      return;
+    }
+    res.json(team);
+  });
+
+  app.post("/api/v1/teams/message", async (req, res) => {
+    const deviceId = getCurrentDeviceId(req);
+    const { teamId, type, payload } = req.body || {};
+    if (!teamId) {
+      res.status(400).json({ error: "teamId required" });
+      return;
+    }
+    const msg = teamsStore.addMessage({
+      teamId,
+      senderDeviceId: deviceId,
+      type: type || "text",
+      payload: payload || {},
+    });
+    if (!msg) {
+      res.status(403).json({ error: "not_a_member" });
+      return;
+    }
+    const team = teamsStore.getTeam(teamId);
+    const offlineCount = 0;
+    res.json({ message: msg, offlineCount });
+  });
+
+  app.post("/api/v1/teams/receive", async (req, res) => {
+    const deviceId = getCurrentDeviceId(req);
+    const { teamId, senderDeviceId, messageId, timestamp, type, payload } = req.body || {};
+    if (!teamId || !senderDeviceId) {
+      res.status(400).json({ error: "teamId and senderDeviceId required" });
+      return;
+    }
+    const team = teamsStore.getTeam(teamId);
+    if (!team || !team.members.includes(deviceId)) {
+      res.status(404).json({ error: "team_not_found" });
+      return;
+    }
+    if (!team.members.includes(senderDeviceId)) {
+      res.status(403).json({ error: "sender_not_member" });
+      return;
+    }
+    if (!teamsStore.state.messages[teamId]) teamsStore.state.messages[teamId] = [];
+    teamsStore.state.messages[teamId].push({
+      messageId: messageId || crypto.randomUUID(),
+      teamId,
+      senderDeviceId,
+      timestamp: timestamp || new Date().toISOString(),
+      type: type || "text",
+      payload: payload || {},
+    });
+    teamsStore.persist();
+    res.json({ success: true });
+  });
+
+  app.get("/api/v1/teams/:teamId/messages", (req, res) => {
+    const deviceId = getCurrentDeviceId(req);
+    const team = teamsStore.getTeam(req.params.teamId);
+    if (!team || !team.members.includes(deviceId)) {
+      res.status(404).json({ error: "team_not_found" });
+      return;
+    }
+    const messages = teamsStore.getMessages(req.params.teamId, deviceId);
+    res.json({ messages });
   });
 
   app.get("/api/v1/telemetry/settings", (_req, res) => {
@@ -2461,6 +2945,10 @@ async function bootstrap() {
     app(req, res);
   });
 
+  server.on("connection", (socket) => {
+    socket.setNoDelay(true);
+  });
+
   shareOnlyServer = http.createServer((req, res) => {
     const url = req.url || "/";
     if (url === config.server.shareBasePath || url.startsWith(`${config.server.shareBasePath}/`)) {
@@ -2469,6 +2957,10 @@ async function bootstrap() {
     }
     res.statusCode = 404;
     res.end();
+  });
+
+  shareOnlyServer.on("connection", (socket) => {
+    socket.setNoDelay(true);
   });
 
   function handleListenError(name, host, port, error) {
@@ -2516,6 +3008,15 @@ async function bootstrap() {
       path: path.join(config.server.shareBasePath, "<token>"),
     });
 
+    const lanIp = getBestLanIp();
+    console.log("[joincloud] mDNS verification checklist:");
+    console.log("  Hostname:", mdnsHostname);
+    console.log("  IP fallback:", `${lanIp}:${config.server.port}`);
+    console.log("  Commands:");
+    console.log(`    ping ${mdnsHostname}`);
+    console.log(`    curl -I http://${mdnsHostname}:${config.server.port}/`);
+    console.log(`    curl -I http://${lanIp}:${config.server.port}/`);
+
     const target = process.env.JOINCLOUD_SHARE_TARGET;
     if (target) {
       const permission = process.env.JOINCLOUD_SHARE_PERMISSION;
@@ -2542,13 +3043,13 @@ async function bootstrap() {
   const shutdown = async () => {
     expiryManager.stop();
     tunnelManager.stop();
+    networkManager?.stop?.();
     telemetrySync.flush().catch(() => {});
     telemetrySync.stop();
     if (usageAggregation && typeof usageAggregation.stop === "function") {
       await usageAggregation.stop().catch(() => {});
     }
     stopDiscovery();
-    stopBroadcast();
     bonjour.destroy();
     clearInterval(uptimeTimer);
     if (shareOnlyServer && server) {
