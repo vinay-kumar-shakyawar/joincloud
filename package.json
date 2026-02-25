@@ -9,8 +9,8 @@
     "backend:dev": "node server/index.js",
     "electron:dev": "node scripts/run-electron.cjs .",
     "test:electron": "ELECTRON_RUN_AS_NODE= node electron/tests/smoke.test.js",
-    "build:mac": "node -e \"require('fs').rmSync('dist/mac', { recursive: true, force: true })\" && USE_HARD_LINKS=false electron-builder --mac --publish never -c.directories.output=dist/mac",
-    "build:win": "npm run rebuild:server && npm run build:icon:win && node -e \"require('fs').rmSync('dist/win', { recursive: true, force: true })\" && USE_HARD_LINKS=false electron-builder --win --x64 --publish never -c.directories.output=dist/win",
+    "build:mac": "node -e \"require('fs').rmSync('dist/mac', { recursive: true, force: true })\" && cross-env USE_HARD_LINKS=false electron-builder --mac --publish never -c.directories.output=dist/mac",
+    "build:win": "npm run rebuild:server && npm run build:icon:win && node -e \"require('fs').rmSync('dist/win', { recursive: true, force: true })\" && cross-env USE_HARD_LINKS=false electron-builder --win --x64 --publish never -c.directories.output=dist/win",
     "build:icon:win": "node scripts/prepare-win-icon.cjs",
     "rebuild:server": "electron-rebuild -w sqlite3",
     "postinstall": "npm run rebuild:server",
@@ -31,6 +31,7 @@
     "webdav-server": "^2.6.2"
   },
   "devDependencies": {
+    "cross-env": "^7.0.3",
     "electron": "^31.2.0",
     "electron-builder": "^24.13.3",
     "electron-rebuild": "^3.2.9",

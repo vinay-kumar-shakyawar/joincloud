@@ -21,6 +21,7 @@ const state = {
   licenseExpiresAt: null,
   licenseDeviceLimit: null,
   activationRequired: false,
+  trialDays: 7,
   upgradeUrl: "",
   subscription: null,
   supportMessages: [],
@@ -328,6 +329,7 @@ function showActivationGate() {
   els.appLayout.style.display = "none";
   if (els.activationGate) els.activationGate.style.display = "grid";
   setActivationGateMessage("");
+  updateActivationGateTrialText();
   var webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
   var deviceId = state.hostUuidFromConfig || state.deviceId || "";
   var accountId = state.accountId || "";
@@ -1001,6 +1003,7 @@ async function loadControlPlaneConfig() {
     state.licenseExpiresAt = data.license?.expires_at ?? null;
     state.licenseDeviceLimit = data.license?.device_limit ?? null;
     state.activationRequired = data.activation?.required === true;
+    state.trialDays = typeof data.trial_days === "number" ? data.trial_days : 7;
     state.upgradeUrl = data.upgrade_url || "";
     state.subscription = data.subscription || null;
     if (data.web_url) window.__JOINCLOUD_WEB_URL__ = data.web_url;
@@ -1010,7 +1013,15 @@ async function loadControlPlaneConfig() {
     updateGraceBanner();
     updateSubscriptionSection();
     updateHeaderProfile();
+    updateActivationGateTrialText();
   } catch (_) {}
+}
+
+function updateActivationGateTrialText() {
+  var el = document.getElementById("activation-gate-trial-text");
+  if (!el) return;
+  var days = state.trialDays || 7;
+  el.textContent = "A free " + days + "-day trial starts automatically when you sign in. Create shares and manage your files—no credit card required.";
 }
 
 function updateGraceBanner() {
@@ -1065,6 +1076,17 @@ function updateGraceBanner() {
 
 function updateSubscriptionSection() {
   const hasLicense = state.licenseState && state.licenseState !== "UNREGISTERED";
+
+  // Home trial notice: show when on trial so users know they can create shares and manage files
+  var homeTrialNotice = document.getElementById("home-trial-notice");
+  if (homeTrialNotice) {
+    if (state.licenseState === "trial_active") {
+      homeTrialNotice.style.display = "block";
+      homeTrialNotice.textContent = "You're on a free trial. Create shares from the Shares section and manage your files below.";
+    } else {
+      homeTrialNotice.style.display = "none";
+    }
+  }
 
   // Populate the richer profile card in Settings
   if (els.settingsProfileCard) {

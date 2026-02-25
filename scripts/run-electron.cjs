@@ -1,6 +1,9 @@
 const path = require("path");
 const { spawn } = require("child_process");
 
+// Load root .env so Electron and its backend get JOINCLOUD_ADMIN_HOST, JOINCLOUD_WEB_URL, etc. in dev
+require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
+
 const electronBinary =
   process.platform === "win32"
     ? path.join(__dirname, "..", "node_modules", ".bin", "electron.cmd")

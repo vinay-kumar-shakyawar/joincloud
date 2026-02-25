@@ -2925,6 +2925,7 @@ async function bootstrap() {
       const out = cp || { license: {}, activation: {}, telemetry: {} };
       out.upgrade_url = process.env.JOINCLOUD_UPGRADE_URL || "";
       out.web_url = process.env.JOINCLOUD_WEB_URL || "https://joincloud.com";
+      if (out.trial_days == null) out.trial_days = 7;
       const cached = getControlPlaneConfig();
       if (cached && cached.subscription) out.subscription = cached.subscription;
       if (hostUuidForCfg) out.host_uuid = hostUuidForCfg;

@@ -60,7 +60,7 @@
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.7"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
           </div>
           <h2 style="margin:0 0 8px">Sign in to JoinCloud</h2>
-          <p class="value value-muted" style="margin:0 0 24px; line-height:1.5;">A free 7-day trial starts automatically when you sign in.<br>No credit card required.</p>
+          <p id="activation-gate-trial-text" class="value value-muted" style="margin:0 0 24px; line-height:1.5;">A free trial starts automatically when you sign in. Create shares and manage your files—no credit card required.</p>
           <button class="button" id="activation-gate-signin-web" style="width:100%; padding:12px 0; font-size:15px;">Sign In / Create Account</button>
           <div id="activation-gate-message" class="modal-result" style="margin-top:12px;"></div>
           <p class="value value-muted" style="margin-top:20px; font-size:12px; line-height:1.4;">Your browser will open to sign in or create an account.<br>You'll be redirected back here automatically.</p>
@@ -92,6 +92,7 @@
       <div class="content">
       <section class="card section" data-section="home">
         <h2>Home</h2>
+        <p id="home-trial-notice" class="value value-muted" style="display:none; margin-bottom:16px;"></p>
         <div class="home-grid">
           <div class="home-section">
             <div class="label">Storage</div>

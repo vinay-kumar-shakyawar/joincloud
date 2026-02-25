@@ -56,7 +56,8 @@ const MAX_RESTARTS_IN_WINDOW = 3;
 if (process.defaultApp) {
   app.setAsDefaultProtocolClient("joincloud", process.execPath, [path.resolve(process.argv[1])]);
 } else {
-  app.setAsDefaultProtocolClient("joincloud");
+  // Packaged app: pass exe path so Windows/macOS/Linux associate the protocol with this app
+  app.setAsDefaultProtocolClient("joincloud", process.execPath);
 }
 
 const gotLock = app.requestSingleInstanceLock();
@@ -689,6 +690,14 @@ async function createWindow() {
     mainWindow.on("closed", () => {
       mainWindow = null;
     });
+
+    // Handle deep link passed when app was launched via joincloud:// (e.g. from web redirect when app was closed)
+    const startupDeepLink = process.argv.find((arg) => typeof arg === "string" && arg.startsWith("joincloud://"));
+    if (startupDeepLink) {
+      setImmediate(() => {
+        handleDeepLink(startupDeepLink).catch((err) => logLine(`[deep-link] startup error: ${formatError(err)}`));
+      });
+    }
   } finally {
     isCreatingWindow = false;
   }
