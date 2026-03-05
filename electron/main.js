@@ -8,17 +8,29 @@ try {
 
 const app = electron.app;
 const BrowserWindow = electron.BrowserWindow;
+const BrowserView = electron.BrowserView;
 const dialog = electron.dialog;
 const ipcMain = electron.ipcMain;
 const shell = electron.shell;
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const net = require("net");
 const { spawn } = require("child_process");
 const http = require("http");
 
+if (!app.isPackaged) {
+  try {
+    const devUserDataPath = path.join(app.getPath("appData"), "JoinCloud-dev");
+    app.setPath("userData", devUserDataPath);
+  } catch (_error) {
+    // ignore and continue with default userData
+  }
+}
+
 let backendProcess = null;
 let mainWindow = null;
+let authView = null;
 let logPath = null;
 let healthTimer = null;
 let restartTimer = null;
@@ -26,12 +38,119 @@ let consecutiveHealthFailures = 0;
 let restartHistory = [];
 let backendState = "healthy";
 let isStopping = false;
+let isCreatingWindow = false;
+let allowWindowClose = false;
+let isHandlingClosePrompt = false;
+let deviceIdentity = null;
+let heartbeatTimer = null;
+let registrationSchedulerRef = null;
 
 const HEALTH_URL = "http://127.0.0.1:8787/api/v1/health";
+const BACKEND_URL = "http://127.0.0.1:8787";
+const BACKEND_PORT = "8787";
+const SHARE_PORT = "8788";
 const HEALTH_INTERVAL_MS = 12000;
 const HEALTH_FAILURE_THRESHOLD = 2;
 const RESTART_WINDOW_MS = 10 * 60 * 1000;
 const MAX_RESTARTS_IN_WINDOW = 3;
+
+// Register joincloud:// deep link protocol so the website can redirect back to the app.
+if (process.defaultApp) {
+  app.setAsDefaultProtocolClient("joincloud", process.execPath, [path.resolve(process.argv[1])]);
+} else {
+  // Packaged app: pass exe path so Windows/macOS/Linux associate the protocol with this app
+  app.setAsDefaultProtocolClient("joincloud", process.execPath);
+}
+
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+}
+
+/** Handle a joincloud:// deep-link URL (auth or refresh). */
+async function handleDeepLink(url) {
+  try {
+    logLine(`[deep-link] received: ${url}`);
+    const parsed = new URL(url);
+
+    if (parsed.hostname === "refresh" || parsed.pathname === "//refresh") {
+      logLine("[deep-link] refresh requested — re-fetching config");
+      await new Promise((resolve, reject) => {
+        const req = http.request(
+          { hostname: "127.0.0.1", port: parseInt(BACKEND_PORT, 10), path: "/api/v1/control-plane-config", method: "GET", timeout: 8000 },
+          (resp) => { let d = ""; resp.on("data", (c) => { d += c; }); resp.on("end", () => resolve(d)); }
+        );
+        req.on("error", reject);
+        req.end();
+      });
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("license-updated");
+        mainWindow.show();
+        mainWindow.focus();
+      }
+      return;
+    }
+
+    const token = parsed.searchParams.get("token");
+    if (!token) {
+      logLine("[deep-link] no token in URL");
+      return;
+    }
+    const res = await new Promise((resolve, reject) => {
+      const bodyStr = JSON.stringify({ token });
+      const req = http.request(
+        {
+          hostname: "127.0.0.1",
+          port: parseInt(BACKEND_PORT, 10),
+          path: "/api/desktop/verify",
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bodyStr) },
+          timeout: 8000,
+        },
+        (resp) => {
+          let data = "";
+          resp.on("data", (chunk) => { data += chunk; });
+          resp.on("end", () => {
+            try { resolve({ statusCode: resp.statusCode, body: JSON.parse(data) }); }
+            catch { resolve({ statusCode: resp.statusCode, body: {} }); }
+          });
+        }
+      );
+      req.on("error", reject);
+      req.write(bodyStr);
+      req.end();
+    });
+    if (res.statusCode !== 200 || !res.body) {
+      logLine(`[deep-link] verify failed: ${JSON.stringify(res.body)}`);
+      return;
+    }
+    const userDataPath = app.getPath("userData");
+    const systemDir = path.join(userDataPath, "JoinCloud", "system");
+    if (!fs.existsSync(systemDir)) fs.mkdirSync(systemDir, { recursive: true });
+    if (res.body.jwt) {
+      const authPath = path.join(systemDir, "auth.json");
+      fs.writeFileSync(authPath, JSON.stringify({ token: res.body.jwt }, null, 2), "utf8");
+      logLine("[deep-link] auth token saved");
+    }
+    if (res.body.license) {
+      const licensePath = path.join(systemDir, "license.json");
+      fs.writeFileSync(licensePath, JSON.stringify(res.body.license, null, 2), "utf8");
+      logLine("[deep-link] license updated from web auth");
+    }
+    if (res.body.licenseState && res.body.entitlements) {
+      const entitlementsPath = path.join(systemDir, "entitlements.json");
+      fs.writeFileSync(entitlementsPath, JSON.stringify(res.body, null, 2), "utf8");
+      logLine("[deep-link] entitlements updated (trial extend)");
+    }
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("license-updated");
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  } catch (err) {
+    logLine(`[deep-link] error: ${formatError(err)}`);
+  }
+}
 
 function initLogging() {
   const userData = app.getPath("userData");
@@ -41,25 +160,73 @@ function initLogging() {
   }
   logPath = path.join(dir, "startup.log");
   fs.appendFileSync(logPath, `${new Date().toISOString()} App start\n`);
+  console.log(`[joincloud-electron] log file: ${logPath}`);
 }
 
 function logLine(message) {
+  const line = `${new Date().toISOString()} ${message}`;
+  console.log(`[joincloud-electron] ${message}`);
   if (!logPath) return;
-  fs.appendFileSync(logPath, `${new Date().toISOString()} ${message}\n`);
+  fs.appendFileSync(logPath, `${line}\n`);
 }
 
-function getBackendScriptPath() {
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, "server", "index.js");
-  }
-  return path.join(__dirname, "..", "server", "index.js");
+function formatError(error) {
+  if (!error) return "unknown error";
+  if (typeof error === "string") return error;
+  return error.stack || error.message || JSON.stringify(error);
 }
 
-function getBackendCwd() {
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, "server");
+function showInitFailure(reason, error) {
+  const details = error ? `\n${formatError(error)}` : "";
+  const logHint = logPath ? `\n\nSee log:\n${logPath}` : "";
+  const message = `App failed to initialize.\n\nReason: ${reason}${details}${logHint}`;
+  logLine(`Initialization failure: ${reason}${details ? ` | ${details}` : ""}`);
+  showBackendError(message);
+}
+
+function resolveBackendPaths() {
+  if (!app.isPackaged) {
+    return {
+      script: path.join(__dirname, "..", "server", "index.js"),
+      cwd: path.join(__dirname, "..", "server"),
+    };
   }
-  return path.join(__dirname, "..", "server");
+
+  const candidates = [
+    {
+      script: path.join(process.resourcesPath, "app.asar", "server", "index.js"),
+      cwd: process.resourcesPath,
+      source: "resources/app.asar/server/index.js",
+    },
+    {
+      script: path.join(process.resourcesPath, "app", "server", "index.js"),
+      cwd: path.join(process.resourcesPath, "app"),
+      source: "resources/app/server/index.js",
+    },
+    {
+      script: path.join(process.resourcesPath, "server", "index.js"),
+      cwd: process.resourcesPath,
+      source: "resources/server/index.js",
+    },
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate.script)) {
+      return candidate;
+    }
+  }
+
+  return {
+    script: candidates[0].script,
+    cwd: process.resourcesPath,
+    source: "missing",
+    checked: candidates.map((entry) => entry.script),
+  };
+}
+
+function getPackagedUiRoot() {
+  if (!app.isPackaged) return "";
+  return path.join(process.resourcesPath, "app.asar.unpacked", "server", "ui");
 }
 
 function getStoragePath() {
@@ -70,18 +237,51 @@ function startBackend() {
   if (backendProcess) return;
 
   // Native modules used by backend that require Electron rebuilds: sqlite3.
-  const backendScript = getBackendScriptPath();
-  const backendCwd = getBackendCwd();
+  const backendPath = resolveBackendPaths();
+  const backendScript = backendPath.script;
+  const backendCwd = backendPath.cwd;
+  if (!fs.existsSync(backendScript)) {
+    throw new Error(`Backend script not found: ${backendScript}`);
+  }
   logLine(`Backend start ${backendScript}`);
+  if (backendPath.source) {
+    logLine(`Backend source ${backendPath.source}`);
+  }
+  const nodePathCandidates = app.isPackaged
+    ? [
+        path.join(process.resourcesPath, "app.asar", "node_modules"),
+        path.join(process.resourcesPath, "app", "node_modules"),
+        path.join(process.resourcesPath, "node_modules"),
+      ].filter((candidatePath) => fs.existsSync(candidatePath))
+    : [];
+  const inheritedNodePath = process.env.NODE_PATH || "";
+  const mergedNodePath = [...nodePathCandidates, inheritedNodePath].filter(Boolean).join(path.delimiter);
+  const userDataPath = app.getPath("userData");
   const env = {
     ...process.env,
     NODE_ENV: app.isPackaged ? "production" : "development",
     ELECTRON_RUN_AS_NODE: "1",
     JOINCLOUD_HOST: "0.0.0.0",
+    JOINCLOUD_PORT: BACKEND_PORT,
+    JOINCLOUD_SHARE_PORT: SHARE_PORT,
+    PORT: BACKEND_PORT,
+    SHARE_PORT,
     JOINCLOUD_STORAGE_ROOT: getStoragePath(),
-    JOINCLOUD_RESOURCES_PATH: process.resourcesPath || "",
+    JOINCLOUD_USER_DATA: userDataPath,
     PATH: process.env.PATH || "",
+    NODE_PATH: mergedNodePath || inheritedNodePath,
   };
+  if (app.isPackaged && process.resourcesPath) {
+    env.JOINCLOUD_RESOURCES_PATH = process.resourcesPath;
+    const packagedUiRoot = getPackagedUiRoot();
+    env.UI_ROOT = packagedUiRoot;
+    env.JOINCLOUD_UI_ROOT = packagedUiRoot;
+    logLine(`Packaged UI root ${packagedUiRoot}`);
+  } else {
+    delete env.JOINCLOUD_RESOURCES_PATH;
+    delete env.UI_ROOT;
+    delete env.JOINCLOUD_UI_ROOT;
+  }
 
   backendProcess = spawn(process.execPath, [backendScript], {
     env,
@@ -91,11 +291,21 @@ function startBackend() {
   logLine(`Backend pid ${backendProcess.pid}`);
 
   backendProcess.stdout.on("data", (chunk) => {
-    logLine(chunk.toString().trim());
+    const text = chunk.toString().trim();
+    logLine(text);
+    // Loopback callback route emits this marker after successful auth/extend verify.
+    if (text.includes("[joincloud-auth-callback] license-updated") && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("license-updated");
+      mainWindow.show();
+      mainWindow.focus();
+    }
   });
 
   backendProcess.stderr.on("data", (chunk) => {
     logLine(chunk.toString().trim());
+  });
+  backendProcess.on("error", (error) => {
+    logLine(`Backend process error: ${formatError(error)}`);
   });
 
   const startTime = Date.now();
@@ -107,7 +317,14 @@ function startBackend() {
     }
     backendProcess = null;
     if (!isStopping) {
-      scheduleBackendRestart("backend exit");
+      checkBackend().then((healthy) => {
+        if (healthy) {
+          logLine("Backend process exited, but another backend instance is healthy");
+          setBackendState("healthy", "existing instance");
+          return;
+        }
+        scheduleBackendRestart("backend exit");
+      });
     }
   });
 }
@@ -276,23 +493,39 @@ async function ensureBackend() {
 
   const portFree = await checkPortFree();
   if (!portFree) {
-    logLine("Port 8787 in use");
-    showBackendError("App failed to initialize.");
-    setBackendState("degraded", "port in use");
+    logLine("Port 8787 in use, checking existing backend health");
+    const existingOnBusyPort = await waitForBackend(10000);
+    if (existingOnBusyPort) {
+      logLine("Reusing existing backend on 8787");
+      setBackendState("healthy", "existing on occupied port");
+      return true;
+    }
+    showInitFailure("Backend port 8787 is already in use and no healthy backend responded");
+    setBackendState("degraded", "port in use no healthy backend");
     return false;
   }
 
-  startBackend();
+  try {
+    startBackend();
+  } catch (error) {
+    showInitFailure("Failed to spawn backend", error);
+    return false;
+  }
   const ok = await waitForBackend(15000);
   if (!ok) {
     logLine("Backend did not respond");
-    showBackendError("App failed to initialize.");
+    showInitFailure("Backend health check failed at /api/v1/health");
     stopBackend();
     setBackendState("degraded", "init failed");
     return false;
   }
   setBackendState("healthy", "init ok");
   return true;
+}
+
+async function loadRenderer(window) {
+  logLine(`Loading backend renderer at ${BACKEND_URL}`);
+  await window.loadURL(BACKEND_URL);
 }
 
 function startHealthMonitor() {
@@ -322,55 +555,166 @@ function stopHealthMonitor() {
 }
 
 async function createWindow() {
+  if (isCreatingWindow) return;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+    return;
+  }
+  isCreatingWindow = true;
   initLogging();
   logLine("UI init");
-  const iconPath = path.join(__dirname, "..", "assets", "icon", "icon.png");
-  if (app.dock && typeof app.dock.setIcon === "function") {
+  try {
     try {
-      app.dock.setIcon(iconPath);
+      const resolver = require(path.join(__dirname, "..", "server", "tunnel", "resolveBinary"));
+      resolver.resolveTunnelBinaryPath();
+      logLine("Tunnel binary resolved");
     } catch (error) {
-      logLine("Dock icon unavailable");
+      logLine(`Tunnel binary unavailable: ${formatError(error)}`);
     }
-  }
-  try {
-    const resolver = require(path.join(__dirname, "..", "server", "tunnel", "resolveBinary"));
-    resolver.resolveTunnelBinaryPath();
-    logLine("Tunnel binary resolved");
-  } catch (error) {
-    logLine("Tunnel binary unavailable");
-  }
 
-  const ok = await ensureBackend();
-  if (!ok) {
-    logLine("Backend init failed");
-    app.quit();
-    return;
-  }
-  startHealthMonitor();
+    const ok = await ensureBackend();
+    if (!ok) {
+      logLine("Backend init failed");
+      app.quit();
+      return;
+    }
+    startHealthMonitor();
 
-  mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    icon: iconPath,
-    webPreferences: {
-      contextIsolation: true,
-      nodeIntegration: false,
-      preload: path.join(__dirname, "preload.js"),
-    },
-  });
+    setImmediate(() => {
+      try {
+        const userDataPath = app.getPath("userData");
+        const systemDir = path.join(userDataPath, "JoinCloud", "system");
+        const identityPath = path.join(systemDir, "identity.json");
+        let appVersion = "0.0.0";
+        try {
+          const pkg = require(path.join(__dirname, "..", "package.json"));
+          if (pkg && pkg.version) appVersion = pkg.version;
+        } catch (_) {}
+        const deviceIdentityModule = require(path.join(__dirname, "..", "core", "device-identity"));
+        const registrationClient = require(path.join(__dirname, "..", "core", "registration-client"));
+        const identityVault = require(path.join(__dirname, "..", "core", "identity-vault"));
+        let vault = null;
+        if (typeof electron.safeStorage !== "undefined" && electron.safeStorage.isEncryptionAvailable()) {
+          const vaultPath = path.join(systemDir, "vault.dat");
+          vault = identityVault.createFileBackedVault({
+            vaultPath,
+            encrypt: (str) => electron.safeStorage.encryptString(str),
+            decrypt: (buf) => electron.safeStorage.decryptString(Buffer.isBuffer(buf) ? buf : Buffer.from(buf)),
+          });
+        }
+        deviceIdentity = deviceIdentityModule.getOrCreateIdentity({ appVersion, identityPath, vault });
+        if (!fs.existsSync(systemDir)) fs.mkdirSync(systemDir, { recursive: true });
+        try {
+          fs.writeFileSync(path.join(systemDir, "host_uuid"), deviceIdentity.host_uuid, "utf8");
+        } catch (_) {}
+        let controlPlaneHost = process.env.JOINCLOUD_ADMIN_HOST;
+        if (!controlPlaneHost && process.env.JOINCLOUD_CONTROL_PLANE_URL) {
+          try {
+            const u = new URL(process.env.JOINCLOUD_CONTROL_PLANE_URL);
+            controlPlaneHost = u.port ? `${u.hostname}:${u.port}` : u.hostname;
+          } catch (_) {}
+        }
+        if (controlPlaneHost) {
+          const log = (msg, meta) => logLine(`[identity] ${msg} ${meta ? JSON.stringify(meta) : ""}`);
+          registrationSchedulerRef = registrationClient.createRegistrationScheduler({
+            identityPath,
+            getIdentity: () => deviceIdentity,
+            persistIdentity: deviceIdentityModule.persistIdentity,
+            controlPlaneHost,
+            log,
+          });
+          registrationSchedulerRef.start();
+          const heartbeatIntervalMs = 12 * 60 * 60 * 1000 * (0.9 + 0.2 * Math.random());
+          heartbeatTimer = setInterval(() => {
+            if (!deviceIdentity) return;
+            const uptimeSeconds = typeof process.uptime === "function" ? process.uptime() : 0;
+            registrationClient.sendHeartbeat(deviceIdentity, {
+              controlPlaneHost,
+              uptimeSeconds,
+              log: (msg, meta) => logLine(`[heartbeat] ${msg} ${meta ? JSON.stringify(meta) : ""}`),
+            }).catch(() => {});
+          }, heartbeatIntervalMs);
+        }
+      } catch (err) {
+        logLine(`Device identity init failed: ${formatError(err)}`);
+      }
+    });
 
-  try {
-    await mainWindow.loadURL("http://127.0.0.1:8787");
-  } catch (error) {
-    logLine("UI load failed");
-    showBackendError("App failed to initialize.");
-    stopBackend();
-    app.quit();
-    return;
+    mainWindow = new BrowserWindow({
+      width: 1200,
+      height: 800,
+      icon: path.join(__dirname, "..", "assets", "icons.png"),
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        preload: path.join(__dirname, "preload.js"),
+      },
+    });
+    mainWindow.webContents.on("did-fail-load", (_event, code, description, url) => {
+      logLine(`Renderer failed to load code=${code} url=${url} reason=${description}`);
+    });
+
+    // Open all external links (http/https) in the system browser, not in a new Electron window.
+    // This ensures "Open Dashboard on Web" and "Upgrade / Buy plan" open in Chrome/Edge/Safari.
+    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+      if (url.startsWith("http://") || url.startsWith("https://")) {
+        shell.openExternal(url).catch(() => {});
+        return { action: "deny" };
+      }
+      return { action: "allow" };
+    });
+
+    try {
+      await loadRenderer(mainWindow);
+    } catch (error) {
+      logLine(`UI load failed: ${formatError(error)}`);
+      showInitFailure("Renderer URL could not be loaded", error);
+      stopBackend();
+      app.quit();
+      return;
+    }
+    mainWindow.on("close", async (event) => {
+      if (isStopping || allowWindowClose) {
+        return;
+      }
+      event.preventDefault();
+      if (isHandlingClosePrompt) {
+        return;
+      }
+      isHandlingClosePrompt = true;
+      const choice = await dialog.showMessageBox(mainWindow, {
+        type: "question",
+        buttons: ["Quit", "Run in Background"],
+        defaultId: 1,
+        cancelId: 1,
+        title: "JoinCloud",
+        message: "Choose what to do when closing JoinCloud.",
+        detail: "Quit will stop sharing and exit the app. Run in Background keeps JoinCloud active.",
+      });
+      if (choice.response === 0) {
+        allowWindowClose = true;
+        isHandlingClosePrompt = false;
+        app.quit();
+        return;
+      }
+      isHandlingClosePrompt = false;
+      mainWindow.hide();
+    });
+    mainWindow.on("closed", () => {
+      mainWindow = null;
+    });
+
+    // Handle deep link passed when app was launched via joincloud:// (e.g. from web redirect when app was closed)
+    const startupDeepLink = process.argv.find((arg) => typeof arg === "string" && arg.startsWith("joincloud://"));
+    if (startupDeepLink) {
+      setImmediate(() => {
+        handleDeepLink(startupDeepLink).catch((err) => logLine(`[deep-link] startup error: ${formatError(err)}`));
+      });
+    }
+  } finally {
+    isCreatingWindow = false;
   }
-  mainWindow.on("closed", () => {
-    mainWindow = null;
-  });
 }
 
 if (!app || !BrowserWindow) {
@@ -378,32 +722,274 @@ if (!app || !BrowserWindow) {
   process.exit(1);
 }
 
-app.whenReady().then(createWindow);
+app.on("second-instance", (_event, argv) => {
+  // Check for deep link in argv (Windows/Linux)
+  const deepLinkUrl = argv.find((arg) => arg.startsWith("joincloud://"));
+  if (deepLinkUrl) {
+    handleDeepLink(deepLinkUrl).catch((err) => logLine(`[deep-link] second-instance error: ${formatError(err)}`));
+    return;
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.focus();
+    return;
+  }
+  if (app.isReady()) {
+    createWindow().catch((error) => {
+      logLine(`Second-instance window creation failed: ${formatError(error)}`);
+    });
+  }
+});
+
+// macOS: handle deep link via open-url event
+app.on("open-url", (_event, url) => {
+  if (url.startsWith("joincloud://")) {
+    handleDeepLink(url).catch((err) => logLine(`[deep-link] open-url error: ${formatError(err)}`));
+  }
+});
+
+if (gotLock) {
+  app.whenReady().then(createWindow);
+}
+
+app.on("activate", () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.show();
+    mainWindow.focus();
+    return;
+  }
+  if (!mainWindow && app.isReady()) {
+    createWindow().catch((error) => {
+      logLine(`Activate window creation failed: ${formatError(error)}`);
+    });
+  }
+});
 
 ipcMain.handle("joincloud-open-storage", async () => {
   const storagePath = getStoragePath();
   await shell.openPath(storagePath);
 });
 
-ipcMain.handle("joincloud-stop-server", async () => {
-  if (isStopping) return true;
-  isStopping = true;
-  stopHealthMonitor();
-  await stopBackendGracefully();
-  app.quit();
-  return true;
+ipcMain.handle("joincloud-select-files", async () => {
+  if (!mainWindow) return [];
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ["openFile", "multiSelections"],
+  });
+  if (result.canceled) return [];
+  return result.filePaths || [];
 });
 
+ipcMain.handle("joincloud-quit-app", async () => {
+  app.quit();
+  return { ok: true };
+});
+
+ipcMain.handle("joincloud-open-auth-modal", async (_event, url) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return { ok: false, error: "No window" };
+  if (authView) {
+    try {
+      mainWindow.removeBrowserView(authView);
+      authView.webContents.destroy();
+    } catch (_) {}
+    authView = null;
+  }
+  authView = new BrowserView({
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+  mainWindow.setBrowserView(authView);
+  const bounds = mainWindow.getContentBounds();
+  authView.setBounds({ x: 0, y: 0, width: bounds.width, height: bounds.height });
+  authView.setAutoResize({ width: true, height: true });
+
+  authView.webContents.on("will-navigate", (event, navUrl) => {
+    if (navUrl.startsWith("http://127.0.0.1:8787/auth/callback")) {
+      event.preventDefault();
+      handleAuthCallback(navUrl);
+    }
+  });
+
+  authView.webContents.on("will-redirect", (event, navUrl) => {
+    if (navUrl.startsWith("http://127.0.0.1:8787/auth/callback")) {
+      event.preventDefault();
+      handleAuthCallback(navUrl);
+    }
+  });
+
+  authView.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    logLine(`[auth-modal] Failed to load: ${errorCode} ${errorDescription} URL: ${validatedURL}`);
+  });
+
+  try {
+    await authView.webContents.loadURL(url);
+    logLine(`[auth-modal] Loaded auth URL: ${url}`);
+    return { ok: true };
+  } catch (err) {
+    logLine(`[auth-modal] Failed to load URL: ${formatError(err)}`);
+    closeAuthView();
+    return { ok: false, error: formatError(err) };
+  }
+});
+
+ipcMain.handle("joincloud-close-auth-modal", async () => {
+  closeAuthView();
+  return { ok: true };
+});
+
+function closeAuthView() {
+  if (authView && mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      mainWindow.removeBrowserView(authView);
+      authView.webContents.destroy();
+    } catch (_) {}
+  }
+  authView = null;
+}
+
+async function handleAuthCallback(callbackUrl) {
+  logLine(`[auth-modal] Intercepted callback: ${callbackUrl}`);
+  try {
+    const parsed = new URL(callbackUrl);
+    const token = parsed.searchParams.get("token");
+    if (!token) {
+      logLine("[auth-modal] No token in callback URL");
+      closeAuthView();
+      return;
+    }
+    const res = await new Promise((resolve, reject) => {
+      const bodyStr = JSON.stringify({ token });
+      const req = http.request(
+        {
+          hostname: "127.0.0.1",
+          port: parseInt(BACKEND_PORT, 10),
+          path: "/api/desktop/verify",
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(bodyStr) },
+          timeout: 10000,
+        },
+        (resp) => {
+          let data = "";
+          resp.on("data", (chunk) => { data += chunk; });
+          resp.on("end", () => {
+            try { resolve({ statusCode: resp.statusCode, body: JSON.parse(data) }); }
+            catch { resolve({ statusCode: resp.statusCode, body: {} }); }
+          });
+        }
+      );
+      req.on("error", reject);
+      req.write(bodyStr);
+      req.end();
+    });
+
+    if (res.statusCode !== 200 || !res.body) {
+      logLine(`[auth-modal] Verify failed: ${JSON.stringify(res.body)}`);
+      closeAuthView();
+      return;
+    }
+
+    const userDataPath = app.getPath("userData");
+    const systemDir = path.join(userDataPath, "JoinCloud", "system");
+    if (!fs.existsSync(systemDir)) fs.mkdirSync(systemDir, { recursive: true });
+
+    if (res.body.jwt) {
+      const authPath = path.join(systemDir, "auth.json");
+      fs.writeFileSync(authPath, JSON.stringify({ token: res.body.jwt }, null, 2), "utf8");
+      logLine("[auth-modal] Auth token saved");
+    }
+    if (res.body.license) {
+      const licensePath = path.join(systemDir, "license.json");
+      fs.writeFileSync(licensePath, JSON.stringify(res.body.license, null, 2), "utf8");
+      logLine("[auth-modal] License updated");
+    }
+    if (res.body.licenseState && res.body.entitlements) {
+      const entitlementsPath = path.join(systemDir, "entitlements.json");
+      fs.writeFileSync(entitlementsPath, JSON.stringify(res.body, null, 2), "utf8");
+      logLine("[auth-modal] Entitlements updated (trial extend)");
+    }
+
+    closeAuthView();
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      logLine("[auth-modal] Auth complete, reloading app...");
+      mainWindow.show();
+      mainWindow.focus();
+      // Force reload the renderer to pick up new auth state
+      mainWindow.webContents.reload();
+      logLine("[auth-modal] Page reload triggered");
+    }
+    logLine("[auth-modal] Auth completed successfully");
+  } catch (err) {
+    logLine(`[auth-modal] Error handling callback: ${formatError(err)}`);
+    closeAuthView();
+  }
+}
+
 app.on("window-all-closed", () => {
+  if (!isStopping) {
+    return;
+  }
   isStopping = true;
   stopHealthMonitor();
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+  if (registrationSchedulerRef && typeof registrationSchedulerRef.stop === "function") {
+    registrationSchedulerRef.stop();
+    registrationSchedulerRef = null;
+  }
   stopBackendGracefully().finally(() => app.quit());
 });
 
 app.on("before-quit", (event) => {
   if (isStopping) return;
+  if (!allowWindowClose) {
+    event.preventDefault();
+    if (isHandlingClosePrompt) {
+      return;
+    }
+    isHandlingClosePrompt = true;
+    const promptTarget = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+    dialog
+      .showMessageBox(promptTarget || undefined, {
+        type: "question",
+        buttons: ["Quit", "Run in Background"],
+        defaultId: 1,
+        cancelId: 1,
+        title: "JoinCloud",
+        message: "Choose what to do when closing JoinCloud.",
+        detail: "Quit will stop sharing and exit the app. Run in Background keeps JoinCloud active.",
+      })
+      .then((choice) => {
+        isHandlingClosePrompt = false;
+        if (choice.response === 0) {
+          allowWindowClose = true;
+          app.quit();
+          return;
+        }
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.hide();
+        }
+      })
+      .catch(() => {
+        isHandlingClosePrompt = false;
+      });
+    return;
+  }
   isStopping = true;
   stopHealthMonitor();
+  if (heartbeatTimer) {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+  }
+  if (registrationSchedulerRef && typeof registrationSchedulerRef.stop === "function") {
+    registrationSchedulerRef.stop();
+    registrationSchedulerRef = null;
+  }
   event.preventDefault();
   stopBackendGracefully().finally(() => app.quit());
 });

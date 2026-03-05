@@ -1,135 +1,52 @@
 # JoinCloud
-## A Personal Cloud Network
 
-JoinCloud allows you to create a local cloud on your system and share files directly with other users using a simple link.
+JoinCloud is a local-first personal cloud application that allows users to share files securely from their own machine.
 
-Only the sender needs to install JoinCloud.  
-Receivers can access shared files through a browser without installing anything.
+This repository contains the desktop application source code.
 
-Fast. Secure. In your control.
+## Run locally
 
----
+1. Install dependencies:
 
-## What is JoinCloud?
+```bash
+npm install
+```
 
-JoinCloud turns your system into a personal cloud node.
+2. Start local development (single command):
 
-Instead of uploading files to third-party cloud services, JoinCloud lets you share files directly from your machine. Files are served from your system and accessed through a generated link.
+```bash
+npm run dev
+```
 
-This gives you:
-- Full control over your files
-- Faster transfers on local networks
-- No dependency on cloud storage accounts
-- No mandatory installation for receivers
+This launches Electron and starts the backend automatically.  
+The app UI is served only from `server/ui`.
 
----
+### Pointing Electron and Web to local dev
 
-## Core Benefits
+To use the **JoinCloud Web** dashboard and **Control Plane (JoinCloudAdmin)** on your machine:
 
-- **Fast**  
-  Files are transferred directly without cloud uploads.
+1. **Root `.env`** (copy from `.env.example` if needed):
+   - `JOINCLOUD_ADMIN_HOST=http://localhost:5000` — Control Plane URL
+   - `JOINCLOUD_WEB_URL=http://localhost:3000` — JoinCloud Web URL for “Open Dashboard” and desktop auth
 
-- **Secure**  
-  Files remain on your system and are shared only when you allow it.
+2. **JoinCloud-Web** (`JoinCloud-Web/.env`):
+   - `NEXT_PUBLIC_CONTROL_PLANE_URL=http://localhost:5000` and `CONTROL_PLANE_URL=http://localhost:5000`
 
-- **Full Control**  
-  You decide what to share, when to share, and when to stop sharing.
+3. **Run all three** (each in its own terminal):
+   - **Control Plane:** `cd JoinCloudAdmin && npm run dev` (port 5000)
+   - **JoinCloud Web:** `cd JoinCloud-Web && npm run dev` (port 3000)
+   - **Electron + server:** from repo root `npm run dev` (backend on 8787)
 
----
+The Electron dev launcher loads the root `.env`, so the desktop app and its backend will use the local Admin and Web URLs.
 
-## JoinCloud v0.3.2 Features
+## Package macOS DMG
 
-### Sender-only installation
-- Only the person sharing files needs JoinCloud installed
-- Receivers can download files using a browser link
+```bash
+npm run build:mac
+```
 
-### Local cloud creation
-- JoinCloud creates a local cloud instance on your system
-- Your system acts as the file host
+## Package Windows installer
 
-### Link-based file sharing
-- Generate a share link for any file or folder
-- Share the link with another user
-- Receiver opens the link and downloads the file
-
-### No signup or account required
-- No login
-- No user binding
-- Install only if you want to share files from your own system
-
-### Local network optimized
-- Designed for same-network usage
-- Works even when internet connectivity is limited or unavailable
-
----
-
-## How It Works
-
-1. Install and start JoinCloud on your system  
-2. Select a file or folder to share  
-3. JoinCloud generates a share link  
-4. Share the link with another user  
-5. The receiver opens the link and downloads the file  
-
----
-
-## Design Philosophy
-
-- Technology should stay invisible to the user
-- The first successful file transfer matters most
-- File sharing should be fast and frictionless
-- Users should retain ownership and control of their data
-
----
-
-## Current Status
-
-- Version: v0.3.2
-- Development stage: Active
-- Focus areas:
-  - Core sharing reliability
-  - Accurate system and agent states
-  - Stable first-time user experience
-
-Advanced features will be introduced after the core experience is fully stable.
-
----
-
-## Getting Started
-
-Detailed installation and usage instructions will be added soon.
-
-For now:
-- Clone the repository
-- Run JoinCloud on your system
-- Generate a share link
-- Access the link from another device on the same network
-
----
-
-## Contributing
-
-JoinCloud is an early-stage project.
-
-Contributions are welcome in:
-- Networking and system reliability
-- UI and UX improvements
-- Performance optimization
-- Documentation
-
-Please open an issue or submit a pull request.
-
----
-
-## License
-
-Arevei0.1
-Free to Use, No Reselling Allowed.
-
----
-
-## Final Note
-
-JoinCloud simplifies file sharing by removing unnecessary layers.
-
-If you want a personal cloud that stays under your control, JoinCloud is built for that purpose.
+```bash
+npm run build:win
+```

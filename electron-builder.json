@@ -5,14 +5,40 @@
     "target": [
       "dmg"
     ],
-    "icon": "assets/icon/icon.icns"
+    "icon": "build/icon.icns"
   },
-  "asar": false,
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      },
+      {
+        "target": "zip",
+        "arch": [
+          "x64"
+        ]
+      }
+    ],
+    "icon": "build/icon.ico"
+  },
+  "npmRebuild": false,
+  "asar": true,
+  "asarUnpack": [
+    "server/ui/**"
+  ],
+  "files": [
+    "**/*",
+    "!release-artifacts/**",
+    "!**/.git/**",
+    "!**/node_modules/.cache/**",
+    "!dist/**",
+    "!dist-mac2/**",
+    "!win/**"
+  ],
   "extraResources": [
-    {
-      "from": "server",
-      "to": "server"
-    },
     {
       "from": "server/bin",
       "to": "bin"

@@ -1,40 +1,124 @@
 const state = {
   path: "/",
   items: [],
+  rawItems: [],
   shares: [],
-  messages: [],
+  requestId: null,
+  isAdmin: false,
+  sharingEnabled: true,
+  fileView: "list",
+  fileSort: "name_asc",
+  fileSearch: "",
+  foldersOnly: false,
+  selectedShares: new Set(),
+  accessRole: "host",
+  deviceId: null,
+  deviceName: null,
+  deviceFolderRel: null,
+  licenseState: null,
+  licenseGraceEndsAt: null,
+  licenseTier: null,
+  licenseExpiresAt: null,
+  licenseDeviceLimit: null,
+  activationRequired: false,
+  trialDays: 7,
+  upgradeUrl: "",
+  subscription: null,
+  supportMessages: [],
+  accountId: null,
+  hostUuidFromConfig: null,
+  accountEmail: null,
+  isAuthenticated: false,
+  displayName: "Join",
+  entitlements: null,
+  trialEndsAt: null,
+  canExtendTrial: false,
+  isSuspended: false,
+  isRevoked: false,
+  referralCode: null,
+  referralCount: 0,
+  daysRemaining: null,
 };
 
 const els = {
+  appLayout: document.getElementById("app-layout"),
+  accessGate: document.getElementById("access-gate"),
+  activationGate: document.getElementById("activation-gate"),
+  activationGateSigninWeb: document.getElementById("activation-gate-signin-web"),
+  activationGateExtendTrial: document.getElementById("activation-gate-extend-trial"),
+  activationGateMessage: document.getElementById("activation-gate-message"),
+  activationGateUpgradeWrap: document.getElementById("activation-gate-upgrade-wrap"),
+  activationGateExtendLink: document.getElementById("activation-gate-extend-link"),
+  activationGateUpgradeLink: document.getElementById("activation-gate-upgrade-link"),
+  accessDeviceNameInput: document.getElementById("access-device-name-input"),
+  accessFingerprint: document.getElementById("access-fingerprint"),
+  accessStatus: document.getElementById("access-status"),
+  requestApproval: document.getElementById("request-approval"),
+  pendingBadge: document.getElementById("pending-badge"),
+  menuToggle: document.getElementById("menu-toggle"),
+  addFileHeader: document.getElementById("add-file-header"),
+  toggleSharing: document.getElementById("toggle-sharing"),
+  statusDot: document.getElementById("status-dot"),
   status: document.getElementById("node-status"),
-  statusIndicator: document.getElementById("status-indicator"),
-  statusText: document.getElementById("status-text"),
-  heartbeatIndicator: document.getElementById("heartbeat-indicator"),
-  heartbeatNote: document.getElementById("heartbeat-note"),
-  stopServer: document.getElementById("stop-server"),
+  uploadDestinationLabel: document.getElementById("upload-destination-label"),
+  headerDisplayName: document.getElementById("header-display-name"),
+  homeStorageSection: document.getElementById("home-storage-section"),
   storageLabel: document.getElementById("storage-label"),
   ownerMount: document.getElementById("owner-mount"),
-  publicStatus: document.getElementById("public-status"),
-  publicUrl: document.getElementById("public-url"),
-  publicReason: document.getElementById("public-reason"),
-  togglePublic: document.getElementById("toggle-public"),
-  retryPublic: document.getElementById("retry-public"),
-  switchLan: document.getElementById("switch-lan"),
   openStorage: document.getElementById("open-storage"),
+  cloudUrlInput: document.getElementById("cloud-url-input"),
+  copyCloudUrl: document.getElementById("copy-cloud-url"),
+  cloudUrlQr: document.getElementById("cloud-url-qr"),
+  pendingAccessList: document.getElementById("pending-access-list"),
+  pendingAccessCount: document.getElementById("pending-access-count"),
+  approvedDevicesList: document.getElementById("approved-devices-list"),
+  refreshDevices: document.getElementById("refresh-devices"),
+  refreshActivity: document.getElementById("refresh-activity"),
+  activitySummary: document.getElementById("activity-summary"),
+  metricTotalUploads: document.getElementById("metric-total-uploads"),
+  metricTotalDownloads: document.getElementById("metric-total-downloads"),
+  metricSharesCreated: document.getElementById("metric-shares-created"),
+  metricConnectedDevices: document.getElementById("metric-connected-devices"),
+  metricStorageUsed: document.getElementById("metric-storage-used"),
+  metricShareDownloads: document.getElementById("metric-share-downloads"),
+  activityChart: document.getElementById("activity-chart"),
   fileList: document.getElementById("file-list"),
+  fileSearch: document.getElementById("file-search"),
+  fileSort: document.getElementById("file-sort"),
+  foldersOnly: document.getElementById("folders-only"),
+  viewList: document.getElementById("view-list"),
+  viewThumb: document.getElementById("view-thumb"),
+  myFolderShortcut: document.getElementById("my-folder-shortcut"),
+  uploadScopeHint: document.getElementById("upload-scope-hint"),
+  uploadButtonLabel: document.getElementById("upload-button-label"),
   shareList: document.getElementById("share-list"),
+  teamsList: document.getElementById("teams-list"),
+  teamsEmptyState: document.getElementById("teams-empty-state"),
+  teamsLayout: document.getElementById("teams-layout"),
+  teamDetail: document.getElementById("team-detail"),
+  teamDetailBack: document.getElementById("team-detail-back"),
+  teamToggleRight: document.getElementById("team-toggle-right"),
+  teamsRightCollapseBtn: document.getElementById("teams-right-collapse-btn"),
+  teamDetailName: document.getElementById("team-detail-name"),
+  teamChatFeed: document.getElementById("team-chat-feed"),
+  teamMessageInput: document.getElementById("team-message-input"),
+  teamSendBtn: document.getElementById("team-send-btn"),
+  teamInviteBtn: document.getElementById("team-invite-btn"),
+  createTeamBtn: document.getElementById("create-team-btn"),
+  startNewPeerChatBtn: document.getElementById("start-new-peer-chat-btn"),
   breadcrumbs: document.getElementById("breadcrumbs"),
   refreshFiles: document.getElementById("refresh-files"),
   refreshShares: document.getElementById("refresh-shares"),
+  revokeSelected: document.getElementById("revoke-selected"),
+  revokeAll: document.getElementById("revoke-all"),
   refreshLogs: document.getElementById("refresh-logs"),
   logList: document.getElementById("log-list"),
-  refreshNetwork: document.getElementById("refresh-network"),
   networkList: document.getElementById("network-list"),
-  uploadButton: document.getElementById("upload-button"),
   telemetryToggle: document.getElementById("telemetry-toggle"),
-  networkName: document.getElementById("network-name"),
+  networkNameSuffix: document.getElementById("network-name-suffix"),
   saveNetworkName: document.getElementById("save-network-name"),
   networkVisibility: document.getElementById("network-visibility"),
+  networkVisibilityNetwork: document.getElementById("network-visibility-network"),
   navButtons: document.querySelectorAll(".nav-button"),
   sections: document.querySelectorAll(".section"),
   backButton: document.getElementById("back-button"),
@@ -43,7 +127,6 @@ const els = {
   shareModal: document.getElementById("share-modal"),
   sharePath: document.getElementById("share-path"),
   sharePermission: document.getElementById("share-permission"),
-  shareScope: document.getElementsByName("share-scope"),
   shareTtl: document.getElementById("share-ttl"),
   shareTtlCustom: document.getElementById("share-ttl-custom"),
   createShare: document.getElementById("create-share"),
@@ -51,441 +134,348 @@ const els = {
   cancelShare: document.getElementById("cancel-share"),
   shareResult: document.getElementById("share-result"),
   copyShare: document.getElementById("copy-share"),
-  messageThread: document.getElementById("message-thread"),
-  messageInput: document.getElementById("message-input"),
-  messageSend: document.getElementById("message-send"),
-  messagesBadge: document.getElementById("messages-badge"),
-  messagesStatus: document.getElementById("messages-status"),
-  // Task 1: System info elements
-  sysUserId: document.getElementById("sys-user-id"),
-  sysOs: document.getElementById("sys-os"),
-  sysArch: document.getElementById("sys-arch"),
-  sysVersion: document.getElementById("sys-version"),
-  sysStatus: document.getElementById("sys-status"),
-  copyUserId: document.getElementById("copy-user-id"),
-  sysDeviceUuid: document.getElementById("sys-device-uuid"),
-  copyDeviceUuid: document.getElementById("copy-device-uuid"),
+  stopModal: document.getElementById("sharing-stop-modal"),
+  closeStopModal: document.getElementById("close-stop-modal"),
+  cancelStopModal: document.getElementById("cancel-stop-modal"),
+  stopSharingOnly: document.getElementById("stop-sharing-only"),
+  closeApplication: document.getElementById("close-application"),
+  shareVisitTotal: document.getElementById("share-visit-total"),
+  shareVisitToday: document.getElementById("share-visit-today"),
+  copyPrivacyPolicy: document.getElementById("copy-privacy-policy"),
+  downloadPrivacyPolicy: document.getElementById("download-privacy-policy"),
+  privacyPolicyContent: document.getElementById("privacy-policy-content"),
+  buildId: document.getElementById("build-id"),
+  graceBanner: document.getElementById("grace-banner"),
+  graceEndsDate: document.getElementById("grace-ends-date"),
+  settingsProfileRow: document.getElementById("settings-profile-row"),
+  settingsProfileValue: document.getElementById("settings-profile-value"),
+  settingsProfileCard: document.getElementById("settings-profile-card"),
+  settingsProfileEmail: document.getElementById("settings-profile-email"),
+  settingsProfilePlan: document.getElementById("settings-profile-plan"),
+  settingsProfileStatus: document.getElementById("settings-profile-status"),
+  settingsProfileDeviceLimit: document.getElementById("settings-profile-device-limit"),
+  settingsProfileExpiry: document.getElementById("settings-profile-expiry"),
+  subscriptionCard: document.getElementById("subscription-card"),
+  subscriptionPlan: document.getElementById("subscription-plan"),
+  subscriptionStatus: document.getElementById("subscription-status"),
+  subscriptionRenewal: document.getElementById("subscription-renewal"),
+  subscriptionManageBtn: document.getElementById("subscription-manage-btn"),
+  subscriptionUpgradeLink: document.getElementById("subscription-upgrade-link"),
+  subscriptionExtendTrialLink: document.getElementById("subscription-extend-trial-link"),
+  settingsOpenDashboardLink: document.getElementById("settings-open-dashboard-link"),
+  subscriptionHelperText: document.getElementById("subscription-helper-text"),
+  settingsLogout: document.getElementById("settings-logout"),
+  uptimeDisplay: document.getElementById("uptime-display"),
+  previewModal: document.getElementById("preview-modal"),
+  closePreviewModal: document.getElementById("close-preview-modal"),
+  previewTitle: document.getElementById("preview-title"),
+  previewBody: document.getElementById("preview-body"),
+  activationBlock: document.getElementById("activation-block"),
+  activationEmail: document.getElementById("activation-email"),
+  activationPassword: document.getElementById("activation-password"),
+  activationRegister: document.getElementById("activation-register"),
+  activationLogin: document.getElementById("activation-login"),
+  activationActivate: document.getElementById("activation-activate"),
+  activationSigninWeb: document.getElementById("activation-signin-web"),
+  activationMessage: document.getElementById("activation-message"),
+  activationUpgradeWrap: document.getElementById("activation-upgrade-wrap"),
+  activationUpgradeLink: document.getElementById("activation-upgrade-link"),
+  supportMessages: document.getElementById("support-messages"),
+  supportMessageInput: document.getElementById("support-message-input"),
+  supportSend: document.getElementById("support-send"),
+  uploadBanner: document.getElementById("upload-banner"),
+  uploadBannerText: document.querySelector(".upload-banner-text"),
+  uploadBannerDismiss: document.querySelector(".upload-banner-dismiss"),
+  shareQrModal: document.getElementById("share-qr-modal"),
+  closeShareQrModal: document.getElementById("close-share-qr-modal"),
+  technicalConfigContent: document.getElementById("technical-config-content"),
+  mdnsHostname: document.getElementById("mdns-hostname"),
+  mdnsIpFallback: document.getElementById("mdns-ip-fallback"),
+  mdnsStatusBadge: document.getElementById("mdns-status-badge"),
+  mdnsOpenBtn: document.getElementById("mdns-open-btn"),
+  manualConnectIp: document.getElementById("manual-connect-ip"),
+  manualConnectPort: document.getElementById("manual-connect-port"),
+  manualConnectBtn: document.getElementById("manual-connect-btn"),
+  manualConnectStatus: document.getElementById("manual-connect-status"),
+  shareExtraActions: document.getElementById("share-extra-actions"),
+  shareWithUserBtn: document.getElementById("share-with-user-btn"),
+  shareWithTeamBtn: document.getElementById("share-with-team-btn"),
+  networkSearchBtn: document.getElementById("network-search-btn"),
+  networkSearchBtnText: document.getElementById("network-search-btn-text"),
+  connectedUsersList: document.getElementById("connected-users-list"),
+  createTeamModal: document.getElementById("create-team-modal"),
+  createTeamName: document.getElementById("create-team-name"),
+  createTeamDepartment: document.getElementById("create-team-department"),
+  createTeamModalClose: document.getElementById("create-team-modal-close"),
+  createTeamModalCancel: document.getElementById("create-team-modal-cancel"),
+  createTeamModalSubmit: document.getElementById("create-team-modal-submit"),
+  addMembersModal: document.getElementById("add-members-modal"),
+  addMembersList: document.getElementById("add-members-list"),
+  addMembersModalClose: document.getElementById("add-members-modal-close"),
+  addMembersModalCancel: document.getElementById("add-members-modal-cancel"),
+  addMembersModalSend: document.getElementById("add-members-modal-send"),
+  shareTeamPickerModal: document.getElementById("share-team-picker-modal"),
+  shareTeamPickerList: document.getElementById("share-team-picker-list"),
+  shareTeamPickerClose: document.getElementById("share-team-picker-close"),
+  notificationsUnreadBadge: document.getElementById("notifications-unread-badge"),
+  notificationsList: document.getElementById("notifications-list"),
+  notificationsClearAll: document.getElementById("notifications-clear-all"),
+  muteNotificationsBtn: document.getElementById("mute-notifications-btn"),
+  muteIcon: document.getElementById("mute-icon"),
+  networkDiscoveryHostname: document.getElementById("network-discovery-hostname"),
+  networkDiscoveryIp: document.getElementById("network-discovery-ip"),
+  networkDiscoveryBadge: document.getElementById("network-discovery-badge"),
+  networkDiscoveryOpenBtn: document.getElementById("network-discovery-open-btn"),
 };
 
 const stateMeta = {
   lanBaseUrl: window.location.origin,
-  publicUrl: null,
-  publicActive: false,
+  cloudUrl: window.location.origin,
+  shareLinkUrls: { ip: "" },
+  lastNetworkChangedAt: 0,
+  mdnsUnresolvableToastShown: false,
+  networkDiscoveryUnresolvableToastShown: false,
+  fingerprint: getOrCreateFingerprint(),
+  sessionToken: localStorage.getItem("joincloud:session-token") || "",
+  privacyPolicyRaw: "",
+  buildId: "",
+  lastPendingCount: 0,
+  lastNetworkHash: "",
+  notificationsMuted: localStorage.getItem("joincloud:mute-notifications") === "1",
+  lastNotificationIds: new Set(),
 };
 
-const messageMeta = {
-  lastSeenAt: 0,
-  unreadCount: 0,
-  pollTimer: null,
-};
-
-const heartbeatMeta = {
-  failures: 0,
-  timer: null,
-  lastState: "unknown",
-  isInternetAvailable: navigator.onLine,
-  adminReachable: false,
-};
-
-const HEARTBEAT_POLL_MS = 10 * 60 * 1000;
-const HEARTBEAT_BACKOFF_BASE_MS = 30 * 1000;
-const HEARTBEAT_BACKOFF_MAX_MS = 10 * 60 * 1000;
-const MESSAGES_POLL_MS = 45 * 1000;
-const MESSAGES_CACHE_KEY = "joincloud_messages_cache_v1";
-const MESSAGES_LAST_SEEN_KEY = "joincloud_messages_last_seen_v1";
-
-function nextHeartbeatDelay() {
-  const attempt = Math.min(heartbeatMeta.failures, 10);
-  return Math.min(
-    HEARTBEAT_BACKOFF_MAX_MS,
-    HEARTBEAT_BACKOFF_BASE_MS * Math.pow(2, attempt)
-  );
+function getOrCreateFingerprint() {
+  const key = "joincloud:device-fingerprint";
+  const existing = localStorage.getItem(key);
+  if (existing) return existing;
+  const fp = (window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : `fp_${Date.now()}_${Math.random().toString(36).slice(2)}`);
+  localStorage.setItem(key, fp);
+  return fp;
 }
 
-function setHeartbeatState(state, tooltip, note) {
-  if (!els.heartbeatIndicator) return;
-  if (heartbeatMeta.lastState === state) {
-    if (tooltip) els.heartbeatIndicator.title = tooltip;
-    if (els.heartbeatNote) {
-      els.heartbeatNote.textContent = note || "";
+function setHeaderDisplayName(value) {
+  els.headerDisplayName.textContent = value && value.trim() ? value : "Join";
+}
+
+function updateHeaderProfile() {
+  if (!els.headerDisplayName) return;
+  const displayName = (state.displayName && state.displayName.trim()) ? state.displayName.trim() : null;
+  const hasCustomName = displayName && displayName !== "Join";
+  if (hasCustomName) {
+    els.headerDisplayName.textContent = displayName;
+    els.headerDisplayName.title = state.accountEmail ? "Signed in as " + state.accountEmail.trim() : "";
+  } else if (state.accountEmail && state.accountEmail.trim()) {
+    const email = state.accountEmail.trim();
+    const localPart = email.split("@")[0];
+    const friendlyName = localPart ? "Join " + localPart.charAt(0).toUpperCase() + localPart.slice(1).toLowerCase() : "Join";
+    els.headerDisplayName.textContent = friendlyName;
+    els.headerDisplayName.title = "Signed in as " + email;
+  } else {
+    els.headerDisplayName.textContent = "Join";
+    els.headerDisplayName.title = state.accountId ? "Account: " + (state.accountId || "").slice(0, 16) + "…" : "";
+  }
+}
+
+function displayNameToSuffix(fullName) {
+  const normalized = String(fullName || "").trim();
+  if (!normalized) return "";
+  if (normalized === "Join") return "";
+  if (!normalized.toLowerCase().startsWith("join")) return normalized;
+  return normalized.slice(4).trimStart();
+}
+
+function buildDisplayNameFromSuffix(suffix) {
+  const trimmed = String(suffix || "").trim();
+  return trimmed ? `Join ${trimmed}` : "Join";
+}
+
+function getSuggestedDeviceName() {
+  const ua = String(navigator.userAgent || "").toLowerCase();
+  if (ua.includes("iphone")) return "iPhone";
+  if (ua.includes("ipad")) return "iPad";
+  if (ua.includes("android")) return "Android";
+  if (ua.includes("windows")) return "Windows Device";
+  if (ua.includes("mac")) return "Mac Device";
+  return "My Device";
+}
+
+function isHostRole() {
+  return state.accessRole === "host" || state.isAdmin;
+}
+
+function isRemoteRole() {
+  return state.accessRole === "remote" || state.accessRole === "device";
+}
+
+function isInMyFolder(pathValue) {
+  return true;
+}
+
+function isPreviewableName(fileName) {
+  const lower = String(fileName || "").toLowerCase();
+  return /\.(png|jpe?g|gif|webp|svg|pdf|mp4|webm|mov|m4v)$/i.test(lower);
+}
+
+function withAuthHeaders(extra = {}) {
+  const headers = { ...extra, "x-joincloud-fingerprint": stateMeta.fingerprint };
+  if (stateMeta.sessionToken) {
+    headers.Authorization = `Bearer ${stateMeta.sessionToken}`;
+  }
+  return headers;
+}
+
+async function apiFetch(url, options = {}, allowUnauthorized = false) {
+  const init = { ...options };
+  init.headers = withAuthHeaders(options.headers || {});
+  const res = await fetch(url, init);
+  if (res.status === 423 && !allowUnauthorized) {
+    showAccessGate("Sharing is currently stopped by the admin.");
+    throw new Error("sharing_stopped");
+  }
+  if (res.status === 401 && !allowUnauthorized) {
+    showAccessGate("Approval required for this device.");
+    throw new Error("approval_required");
+  }
+  return res;
+}
+
+function showAccessGate(statusText) {
+  document.body.classList.remove("activation-gate-active");
+  els.appLayout.style.display = "none";
+  if (els.activationGate) els.activationGate.style.display = "none";
+  els.accessGate.style.display = "grid";
+  els.accessStatus.textContent = statusText || "Waiting to request access.";
+  state.accessRole = "pending";
+  updateAdminUi();
+}
+
+function showActivationGate() {
+  console.log("[showActivationGate] Showing activation gate, hiding app layout");
+  document.body.classList.add("activation-gate-active");
+  els.accessGate.style.display = "none";
+  els.appLayout.style.display = "none";
+  if (els.activationGate) els.activationGate.classList.add("visible");
+  setActivationGateMessage("");
+  updateActivationGateTrialText();
+  var webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+  var deviceId = state.hostUuidFromConfig || state.deviceId || "";
+  var accountId = state.accountId || "";
+  var billingParams = new URLSearchParams();
+  if (accountId) billingParams.set("accountId", accountId);
+  if (deviceId) billingParams.set("deviceId", deviceId);
+  var billingUrl = billingParams.toString() ? `${webUrl}/billing?${billingParams.toString()}` : (state.upgradeUrl || `${webUrl}/billing`);
+  if (els.activationGateUpgradeWrap) {
+    els.activationGateUpgradeWrap.style.display = "block";
+    if (els.activationGateUpgradeLink) els.activationGateUpgradeLink.href = billingUrl;
+  }
+  const showExtendTrial = state.canExtendTrial && !isPaidPlanTier();
+  if (els.activationGateExtendTrial) {
+    els.activationGateExtendTrial.style.display = showExtendTrial ? "block" : "none";
+  }
+  const extendLink = document.getElementById("activation-gate-extend-link");
+  const extendSep = document.getElementById("activation-gate-extend-sep");
+  if (extendLink) {
+    extendLink.style.display = showExtendTrial ? "inline" : "none";
+    if (showExtendTrial && deviceId) {
+      extendLink.href = `${webUrl}/auth/desktop?deviceId=${encodeURIComponent(deviceId)}&mode=extendTrial`;
     }
+  }
+  if (extendSep) extendSep.style.display = showExtendTrial ? "inline" : "none";
+}
+
+function setActivationGateMessage(text, isError) {
+  if (!els.activationGateMessage) return;
+  els.activationGateMessage.textContent = text || "";
+  els.activationGateMessage.style.color = isError ? "#ef4444" : "";
+}
+
+function showMainApp() {
+  console.log("[showMainApp] Hiding activation gate, showing app layout");
+  document.body.classList.remove("activation-gate-active");
+  els.accessGate.style.display = "none";
+  if (els.activationGate) {
+    els.activationGate.classList.remove("visible");
+  }
+  els.appLayout.style.display = "grid";
+}
+
+let didBootstrapAfterAuth = false;
+
+/** True if device has a valid license (trial, pro, teams, custom, or grace). */
+function hasValidLicense() {
+  const s = state.licenseState;
+  return s === "trial_active" || s === "active" || s === "grace" || s === "trialing" || s === "TRIAL" || s === "TRIAL_ACTIVE";
+}
+
+/** True if license tier is a paid plan (pro, teams, custom). For these, sign-in is required. */
+function isPaidPlanTier() {
+  const t = (state.licenseTier || "").toLowerCase();
+  return t === "pro" || t === "teams" || t === "custom";
+}
+
+/**
+ * Deterministic gate logic:
+ * - Remote users (accessing shared cloud): always allowed - they don't need a license
+ * - Paid tiers (pro/teams/custom): require authentication + valid license state
+ * - Trial/free tiers: allow usage when trial is active
+ * - Otherwise: deny usage
+ */
+function canUseApp() {
+  // Remote users accessing shared cloud UI don't need license checks
+  if (isRemoteRole()) {
+    return true;
+  }
+
+  const ls = (state.licenseState || "").toLowerCase();
+  const tier = (state.licenseTier || "").toLowerCase();
+
+  // Suspended and revoked users cannot use the app
+  if (ls === "suspended" || ls === "revoked") {
+    return false;
+  }
+
+  const isPaidTier = tier === "pro" || tier === "teams" || tier === "custom";
+
+  const isValidLicenseState =
+    ls === "active" ||
+    ls === "trial_active" ||
+    ls === "grace" ||
+    ls === "trialing";
+
+  // Paid plans must be authenticated
+  if (isPaidTier) {
+    return state.isAuthenticated === true && isValidLicenseState;
+  }
+
+  // Trial/free devices can use app if trial is active
+  if (ls === "trial_active" || ls === "trialing") {
+    return true;
+  }
+
+  return false;
+}
+
+/** Show or hide activation gate based purely on canUseApp(). */
+function updateAppGate() {
+  // Remote users accessing shared cloud never see activation gate
+  if (isRemoteRole()) {
+    showMainApp();
     return;
   }
-  heartbeatMeta.lastState = state;
-  els.heartbeatIndicator.classList.remove("connected", "degraded", "offline");
-  if (state === "connected") {
-    els.heartbeatIndicator.classList.add("connected");
-  } else if (state === "degraded") {
-    els.heartbeatIndicator.classList.add("degraded");
-  } else if (state === "offline") {
-    els.heartbeatIndicator.classList.add("offline");
-  }
-  if (tooltip) {
-    els.heartbeatIndicator.title = tooltip;
-  }
-  if (els.heartbeatNote) {
-    els.heartbeatNote.textContent = note || "";
+  if (canUseApp()) {
+    showMainApp();
+    bootstrapOnceAfterAuth();
+  } else {
+    showActivationGate();
   }
 }
 
-async function checkConnectivity() {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4000);
-    const res = await fetch("/api/v1/admin/health", { signal: controller.signal });
-    clearTimeout(timer);
-    const data = await res.json();
-    return {
-      internetAvailable: data.internetAvailable === false ? false : true,
-      adminReachable: !!data.adminReachable,
-    };
-  } catch (error) {
-    return null;
-  }
-}
-
-function scheduleHeartbeatCheck(delayMs) {
-  if (heartbeatMeta.timer) {
-    clearTimeout(heartbeatMeta.timer);
-  }
-  heartbeatMeta.timer = setTimeout(runHeartbeatCheck, delayMs);
-}
-
-function recomputeHeartbeatIndicator() {
-  if (heartbeatMeta.isInternetAvailable === false) {
-    setHeartbeatState("offline", "No internet connection", "Check your internet connectivity");
-    return;
-  }
-  if (heartbeatMeta.adminReachable === false) {
-    setHeartbeatState("degraded", "Admin temporarily unreachable");
-    return;
-  }
-  setHeartbeatState("connected", "Connected");
-}
-
-async function runHeartbeatCheck() {
-  const result = await checkConnectivity();
-  if (!result) {
-    heartbeatMeta.failures += 1;
-    heartbeatMeta.adminReachable = false;
-    heartbeatMeta.isInternetAvailable = navigator.onLine;
-    recomputeHeartbeatIndicator();
-    scheduleHeartbeatCheck(nextHeartbeatDelay());
-    return;
-  }
-
-  heartbeatMeta.isInternetAvailable = result.internetAvailable;
-  heartbeatMeta.adminReachable = result.adminReachable;
-  if (result.internetAvailable && result.adminReachable) {
-    heartbeatMeta.failures = 0;
-    recomputeHeartbeatIndicator();
-    scheduleHeartbeatCheck(HEARTBEAT_POLL_MS);
-    return;
-  }
-
-  heartbeatMeta.failures += 1;
-  recomputeHeartbeatIndicator();
-  scheduleHeartbeatCheck(nextHeartbeatDelay());
-}
-
-function startHeartbeatMonitor() {
-  setHeartbeatState("degraded", "Checking connectivity");
-  window.addEventListener("online", () => {
-    heartbeatMeta.isInternetAvailable = true;
-    scheduleHeartbeatCheck(0);
-  });
-  window.addEventListener("offline", () => {
-    heartbeatMeta.isInternetAvailable = false;
-    heartbeatMeta.adminReachable = false;
-    recomputeHeartbeatIndicator();
-  });
-  runHeartbeatCheck().catch(() => {});
-}
-
-function getMessageKey(message) {
-  if (message.id) return `id:${message.id}`;
-  const stamp = message.timestamp || 0;
-  return `fallback:${message.sender}:${stamp}:${message.text}`;
-}
-
-function parseMessageTimestamp(value) {
-  if (!value) return Date.now();
-  if (typeof value === "number") {
-    return value < 1e12 ? value * 1000 : value;
-  }
-  const parsed = Date.parse(value);
-  return Number.isNaN(parsed) ? Date.now() : parsed;
-}
-
-function normalizeMessage(raw) {
-  if (!raw) return null;
-  const text = `${raw.text || raw.message || raw.body || raw.content || ""}`.trim();
-  if (!text) return null;
-  const senderRaw = `${raw.sender || raw.from || raw.role || raw.author || raw.direction || raw.type || ""}`.toLowerCase();
-  let sender = "admin";
-  if (senderRaw.includes("user") || senderRaw.includes("you") || senderRaw.includes("client")) {
-    sender = "user";
-  }
-  if (senderRaw.includes("out")) {
-    sender = "user";
-  }
-  if (senderRaw.includes("admin") || senderRaw.includes("support")) {
-    sender = "admin";
-  }
-  if (raw.isAdmin === true) {
-    sender = "admin";
-  }
-  if (raw.isAdmin === false) {
-    sender = "user";
-  }
-  const timestamp = parseMessageTimestamp(raw.timestamp || raw.createdAt || raw.sentAt || raw.time);
-  const id = raw.id || raw.messageId || raw._id || null;
-  return {
-    id,
-    sender,
-    text,
-    timestamp,
-    status: raw.status || "sent",
-  };
-}
-
-function loadCachedMessages() {
-  try {
-    const cached = localStorage.getItem(MESSAGES_CACHE_KEY);
-    if (cached) {
-      const parsed = JSON.parse(cached);
-      if (Array.isArray(parsed)) {
-        state.messages = parsed;
-      }
-    }
-    const lastSeen = Number(localStorage.getItem(MESSAGES_LAST_SEEN_KEY));
-    if (!Number.isNaN(lastSeen) && lastSeen > 0) {
-      messageMeta.lastSeenAt = lastSeen;
-    }
-  } catch (error) {
-    // silent
-  }
-}
-
-function saveCachedMessages() {
-  try {
-    const trimmed = state.messages.slice(-200);
-    localStorage.setItem(MESSAGES_CACHE_KEY, JSON.stringify(trimmed));
-    localStorage.setItem(MESSAGES_LAST_SEEN_KEY, String(messageMeta.lastSeenAt || 0));
-  } catch (error) {
-    // silent
-  }
-}
-
-function mergeMessages(incoming) {
-  const existingKeys = new Set(state.messages.map(getMessageKey));
-  incoming.forEach((message) => {
-    const key = getMessageKey(message);
-    if (existingKeys.has(key)) return;
-    state.messages.push(message);
-    existingKeys.add(key);
-  });
-  state.messages.sort((a, b) => a.timestamp - b.timestamp);
-}
-
-function formatMessageTime(timestamp) {
-  try {
-    return new Date(timestamp).toLocaleString([], {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return "--";
-  }
-}
-
-function renderMessages() {
-  if (!els.messageThread) return;
-  els.messageThread.innerHTML = "";
-  if (!state.messages.length) {
-    const emptyState = document.createElement("div");
-    emptyState.className = "empty-state";
-    emptyState.innerHTML = `
-      <div class="empty-state-title">No messages yet</div>
-      <div class="empty-state-sub">Support replies will appear here</div>
-    `;
-    els.messageThread.appendChild(emptyState);
-    return;
-  }
-  state.messages.forEach((message) => {
-    const row = document.createElement("div");
-    const isYou = message.sender === "user";
-    row.className = `message-item ${isYou ? "you" : "admin"}`;
-
-    const bubble = document.createElement("div");
-    bubble.className = "message-bubble";
-    bubble.textContent = message.text;
-    row.appendChild(bubble);
-
-    const meta = document.createElement("div");
-    meta.className = "message-meta";
-    const senderLabel = document.createElement("span");
-    senderLabel.textContent = isYou ? "You" : "Admin";
-    const timeLabel = document.createElement("span");
-    timeLabel.textContent = formatMessageTime(message.timestamp);
-    meta.appendChild(senderLabel);
-    meta.appendChild(timeLabel);
-    if (message.status === "sending") {
-      const status = document.createElement("span");
-      status.className = "message-status-tag";
-      status.textContent = "Sending…";
-      meta.appendChild(status);
-    } else if (message.status === "failed") {
-      const status = document.createElement("span");
-      status.className = "message-status-tag failed";
-      status.textContent = "Failed";
-      meta.appendChild(status);
-    }
-    row.appendChild(meta);
-
-    els.messageThread.appendChild(row);
-  });
-}
-
-function scrollMessagesToBottom() {
-  if (!els.messageThread) return;
-  els.messageThread.scrollTop = els.messageThread.scrollHeight;
-}
-
-function updateUnreadCount() {
-  const unread = state.messages.filter(
-    (message) => message.sender === "admin" && message.timestamp > messageMeta.lastSeenAt
-  );
-  messageMeta.unreadCount = unread.length;
-  if (els.messagesBadge) {
-    if (messageMeta.unreadCount > 0) {
-      els.messagesBadge.textContent = `${messageMeta.unreadCount}`;
-      els.messagesBadge.classList.remove("hidden");
-    } else {
-      els.messagesBadge.classList.add("hidden");
-    }
-  }
-}
-
-function markMessagesRead() {
-  const latest = state.messages
-    .filter((message) => message.sender === "admin")
-    .reduce((max, message) => Math.max(max, message.timestamp || 0), messageMeta.lastSeenAt);
-  messageMeta.lastSeenAt = latest;
-  updateUnreadCount();
-  saveCachedMessages();
-}
-
-async function fetchMessages() {
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-    const res = await fetch("/api/v1/messages", { signal: controller.signal });
-    clearTimeout(timer);
-    if (!res.ok) return;
-    const payload = await res.json();
-    const list = Array.isArray(payload)
-      ? payload
-      : Array.isArray(payload.messages)
-        ? payload.messages
-        : Array.isArray(payload.items)
-          ? payload.items
-          : [];
-    const incoming = list.map(normalizeMessage).filter(Boolean);
-    if (!incoming.length) return;
-    mergeMessages(incoming);
-    saveCachedMessages();
-    renderMessages();
-    if (document.querySelector('.section[data-section="messages"]')?.classList.contains("active")) {
-      markMessagesRead();
-    } else {
-      updateUnreadCount();
-    }
-  } catch (error) {
-    // silent
-  }
-}
-
-function startMessagesPolling() {
-  if (messageMeta.pollTimer) {
-    clearInterval(messageMeta.pollTimer);
-  }
-  fetchMessages();
-  messageMeta.pollTimer = setInterval(fetchMessages, MESSAGES_POLL_MS);
-}
-
-async function sendMessage() {
-  if (!els.messageInput || !els.messageSend) return;
-  const text = els.messageInput.value.trim();
-  if (!text) return;
-  const draft = {
-    id: `local-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    sender: "user",
-    text,
-    timestamp: Date.now(),
-    status: "sending",
-  };
-  state.messages.push(draft);
-  renderMessages();
-  scrollMessagesToBottom();
-  updateUnreadCount();
-  saveCachedMessages();
-  els.messageInput.value = "";
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-    const res = await fetch("/api/v1/messages/reply", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, sender: "user" }),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
-    if (!res.ok) {
-      draft.status = "failed";
-    } else {
-      const data = await res.json().catch(() => ({}));
-      draft.status = data.ok === false ? "failed" : "sent";
-    }
-  } catch (error) {
-    draft.status = "failed";
-  }
-  renderMessages();
-  scrollMessagesToBottom();
-  saveCachedMessages();
-}
-
-function setStatusDisplay(statusValue) {
-  const normalized = (statusValue || "").toLowerCase();
-  const label = normalized ? normalized[0].toUpperCase() + normalized.slice(1) : "--";
-  if (els.statusText) {
-    els.statusText.textContent = `Status: ${label}`;
-  }
-  if (els.statusIndicator) {
-    els.statusIndicator.classList.remove("running", "error");
-    if (normalized === "running" || normalized === "healthy") {
-      els.statusIndicator.classList.add("running");
-    } else if (normalized && normalized !== "--") {
-      els.statusIndicator.classList.add("error");
-    }
-  }
-}
-
-async function fetchStatus() {
-  try {
-    const res = await fetch("/api/status");
-    const data = await res.json();
-    setStatusDisplay(data.status);
-    els.storageLabel.textContent = data.storageLabel || "Local storage";
-    els.ownerMount.textContent = data.ownerBasePath;
-    if (data.lanBaseUrl) {
-      stateMeta.lanBaseUrl = data.lanBaseUrl;
-    }
-  } catch (error) {
-    setStatusDisplay("offline");
-  }
+/** Bootstrap app UI once after auth succeeds (idempotent). */
+async function bootstrapOnceAfterAuth() {
+  if (didBootstrapAfterAuth) return;
+  didBootstrapAfterAuth = true;
+  await continueBootstrapAfterActivation();
 }
 
 function formatBytes(bytes) {
@@ -500,6 +490,58 @@ function formatBytes(bytes) {
   return `${size.toFixed(1)} ${units[idx]}`;
 }
 
+function formatLogTime(timestamp) {
+  try {
+    return new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  } catch {
+    return timestamp;
+  }
+}
+
+function getLogIcon(level, message) {
+  const msg = String(message || "").toLowerCase();
+  if (msg.includes("upload")) return "📤";
+  if (msg.includes("download")) return "📥";
+  if (msg.includes("share")) return "🔗";
+  if (msg.includes("revoke")) return "🚫";
+  if (msg.includes("started")) return "🚀";
+  if (level === "error") return "❌";
+  if (level === "warn") return "⚠️";
+  return "ℹ️";
+}
+
+function drawActivityChart(entries) {
+  if (!els.activityChart) return;
+  const canvas = els.activityChart;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const width = canvas.clientWidth || 640;
+  const height = Number(canvas.getAttribute("height") || 180);
+  canvas.width = width;
+  canvas.height = height;
+  ctx.clearRect(0, 0, width, height);
+
+  const values = entries.map((entry) => Number(entry.value || 0));
+  const maxValue = Math.max(1, ...values);
+  const gap = 12;
+  const barWidth = Math.max(32, Math.floor((width - gap * (entries.length + 1)) / entries.length));
+  const baseline = height - 26;
+  const drawHeight = height - 52;
+
+  entries.forEach((entry, index) => {
+    const x = gap + index * (barWidth + gap);
+    const value = Number(entry.value || 0);
+    const h = Math.max(3, Math.round((value / maxValue) * drawHeight));
+    const y = baseline - h;
+    ctx.fillStyle = "#2fb7ff";
+    ctx.fillRect(x, y, barWidth, h);
+    ctx.fillStyle = "#a1a1aa";
+    ctx.font = "11px system-ui, -apple-system, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(entry.label, x + barWidth / 2, height - 8);
+  });
+}
+
 function renderBreadcrumbs() {
   const parts = state.path.split("/").filter(Boolean);
   els.breadcrumbs.innerHTML = "";
@@ -507,6 +549,7 @@ function renderBreadcrumbs() {
   homeButton.textContent = "Home";
   homeButton.onclick = () => loadFiles("/");
   els.breadcrumbs.appendChild(homeButton);
+
   let current = "";
   parts.forEach((part) => {
     const span = document.createElement("span");
@@ -534,141 +577,1698 @@ function getFileIcon(item) {
   return iconMap[ext] || "📄";
 }
 
+function getFileExtension(name) {
+  const ext = String(name || "").split(".").pop()?.toLowerCase();
+  return ext && ext !== String(name || "").toLowerCase() ? ext : "";
+}
+
+function compareBySort(a, b, sortKey) {
+  if (sortKey === "name_desc") {
+    return b.name.localeCompare(a.name);
+  }
+  if (sortKey === "modified_desc") {
+    return new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime();
+  }
+  if (sortKey === "modified_asc") {
+    return new Date(a.modifiedAt).getTime() - new Date(b.modifiedAt).getTime();
+  }
+  if (sortKey === "ext_asc") {
+    return getFileExtension(a.name).localeCompare(getFileExtension(b.name)) || a.name.localeCompare(b.name);
+  }
+  if (sortKey === "ext_desc") {
+    return getFileExtension(b.name).localeCompare(getFileExtension(a.name)) || a.name.localeCompare(b.name);
+  }
+  return a.name.localeCompare(b.name);
+}
+
+function getVisibleItems() {
+  const keyword = state.fileSearch.trim().toLowerCase();
+  const filtered = state.rawItems.filter((item) => {
+    if (state.foldersOnly && item.type !== "folder") return false;
+    if (keyword && !String(item.name || "").toLowerCase().includes(keyword)) return false;
+    return true;
+  });
+
+  const folders = filtered.filter((item) => item.type === "folder").sort((a, b) => compareBySort(a, b, state.fileSort));
+  const files = filtered.filter((item) => item.type !== "folder").sort((a, b) => compareBySort(a, b, state.fileSort));
+  return [...folders, ...files];
+}
+
+function updateFileViewButtons() {
+  els.fileList.dataset.view = state.fileView;
+  els.viewList.classList.toggle("active", state.fileView === "list");
+  els.viewThumb.classList.toggle("active", state.fileView === "thumb");
+}
+
 function renderFiles() {
+  state.items = getVisibleItems();
   els.fileList.innerHTML = "";
+  updateFileViewButtons();
   if (!state.items.length) {
-    const emptyState = document.createElement("div");
-    emptyState.className = "empty-state";
-    emptyState.innerHTML = `
-      <div class="empty-state-title">No files yet</div>
-      <div class="empty-state-sub">Drop files here or click Upload</div>
-    `;
-    els.fileList.appendChild(emptyState);
+    const message = state.rawItems.length
+      ? "No items match current filters."
+      : "Drop files here or click Upload";
+    els.fileList.innerHTML = `<div class="empty-state"><div class="empty-state-title">No files yet</div><div class="empty-state-sub">${message}</div></div>`;
     return;
   }
+
   state.items.forEach((item) => {
     const row = document.createElement("div");
     row.className = "item file-item";
+    const fileExt = getFileExtension(item.name);
+    const details = item.type === "folder" ? "Folder" : `${fileExt || "file"} · ${formatBytes(item.size)}`;
 
-    const icon = document.createElement("span");
-    icon.className = "file-icon";
-    icon.textContent = getFileIcon(item);
-    row.appendChild(icon);
+    const topRow = document.createElement("div");
+    topRow.className = "file-item-top";
+    const titleEl = document.createElement("span");
+    titleEl.className = "item-title";
+    titleEl.textContent = item.name;
+    titleEl.title = item.name;
+    topRow.innerHTML = `<span class="file-icon">${getFileIcon(item)}</span>`;
+    topRow.appendChild(titleEl);
 
-    const info = document.createElement("div");
-    info.className = "file-info";
-    info.innerHTML = `<div class="item-title">${item.name}</div>
-      <div class="item-sub">${item.type === "folder" ? "Folder" : formatBytes(item.size)}</div>`;
-    row.appendChild(info);
-
-    const openButton = document.createElement("button");
-    openButton.className = "button secondary";
-    openButton.textContent = item.type === "folder" ? "Open" : "Share";
-    openButton.onclick = () => {
-      if (item.type === "folder") {
-        loadFiles(item.path);
-      } else {
-        openShareModal(item.path);
-      }
-    };
-    row.appendChild(openButton);
+    const actions = document.createElement("div");
+    actions.className = "file-item-actions";
 
     if (item.type === "folder") {
+      const openBtn = document.createElement("button");
+      openBtn.className = "button secondary";
+      openBtn.textContent = "Open";
+      openBtn.onclick = () => loadFiles(item.path);
+      actions.appendChild(openBtn);
+      if (isHostRole()) {
+        const shareBtn = document.createElement("button");
+        shareBtn.className = "button secondary";
+        shareBtn.textContent = "Share";
+        shareBtn.onclick = () => openShareModal(item.path);
+        actions.appendChild(shareBtn);
+      }
+    } else {
+      if (isHostRole()) {
+        const shareBtn = document.createElement("button");
+        shareBtn.className = "button secondary";
+        shareBtn.textContent = "Share";
+        shareBtn.onclick = () => openShareModal(item.path);
+        actions.appendChild(shareBtn);
+      }
+      if (isPreviewableName(item.name)) {
+        const previewBtn = document.createElement("button");
+        previewBtn.className = "button secondary";
+        previewBtn.textContent = "Preview";
+        previewBtn.onclick = () => openPreviewModal(item);
+        actions.appendChild(previewBtn);
+      }
+    }
+
+    topRow.appendChild(actions);
+    row.appendChild(topRow);
+
+    const detailsRow = document.createElement("div");
+    detailsRow.className = "file-item-details";
+    detailsRow.innerHTML = `<span class="item-sub">${details}</span>`;
+    row.appendChild(detailsRow);
+
+    if (isHostRole()) {
+      const bottomRow = document.createElement("div");
+      bottomRow.className = "file-item-bottom";
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "button danger button-icon-only";
+      deleteBtn.title = "Delete";
+      deleteBtn.setAttribute("aria-label", "Delete");
+      deleteBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+      deleteBtn.onclick = () => confirmDeleteItem(item);
+      bottomRow.appendChild(deleteBtn);
+      row.appendChild(bottomRow);
+    }
+
+    if (item.type === "folder" && isHostRole()) {
       const shareButton = document.createElement("button");
       shareButton.className = "button";
       shareButton.textContent = "Share";
       shareButton.onclick = () => openShareModal(item.path);
       row.appendChild(shareButton);
     }
-
+    if (isHostRole()) {
+      const deleteButton = document.createElement("button");
+      deleteButton.className = "button secondary";
+      deleteButton.textContent = "Delete";
+      deleteButton.onclick = async () => {
+        const label = item.type === "folder" ? "folder" : "file";
+        if (!confirm(`Delete this ${label} "${item.name}"? This cannot be undone.`)) return;
+        try {
+          const res = await apiFetch(`/api/v1/file?path=${encodeURIComponent(item.path)}`, { method: "DELETE" });
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            alert(data.error || "Delete failed.");
+            return;
+          }
+          await loadFiles(state.path);
+        } catch (_) {
+          alert("Delete failed.");
+        }
+      };
+      row.appendChild(deleteButton);
+    }
     els.fileList.appendChild(row);
   });
+  refreshRemoteUploadUi();
 }
 
 function renderShares() {
   els.shareList.innerHTML = "";
-  // Filter to only show active shares (not revoked or expired)
+  const updateBulkButtons = () => {
+    els.revokeSelected.disabled = state.selectedShares.size === 0;
+  };
   const activeShares = state.shares.filter((share) => share.status === "active");
   if (!activeShares.length) {
-    const emptyState = document.createElement("div");
-    emptyState.className = "empty-state";
-    emptyState.innerHTML = `
-      <div class="empty-state-title">No active shares</div>
-      <div class="empty-state-sub">When there's no content</div>
-    `;
-    els.shareList.appendChild(emptyState);
+    state.selectedShares.clear();
+    updateBulkButtons();
+    els.shareList.innerHTML = '<div class="empty-state"><div class="empty-state-title">No active shares</div><div class="empty-state-sub">No shares created yet</div></div>';
     return;
   }
+  const activeIds = new Set(activeShares.map((share) => share.shareId));
+  state.selectedShares = new Set(Array.from(state.selectedShares).filter((id) => activeIds.has(id)));
+  updateBulkButtons();
   activeShares.forEach((share) => {
     const row = document.createElement("div");
     row.className = "item";
-    const info = document.createElement("div");
-    const expiryText = new Date(share.expiresAt).toLocaleString();
-    info.innerHTML = `<div class="item-title">${share.path}</div>
-      <div class="item-sub">${share.scope} · ${share.permission} · expires ${expiryText}</div>`;
-    row.appendChild(info);
-
-    const statusBadge = document.createElement("span");
-    statusBadge.className = "badge badge-active";
-    statusBadge.textContent = "Active";
-    row.appendChild(statusBadge);
-
+    const shareUrl = share.urlIp || share.url || `${stateMeta.lanBaseUrl}/share/${share.shareId}`;
+    row.innerHTML = `
+      <div style="flex:1;min-width:0">
+        <div class="item-title">${escapeHtml(share.path)}</div>
+        <div class="item-sub">${share.permission} · expires ${new Date(share.expiresAt).toLocaleString()}</div>
+        <div class="share-link-box" style="margin-top:8px;padding:8px 10px;border:1px solid var(--stroke);border-radius:6px;background:var(--bg);font-size:12px;font-family:ui-monospace,monospace;word-break:break-all">${escapeHtml(shareUrl)}</div>
+      </div>
+      <span class="badge badge-active">Active</span>
+    `;
+    if (isHostRole()) {
+      const checkboxWrap = document.createElement("label");
+      checkboxWrap.className = "item-check";
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = state.selectedShares.has(share.shareId);
+      checkbox.onchange = () => {
+        if (checkbox.checked) state.selectedShares.add(share.shareId);
+        else state.selectedShares.delete(share.shareId);
+        updateBulkButtons();
+      };
+      checkboxWrap.appendChild(checkbox);
+      row.appendChild(checkboxWrap);
+    }
     const copyButton = document.createElement("button");
     copyButton.className = "button secondary";
     copyButton.textContent = "Copy Link";
-    const baseUrl =
-      share.scope === "public"
-        ? stateMeta.publicActive
-          ? stateMeta.publicUrl
-          : null
-        : stateMeta.lanBaseUrl;
-    const shareUrl = baseUrl ? `${baseUrl}/share/${share.shareId}` : null;
-    copyButton.disabled = !shareUrl;
     copyButton.onclick = async () => {
-      if (!shareUrl) return;
-      await navigator.clipboard.writeText(shareUrl);
-      copyButton.textContent = "Copied!";
-      setTimeout(() => (copyButton.textContent = "Copy Link"), 1500);
+      const ok = await copyToClipboard(shareUrl);
+      if (ok) {
+        copyButton.textContent = "Copied!";
+        setTimeout(() => (copyButton.textContent = "Copy Link"), 2000);
+      } else {
+        showCopyFallback(shareUrl, copyButton);
+      }
     };
     row.appendChild(copyButton);
+    const qrBtn = document.createElement("button");
+    qrBtn.className = "button secondary";
+    qrBtn.textContent = "QR";
+    qrBtn.onclick = () => showShareQrModal(shareUrl);
+    row.appendChild(qrBtn);
 
-    const revokeButton = document.createElement("button");
-    revokeButton.className = "button danger";
-    revokeButton.textContent = "Revoke";
-    revokeButton.onclick = async () => {
-      revokeButton.disabled = true;
-      revokeButton.textContent = "Revoking...";
-      await revokeShare(share.shareId);
-    };
-    row.appendChild(revokeButton);
-
+    if (isHostRole()) {
+      const revokeButton = document.createElement("button");
+      revokeButton.className = "button danger";
+      revokeButton.textContent = "Revoke";
+      revokeButton.onclick = async () => {
+        revokeButton.disabled = true;
+        revokeButton.textContent = "Revoking...";
+        await revokeShare(share.shareId);
+      };
+      row.appendChild(revokeButton);
+    }
     els.shareList.appendChild(row);
   });
 }
 
-async function loadFiles(pathValue) {
-  const res = await fetch(`/api/files?path=${encodeURIComponent(pathValue)}`);
+function renderLogs(entries) {
+  els.logList.innerHTML = "";
+  if (!entries.length) {
+    els.logList.innerHTML = '<div class="empty-state"><div class="empty-state-title">No logs yet</div><div class="empty-state-sub">Activity will appear here</div></div>';
+    return;
+  }
+  entries.forEach((entry) => {
+    const row = document.createElement("div");
+    row.className = `log-item log-${entry.level}`;
+    row.innerHTML = `
+      <span class="log-icon">${getLogIcon(entry.level, entry.message)}</span>
+      <span class="log-time">${formatLogTime(entry.timestamp)}</span>
+      <span class="log-message">${entry.message}</span>
+    `;
+    els.logList.appendChild(row);
+  });
+}
+
+function renderNetwork() {
+  els.networkList.innerHTML = '<div class="empty-state"><div class="empty-state-title">Coming Soon</div><div class="empty-state-sub">Network discovery will be available in a future release.</div></div>';
+}
+
+function closePreviewModal() {
+  if (!els.previewModal) return;
+  els.previewModal.classList.remove("active");
+  if (els.previewBody) {
+    els.previewBody.innerHTML = "";
+  }
+}
+
+function showShareQrModal(url) {
+  if (!window.QRious || !els.shareQrModal) return;
+  const canvas = document.getElementById("share-qr-canvas");
+  const urlEl = document.getElementById("share-qr-url");
+  if (!canvas || !urlEl) return;
+  canvas.width = 220;
+  canvas.height = 220;
+  new window.QRious({
+    element: canvas,
+    value: url || "",
+    size: 220,
+    level: "M",
+    background: "white",
+    foreground: "#000000",
+  });
+  urlEl.textContent = url || "";
+  els.shareQrModal.classList.add("active");
+}
+
+function closeShareQrModal() {
+  if (els.shareQrModal) els.shareQrModal.classList.remove("active");
+}
+
+async function confirmDeleteItem(item) {
+  const name = item.name || item.path || "item";
+  const typeLabel = item.type === "folder" ? "folder" : "file";
+  const msg = item.type === "folder"
+    ? `Permanently delete the folder "${name}" and all its contents?`
+    : `Permanently delete "${name}"?`;
+  if (!confirm(msg)) return;
+  try {
+    const res = await apiFetch(`/api/v1/file?path=${encodeURIComponent(item.path)}`, { method: "DELETE" });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || "Delete failed");
+    }
+    await loadFiles(state.path);
+    await loadLogs();
+  } catch (err) {
+    alert(err.message || "Delete failed");
+  }
+}
+
+function openPreviewModal(item) {
+  if (!item || item.type !== "file" || !isPreviewableName(item.name)) return;
+  if (!els.previewModal || !els.previewBody || !els.previewTitle) return;
+  const params = new URLSearchParams({
+    path: item.path,
+    fp: stateMeta.fingerprint,
+  });
+  if (stateMeta.sessionToken) {
+    params.set("token", stateMeta.sessionToken);
+  }
+  const previewUrl = `/api/v1/file/content?${params.toString()}`;
+  const lower = String(item.name || "").toLowerCase();
+  els.previewTitle.textContent = `Preview: ${item.name}`;
+  if (/\.(png|jpe?g|gif|webp|svg)$/i.test(lower)) {
+    els.previewBody.innerHTML = `<img src="${previewUrl}" alt="${item.name}" class="preview-image" />`;
+  } else if (/\.pdf$/i.test(lower)) {
+    els.previewBody.innerHTML = `<object data="${previewUrl}" type="application/pdf" class="preview-frame"><iframe src="${previewUrl}" class="preview-frame" title="${item.name}"></iframe></object>`;
+  } else if (/\.(mp4|webm|mov|m4v)$/i.test(lower)) {
+    els.previewBody.innerHTML = `<video controls class="preview-video" src="${previewUrl}"></video>`;
+  } else {
+    return;
+  }
+  els.previewModal.classList.add("active");
+}
+
+function shortenFingerprint(value) {
+  const text = String(value || "");
+  if (text.length <= 16) return text;
+  return `${text.slice(0, 8)}...${text.slice(-6)}`;
+}
+
+function renderCloudQr(url) {
+  if (!window.QRious || !els.cloudUrlQr) return;
+  new window.QRious({
+    element: els.cloudUrlQr,
+    value: url,
+    size: 220,
+    level: "M",
+    background: "white",
+    foreground: "#000000",
+  });
+}
+
+async function copyToClipboard(text) {
+  try {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (_err) {}
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    ta.style.top = "0";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch (_e) {
+    return false;
+  }
+}
+
+function showCopyFallback(text, triggerEl) {
+  const wrap = document.createElement("div");
+  wrap.className = "copy-fallback";
+  wrap.style.marginTop = "8px";
+  wrap.innerHTML = '<div class="value value-muted" style="margin-bottom:4px">Tap and hold to copy:</div>';
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "input mono";
+  input.value = text;
+  input.readOnly = true;
+  input.style.width = "100%";
+  input.onclick = () => input.select();
+  wrap.appendChild(input);
+  const parent = triggerEl.closest(".item") || triggerEl.parentElement;
+  const existing = parent.querySelector(".copy-fallback");
+  if (existing) existing.remove();
+  parent.appendChild(wrap);
+}
+
+function escapeHtml(text) {
+  return String(text || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function formatInline(text) {
+  const escaped = escapeHtml(text);
+  return escaped.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+}
+
+function renderPrivacyMarkdown(markdownText) {
+  const lines = String(markdownText || "").split(/\r?\n/);
+  const html = [];
+  let paragraph = [];
+  let inList = false;
+
+  function flushParagraph() {
+    if (!paragraph.length) return;
+    const text = paragraph.join(" ");
+    html.push(`<p>${formatInline(text)}</p>`);
+    paragraph = [];
+  }
+
+  function closeList() {
+    if (!inList) return;
+    html.push("</ul>");
+    inList = false;
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      flushParagraph();
+      closeList();
+      continue;
+    }
+    if (line.startsWith("### ")) {
+      flushParagraph();
+      closeList();
+      html.push(`<h3>${formatInline(line.slice(4))}</h3>`);
+      continue;
+    }
+    if (line.startsWith("## ")) {
+      flushParagraph();
+      closeList();
+      html.push(`<h2>${formatInline(line.slice(3))}</h2>`);
+      continue;
+    }
+    if (line.startsWith("# ")) {
+      flushParagraph();
+      closeList();
+      html.push(`<h1>${formatInline(line.slice(2))}</h1>`);
+      continue;
+    }
+    if (line.startsWith("• ")) {
+      flushParagraph();
+      if (!inList) {
+        html.push("<ul>");
+        inList = true;
+      }
+      html.push(`<li>${formatInline(line.slice(2))}</li>`);
+      continue;
+    }
+    closeList();
+    paragraph.push(line);
+  }
+
+  flushParagraph();
+  closeList();
+  return html.join("");
+}
+
+async function loadPrivacyPolicy() {
+  try {
+    const response = await fetch("/privacy-policy.md");
+    if (!response.ok) {
+      throw new Error("policy_not_found");
+    }
+    const markdown = await response.text();
+    stateMeta.privacyPolicyRaw = markdown;
+    els.privacyPolicyContent.innerHTML = renderPrivacyMarkdown(markdown);
+  } catch (_error) {
+    stateMeta.privacyPolicyRaw = "";
+    els.privacyPolicyContent.innerHTML = "<p>Unable to load privacy policy.</p>";
+  }
+}
+
+async function loadCloudUrl() {
+  const res = await apiFetch("/api/v1/cloud/url");
   const data = await res.json();
-  state.path = data.path;
-  state.items = data.items;
-  renderBreadcrumbs();
-  renderFiles();
+  stateMeta.cloudUrl = String(data.url || window.location.origin);
+  els.cloudUrlInput.value = stateMeta.cloudUrl;
+  renderCloudQr(`${stateMeta.cloudUrl}?pair=1`);
+}
+
+async function loadAccessMe() {
+  const res = await apiFetch("/api/v1/access/me", {}, true);
+  if (!res.ok) {
+    state.accessRole = state.isAdmin ? "host" : "remote";
+    return;
+  }
+  const data = await res.json();
+  state.accessRole = data.role === "host" ? "host" : "device";
+  state.deviceId = data.device_id || null;
+  state.deviceName = data.device_name || null;
+  state.deviceFolderRel = null;
+}
+
+function formatUptime(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return `${h}H ${m}M`;
+  if (m > 0) return `${m}M`;
+  return `${seconds}S`;
+}
+
+async function loadBuildInfo() {
+  try {
+    const [buildRes, diagRes] = await Promise.all([
+      fetch("/api/v1/build"),
+      fetch("/api/v1/diagnostics/info", {}).catch(() => null),
+    ]);
+    if (buildRes.ok) {
+      const data = await buildRes.json();
+      stateMeta.buildId = String(data.build_id || "");
+      if (els.buildId) {
+        els.buildId.textContent = `Build ${stateMeta.buildId || "unknown"}`;
+      }
+    }
+    if (diagRes?.ok && els.uptimeDisplay) {
+      const diag = await diagRes.json();
+      const sec = Number(diag.uptime_seconds) || 0;
+      if (sec > 0) els.uptimeDisplay.textContent = `Uptime: ${formatUptime(sec)}`;
+    }
+  } catch (_error) {
+    if (els.buildId) els.buildId.textContent = "BUILD: unavailable";
+  }
+}
+
+async function loadControlPlaneConfig() {
+  try {
+    const res = await fetch("/api/v1/control-plane-config");
+    if (!res.ok) return;
+    const data = await res.json();
+    console.log("[loadControlPlaneConfig] received:", JSON.stringify({ is_authenticated: data.is_authenticated, license: data.license }, null, 2));
+    state.licenseState = data.license?.state || null;
+    state.licenseGraceEndsAt = data.license?.grace_ends_at ?? null;
+    state.licenseTier = data.license?.tier ?? null;
+    state.licenseExpiresAt = data.license?.expires_at ?? null;
+    state.licenseDeviceLimit = data.license?.device_limit ?? null;
+    state.activationRequired = data.activation?.required === true;
+    state.trialDays = typeof data.trial_days === "number" ? data.trial_days : 7;
+    state.upgradeUrl = data.upgrade_url || "";
+    state.subscription = data.subscription || null;
+    state.entitlements = data.entitlements || null;
+    state.trialEndsAt = data.trialEndsAt || null;
+    state.canExtendTrial = !!(data.entitlements && data.entitlements.canExtendTrial);
+    state.isSuspended = data.license?.state === "suspended";
+    state.isRevoked = data.license?.state === "revoked";
+    state.referralCode = data.referral_code || null;
+    state.referralCount = data.referral_count || 0;
+    state.daysRemaining = data.license?.days_remaining ?? null;
+    if (data.web_url) window.__JOINCLOUD_WEB_URL__ = data.web_url;
+    if (data.account_id) state.accountId = data.account_id;
+    if (data.host_uuid) state.hostUuidFromConfig = data.host_uuid;
+    state.accountEmail = (data.is_authenticated && data.account_email) ? data.account_email : null;
+    state.isAuthenticated = data.is_authenticated === true;
+    // Gate evaluation must run first and must not be skipped by downstream UI errors.
+    updateAppGate();
+    try { updateGraceBanner(); } catch (_) {}
+    try { updateSubscriptionSection(); } catch (_) {}
+    try { updateHeaderProfile(); } catch (_) {}
+    try { updateAdminUi(); } catch (_) {}
+    try { updateActivationGateTrialText(); } catch (_) {}
+    try { updateButtonStates(); } catch (_) {}
+  } catch (_) {}
+}
+
+/** Update button states based on license status */
+function updateButtonStates() {
+  const ls = (state.licenseState || "").toLowerCase();
+  const tier = (state.licenseTier || "").toLowerCase();
+  const isAuth = state.isAuthenticated === true;
+  const webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+  const deviceId = state.hostUuidFromConfig || state.deviceId || "";
+  
+  // Build URLs
+  const dashboardParams = new URLSearchParams();
+  if (state.accountId) dashboardParams.set("accountId", state.accountId);
+  if (deviceId) dashboardParams.set("deviceId", deviceId);
+  const dashboardUrl = `${webUrl}/dashboard${dashboardParams.toString() ? "?" + dashboardParams.toString() : ""}`;
+  const signInUrl = deviceId ? `${webUrl}/auth/desktop?deviceId=${encodeURIComponent(deviceId)}` : `${webUrl}/auth/desktop`;
+  const billingUrl = `${webUrl}/billing?${dashboardParams.toString()}`;
+  const supportUrl = `${webUrl}/support?${dashboardParams.toString()}`;
+  
+  // Primary button configuration based on state
+  const primaryBtn = document.getElementById("settings-open-dashboard-link");
+  const secondaryBtn = document.getElementById("settings-logout");
+  const upgradeLink = document.getElementById("subscription-upgrade-link");
+  
+  if (primaryBtn) {
+    // State: Suspended - show "Fix Payment" or "Contact Support"
+    if (ls === "suspended") {
+      primaryBtn.textContent = "Fix Payment Issue";
+      primaryBtn.href = billingUrl;
+      primaryBtn.style.display = "";
+    }
+    // State: Revoked - show "Contact Support"
+    else if (ls === "revoked") {
+      primaryBtn.textContent = "Contact Support";
+      primaryBtn.href = supportUrl;
+      primaryBtn.style.display = "";
+    }
+    // State: Grace - show "Update Payment"
+    else if (ls === "grace") {
+      primaryBtn.textContent = "Update Payment";
+      primaryBtn.href = billingUrl;
+      primaryBtn.style.display = "";
+    }
+    // State: Expired (no account) - show "Sign in"
+    else if ((ls === "expired" || ls === "unregistered") && !isAuth) {
+      primaryBtn.textContent = "Sign In";
+      primaryBtn.href = signInUrl;
+      primaryBtn.style.display = "";
+    }
+    // State: Authenticated - show "Open Dashboard"
+    else if (isAuth) {
+      primaryBtn.textContent = "Open Dashboard";
+      primaryBtn.href = dashboardUrl;
+      primaryBtn.style.display = "";
+    }
+    // State: Trial without account - show "Sign In"
+    else {
+      primaryBtn.textContent = "Sign In";
+      primaryBtn.href = signInUrl;
+      primaryBtn.style.display = "";
+    }
+  }
+  
+  // Secondary button (Sign out) visibility
+  if (secondaryBtn) {
+    if (isAuth) {
+      secondaryBtn.textContent = "Sign out";
+      secondaryBtn.style.display = "";
+    } else if (ls === "trial_active" || ls === "trialing") {
+      // During trial without account, hide sign out
+      secondaryBtn.style.display = "none";
+    } else {
+      secondaryBtn.textContent = "Sign in";
+      secondaryBtn.style.display = "";
+    }
+  }
+  
+  // Upgrade link visibility
+  if (upgradeLink) {
+    const isPaidTier = tier === "pro" || tier === "teams" || tier === "custom";
+    const showUpgrade = !isPaidTier && (ls === "trial_active" || ls === "trialing" || ls === "active") && isAuth;
+    
+    if (showUpgrade) {
+      upgradeLink.style.display = "inline";
+      upgradeLink.href = billingUrl;
+      upgradeLink.textContent = "Upgrade Plan";
+    } else {
+      upgradeLink.style.display = "none";
+    }
+  }
+}
+
+function updateActivationGateTrialText() {
+  var el = document.getElementById("activation-gate-trial-text");
+  if (!el) return;
+  if (isPaidPlanTier() && !state.isAuthenticated) {
+    var planName = (state.licenseTier || "").replace(/^./, (c) => c.toUpperCase());
+    el.textContent = "Sign in to continue using your " + planName + " plan. Pro, Teams, and Custom plans require an active sign-in.";
+  } else if (state.licenseState === "UNREGISTERED" || state.licenseState === "EXPIRED" || state.licenseState === "expired") {
+    el.textContent = "Sign in to start a free trial, or purchase a Pro, Teams, or Custom plan to use JoinCloud.";
+  } else {
+    var days = state.trialDays || 7;
+    el.textContent = "A free " + days + "-day trial starts automatically when you sign in. Create shares and manage your files - no credit card required.";
+  }
+}
+
+function updateGraceBanner() {
+  if (!els.graceBanner) return;
+  var bannerText = document.getElementById("grace-banner-text");
+  var bannerUpgrade = document.getElementById("grace-banner-upgrade");
+  var webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+  var params = new URLSearchParams();
+  if (state.accountId) params.set("accountId", state.accountId);
+  if (state.hostUuidFromConfig || state.deviceId) params.set("deviceId", state.hostUuidFromConfig || state.deviceId);
+
+  // Suspended state - critical banner
+  if (state.licenseState === "suspended") {
+    els.graceBanner.style.display = "block";
+    els.graceBanner.className = "grace-banner banner-critical";
+    if (bannerText) bannerText.innerHTML = "<strong>Account Suspended</strong> \u2013 Your account has been suspended due to payment issues. Please update your payment method to restore access.";
+    if (bannerUpgrade) {
+      bannerUpgrade.style.display = "inline";
+      bannerUpgrade.textContent = "Fix Payment";
+      bannerUpgrade.href = webUrl + "/billing?" + params.toString();
+    }
+    return;
+  }
+
+  // Revoked state - critical banner
+  if (state.licenseState === "revoked") {
+    els.graceBanner.style.display = "block";
+    els.graceBanner.className = "grace-banner banner-critical";
+    if (bannerText) bannerText.innerHTML = "<strong>License Revoked</strong> \u2013 Your license has been revoked. Please contact support for assistance.";
+    if (bannerUpgrade) {
+      bannerUpgrade.style.display = "inline";
+      bannerUpgrade.textContent = "Contact Support";
+      bannerUpgrade.href = webUrl + "/support?" + params.toString();
+    }
+    return;
+  }
+
+  // Reset to default banner class
+  els.graceBanner.className = "grace-banner";
+
+  if (state.licenseState === "grace" && state.licenseGraceEndsAt) {
+    els.graceBanner.style.display = "block";
+    var d = new Date(state.licenseGraceEndsAt * 1000);
+    if (els.graceEndsDate) els.graceEndsDate.textContent = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    if (bannerText) bannerText.innerHTML = "Payment issue \u2013 please update your payment method. Full access until <span id=\"grace-ends-date\">" + d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) + "</span>.";
+    if (bannerUpgrade) {
+      bannerUpgrade.style.display = "inline";
+      bannerUpgrade.textContent = "Update Payment";
+      bannerUpgrade.href = webUrl + "/billing?" + params.toString();
+    }
+    return;
+  }
+
+  if (state.licenseState === "trial_active" && state.licenseExpiresAt) {
+    var now = Math.floor(Date.now() / 1000);
+    var remaining = state.licenseExpiresAt - now;
+    var daysLeft = Math.ceil(remaining / 86400);
+    if (daysLeft <= 3 && daysLeft > 0) {
+      els.graceBanner.style.display = "block";
+      if (bannerText) bannerText.textContent = "Your free trial expires in " + daysLeft + " day" + (daysLeft !== 1 ? "s" : "") + ". Upgrade to keep using JoinCloud.";
+      if (bannerUpgrade) {
+        bannerUpgrade.style.display = "inline";
+        bannerUpgrade.textContent = "Upgrade now";
+        bannerUpgrade.href = webUrl + "/billing?" + params.toString();
+      }
+      return;
+    }
+  }
+
+  if (state.licenseState === "expired" || state.licenseState === "EXPIRED") {
+    els.graceBanner.style.display = "block";
+    if (bannerText) bannerText.textContent = "Trial ended - Upgrade to continue.";
+    if (bannerUpgrade) {
+      bannerUpgrade.style.display = "inline";
+      bannerUpgrade.textContent = "Upgrade now";
+      bannerUpgrade.href = webUrl + "/billing?" + params.toString();
+    }
+    return;
+  }
+
+  if (state.licenseState === "UNREGISTERED") {
+    els.graceBanner.style.display = "block";
+    var webUrl3 = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+    var params3 = new URLSearchParams();
+    var deviceId3 = state.hostUuidFromConfig || state.deviceId || "";
+    if (state.accountId) params3.set("accountId", state.accountId);
+    if (deviceId3) params3.set("deviceId", deviceId3);
+    var pricingHref = webUrl3 + "/billing" + (params3.toString() ? "?" + params3.toString() : "");
+    var extendHref = deviceId3
+      ? `${webUrl3}/auth/desktop?deviceId=${encodeURIComponent(deviceId3)}&mode=extendTrial`
+      : `${webUrl3}/auth/desktop?mode=extendTrial`;
+    if (bannerText) {
+      bannerText.innerHTML = `Trial ended - Upgrade to unlock Teams and increase share limits. <a href="${pricingHref}" target="_blank" rel="noopener noreferrer" style="text-decoration:underline;color:inherit">Upgrade / Purchase</a> · <a href="${extendHref}" target="_blank" rel="noopener noreferrer" style="text-decoration:underline;color:inherit">Extend Trial</a>.`;
+    }
+    if (bannerUpgrade) bannerUpgrade.style.display = "none";
+    return;
+  }
+
+  const isTrial = /^trial/i.test(String(state.licenseState || "")) || state.licenseState === "TRIAL" || state.licenseState === "TRIAL_ACTIVE";
+  if (!state.isAuthenticated && !isTrial) {
+    els.graceBanner.style.display = "block";
+    if (bannerText) bannerText.textContent = "Please activate a plan or sign in.";
+    if (bannerUpgrade) {
+      bannerUpgrade.style.display = "inline";
+      var webUrlAct = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+      var paramsAct = new URLSearchParams();
+      if (state.hostUuidFromConfig || state.deviceId) paramsAct.set("deviceId", state.hostUuidFromConfig || state.deviceId);
+      bannerUpgrade.href = webUrlAct + "/billing" + (paramsAct.toString() ? "?" + paramsAct.toString() : "");
+    }
+    return;
+  }
+
+  els.graceBanner.style.display = "none";
+}
+
+function updateSubscriptionSection() {
+  const hasLicense = state.licenseState && state.licenseState !== "UNREGISTERED";
+
+  // Home trial notice: show when on trial only; hide when user has purchased a plan (pro/teams/custom)
+  var homeTrialNotice = document.getElementById("home-trial-notice");
+  if (homeTrialNotice) {
+    const paidTiersNotice = ["pro", "teams", "custom"];
+    const isPaidPlanNotice = state.licenseTier && paidTiersNotice.includes(String(state.licenseTier).toLowerCase());
+    if (!isPaidPlanNotice && (state.licenseState === "trial_active" || state.licenseState === "TRIAL" || state.licenseState === "TRIAL_ACTIVE")) {
+      homeTrialNotice.style.display = "block";
+      homeTrialNotice.textContent = "You're on a free trial.";
+    } else {
+      homeTrialNotice.style.display = "none";
+    }
+  }
+
+  // Populate the richer profile card in Settings (always show plan/status)
+  const isAuth = state.isAuthenticated === true;
+  const isTrialActive = /^trial/i.test(String(state.licenseState || "")) || state.licenseState === "TRIAL" || state.licenseState === "TRIAL_ACTIVE";
+  const deviceIdForDisplay = state.hostUuidFromConfig || state.deviceId || "";
+
+  if (els.settingsProfileCard) {
+    els.settingsProfileCard.style.display = "block";
+    // When signed in: show email. When signed out: show device ID + trial
+    let emailDisplay;
+    if (isAuth && state.accountEmail && state.accountEmail.trim()) {
+      emailDisplay = state.accountEmail.trim();
+    } else if (!isAuth && deviceIdForDisplay) {
+      emailDisplay = "Device: " + deviceIdForDisplay.slice(0, 16) + (deviceIdForDisplay.length > 16 ? "…" : "");
+    } else if (!isAuth) {
+      emailDisplay = "Not signed in";
+    } else {
+      emailDisplay = state.accountId ? "Account: " + state.accountId.slice(0, 16) + "…" : (hasLicense ? "Device account" : "Not signed in");
+    }
+    if (els.settingsProfileEmail) els.settingsProfileEmail.textContent = emailDisplay;
+
+    const planDisplay = (state.licenseTier || (state.licenseState === "UNREGISTERED" ? "free" : "trial")).replace(/^./, (c) => c.toUpperCase());
+    if (els.settingsProfilePlan) els.settingsProfilePlan.textContent = planDisplay;
+
+    const rawStatus = state.licenseState === "UNREGISTERED" ? "Trial ended" : (state.licenseState || "-");
+    const paidTiers = ["pro", "teams", "custom"];
+    const isPaidPlan = state.licenseTier && paidTiers.includes(String(state.licenseTier).toLowerCase());
+    const effectiveStatus = isPaidPlan && (rawStatus === "trial_active" || rawStatus === "trialing") ? "active" : rawStatus;
+    const statusDisplay = String(effectiveStatus).replace(/_/g, " ");
+    if (els.settingsProfileStatus) {
+      els.settingsProfileStatus.textContent = statusDisplay;
+      els.settingsProfileStatus.className = "settings-profile-badge " + (
+        effectiveStatus === "active" ? "badge-active" :
+        effectiveStatus === "trial_active" ? "badge-trial" :
+        effectiveStatus === "grace" ? "badge-grace" :
+        effectiveStatus === "Trial ended" || effectiveStatus === "UNREGISTERED" ? "badge-expired" : "badge-expired"
+      );
+    }
+
+    const limit = state.licenseDeviceLimit;
+    if (els.settingsProfileDeviceLimit) {
+      els.settingsProfileDeviceLimit.textContent = limit ? `${limit} device${limit !== 1 ? "s" : ""}` : "-";
+    }
+
+    let expiryDisplay = "-";
+    if (state.licenseExpiresAt) {
+      try {
+        const d = new Date(state.licenseExpiresAt * 1000);
+        expiryDisplay = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+      } catch (_) {}
+    }
+    if (els.settingsProfileExpiry) els.settingsProfileExpiry.textContent = expiryDisplay;
+  }
+
+  // Banner: show when user cannot use app (signed out + no trial, or paid plan requires sign-in)
+  const noTrialBanner = document.getElementById("settings-no-trial-banner");
+  const noTrialSigninLink = document.getElementById("settings-no-trial-signin-link");
+  if (noTrialBanner && noTrialSigninLink) {
+    const showNoTrialBanner = !canUseApp();
+    noTrialBanner.style.display = showNoTrialBanner ? "block" : "none";
+    if (showNoTrialBanner) {
+      const webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+      noTrialSigninLink.href = deviceIdForDisplay ? `${webUrl}/auth/desktop?deviceId=${encodeURIComponent(deviceIdForDisplay)}` : `${webUrl}/auth/desktop`;
+      noTrialSigninLink.target = "_blank";
+      noTrialSigninLink.rel = "noopener noreferrer";
+    }
+  }
+
+  // Legacy single-row profile - hide when the rich card is shown
+  if (els.settingsProfileRow && els.settingsProfileValue) {
+    if (hasLicense && !els.settingsProfileCard) {
+      els.settingsProfileRow.style.display = "block";
+      if (state.accountEmail && state.accountEmail.trim()) {
+        els.settingsProfileValue.textContent = "Signed in as " + state.accountEmail.trim();
+      } else {
+        const id = (state.accountId || state.hostUuidFromConfig || state.deviceId || "").slice(0, 24);
+        els.settingsProfileValue.textContent = id ? "Account: " + id + "…" : "Device account";
+      }
+    } else {
+      els.settingsProfileRow.style.display = "none";
+    }
+  }
+
+  if (!els.subscriptionCard) return;
+  els.subscriptionCard.style.display = "block";
+  const plan = (state.licenseTier || (state.licenseState === "UNREGISTERED" ? "free" : "trial")).replace(/^./, (c) => c.toUpperCase());
+  if (els.subscriptionPlan) els.subscriptionPlan.textContent = plan;
+  const rawSubStatus = state.licenseState === "UNREGISTERED" ? "Trial ended" : (state.subscription?.status || state.licenseState || "-");
+  const paidTiersSub = ["pro", "teams", "custom"];
+  const isPaidPlanSub = state.licenseTier && paidTiersSub.includes(String(state.licenseTier).toLowerCase());
+  const status = isPaidPlanSub && (rawSubStatus === "trial_active" || rawSubStatus === "trialing") ? "active" : rawSubStatus;
+  if (els.subscriptionStatus) els.subscriptionStatus.textContent = String(status).replace(/_/g, " ");
+  let renewalText = "-";
+  if (state.subscription?.renewal_at) {
+    try {
+      const r = state.subscription.renewal_at;
+      const d = typeof r === "string" ? new Date(r) : new Date(r * 1000);
+      renewalText = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    } catch (_) {}
+  } else if (state.licenseExpiresAt) {
+    try {
+      const d = new Date(state.licenseExpiresAt * 1000);
+      renewalText = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) + " (expires)";
+    } catch (_) {}
+  }
+  if (els.subscriptionRenewal) els.subscriptionRenewal.textContent = renewalText;
+  const showManage = !!(state.subscription && (state.subscription.status === "active" || state.subscription.status === "trialing" || state.subscription.status === "past_due"));
+  if (els.subscriptionManageBtn) {
+    els.subscriptionManageBtn.style.display = showManage ? "inline-flex" : "none";
+  }
+  const webUrlSub = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+  const accountIdSub = state.accountId || "";
+  const deviceIdSub = state.hostUuidFromConfig || state.deviceId || "";
+  const billingParamsSub = new URLSearchParams();
+  if (accountIdSub) billingParamsSub.set("accountId", accountIdSub);
+  if (deviceIdSub) billingParamsSub.set("deviceId", deviceIdSub);
+  const billingQuerySub = billingParamsSub.toString() ? `?${billingParamsSub.toString()}` : "";
+  const pricingUrl = `${webUrlSub}/billing${billingQuerySub}`;
+  const showUpgrade = !!(state.licenseTier === "trial" || !state.subscription?.status);
+  if (els.subscriptionUpgradeLink) {
+    els.subscriptionUpgradeLink.style.display = showUpgrade ? "inline" : "none";
+    els.subscriptionUpgradeLink.href = state.upgradeUrl || pricingUrl;
+    els.subscriptionUpgradeLink.target = "_blank";
+    els.subscriptionUpgradeLink.rel = "noopener noreferrer";
+  }
+  const showExtendTrial = state.licenseState === "UNREGISTERED" && state.canExtendTrial;
+  if (els.subscriptionExtendTrialLink) {
+    els.subscriptionExtendTrialLink.style.display = showExtendTrial ? "inline" : "none";
+    if (showExtendTrial) {
+      const webUrlExt = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+      const deviceIdExt = state.hostUuidFromConfig || state.deviceId || "";
+      els.subscriptionExtendTrialLink.href = deviceIdExt
+        ? `${webUrlExt}/auth/desktop?deviceId=${encodeURIComponent(deviceIdExt)}&mode=extendTrial`
+        : `${webUrlExt}/auth/desktop?mode=extendTrial`;
+      els.subscriptionExtendTrialLink.target = "_blank";
+      els.subscriptionExtendTrialLink.rel = "noopener noreferrer";
+    }
+  }
+  const webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+  const accountIdSub2 = state.accountId || "";
+  const deviceIdSub2 = state.hostUuidFromConfig || state.deviceId || "";
+  const dashboardParams = new URLSearchParams();
+  if (accountIdSub2) dashboardParams.set("accountId", accountIdSub2);
+  if (deviceIdSub2) dashboardParams.set("deviceId", deviceIdSub2);
+  const dashboardUrl = `${webUrl}/dashboard${dashboardParams.toString() ? "?" + dashboardParams.toString() : ""}`;
+  const signInUrl = deviceIdSub2
+    ? `${webUrl}/auth/desktop?deviceId=${encodeURIComponent(deviceIdSub2)}`
+    : `${webUrl}/auth/desktop`;
+  if (els.settingsOpenDashboardLink) {
+    if (isAuth) {
+      els.settingsOpenDashboardLink.style.display = "";
+      els.settingsOpenDashboardLink.textContent = "Open Dashboard";
+      els.settingsOpenDashboardLink.href = dashboardUrl;
+    } else {
+      els.settingsOpenDashboardLink.style.display = "";
+      els.settingsOpenDashboardLink.textContent = "Sign in";
+      els.settingsOpenDashboardLink.href = signInUrl;
+    }
+    els.settingsOpenDashboardLink.target = "_blank";
+    els.settingsOpenDashboardLink.rel = "noopener noreferrer";
+  }
+  if (els.settingsLogout) {
+    els.settingsLogout.style.display = "";
+    els.settingsLogout.textContent = isAuth ? "Sign out" : "Sign in";
+  }
+  if (els.subscriptionHelperText) {
+    if (isAuth) {
+      els.subscriptionHelperText.textContent = "Manage your subscription or extend trial.";
+    } else if (isTrialActive) {
+      els.subscriptionHelperText.textContent = "Sign in to link this device to your account and manage your subscription.";
+    } else {
+      els.subscriptionHelperText.textContent = "Log in and purchase a plan to start.";
+    }
+  }
+}
+
+async function openBillingPortal() {
+  const btn = els.subscriptionManageBtn;
+  if (btn) btn.disabled = true;
+  try {
+    const returnUrl = window.location.origin + window.location.pathname;
+    const res = await apiFetch("/api/v1/billing/portal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ return_url: returnUrl }),
+    });
+    const data = await res.json();
+    if (res.ok && data.url) {
+      window.open(data.url, "_blank", "noopener,noreferrer");
+    } else {
+      const msg = data.message || "Could not open billing portal";
+      if (els.activationMessage) {
+        els.activationMessage.textContent = msg;
+        els.activationMessage.style.color = "#c00";
+      }
+    }
+  } catch (_) {
+    if (els.activationMessage) {
+      els.activationMessage.textContent = "Network error. Try again.";
+      els.activationMessage.style.color = "#c00";
+    }
+  }
+  if (els.subscriptionManageBtn) els.subscriptionManageBtn.disabled = false;
+}
+
+function canAddDeviceOrCreateShare() {
+  if (state.accessRole === "pending") return false;
+  if (state.licenseState === "revoked") return false;
+  return true;
+}
+
+function isTeamsEnabledByEntitlement() {
+  const ls = String(state.licenseState || "").toUpperCase().replace(/-/g, "_");
+  if (ls === "TRIAL" || ls === "TRIAL_ACTIVE") return true;
+  if (state.entitlements && typeof state.entitlements.teamEnabled === "boolean") {
+    return state.entitlements.teamEnabled;
+  }
+  const tier = String(state.licenseTier || "").toLowerCase();
+  return tier === "team" || tier === "teams";
+}
+
+function shouldShowTeamsMenu() {
+  if (state.entitlements?.uiTeasers && typeof state.entitlements.uiTeasers.showTeamsMenu === "boolean") {
+    return state.entitlements.uiTeasers.showTeamsMenu;
+  }
+  const tier = String(state.licenseTier || "").toLowerCase();
+  if (isTeamsEnabledByEntitlement() || tier === "pro") return true;
+  return tier === "free" || tier === "trial" || state.licenseState === "UNREGISTERED" || state.licenseState === "trial_active";
+}
+
+function showNetworkToast() {
+  const banner = document.getElementById("upload-banner");
+  if (!banner) return;
+  const textEl = banner.querySelector(".upload-banner-text");
+  if (!textEl) return;
+  banner.className = "upload-banner upload-banner-loading";
+  banner.classList.remove("upload-banner-hidden");
+  textEl.textContent = "Network changed - share links updated.";
+  setTimeout(() => {
+    banner.classList.add("upload-banner-hidden");
+  }, 3000);
+}
+
+async function fetchStatus() {
+  const res = await apiFetch("/api/status");
+  const data = await res.json();
+  const running = data.status === "running";
+  updateHeaderStatus(running);
+  els.storageLabel.textContent = data.storageLabel || "Local storage";
+  els.ownerMount.textContent = data.ownerBasePath;
+  if (data.lanBaseUrl) stateMeta.lanBaseUrl = data.lanBaseUrl;
+  await loadControlPlaneConfig();
+  if (data.shareLinkUrls) stateMeta.shareLinkUrls = data.shareLinkUrls;
+  const networkHash = data.lanBaseUrl || "";
+  if (stateMeta.lastNetworkHash && stateMeta.lastNetworkHash !== networkHash) {
+    showNetworkToast();
+  }
+  if (data.network_changed_at && data.network_changed_at !== stateMeta.lastNetworkChangedAt) {
+    stateMeta.lastNetworkChangedAt = data.network_changed_at;
+    showNetworkToast();
+  }
+  stateMeta.lastNetworkHash = networkHash;
+  if (els.mdnsHostname) els.mdnsHostname.textContent = data.mdns_hostname || "--";
+  if (els.mdnsIpFallback) {
+    const port = data.port || (data.lanBaseUrl && data.lanBaseUrl.match(/:(\d+)/)?.[1]) || "8787";
+    els.mdnsIpFallback.textContent = data.bestLanIp ? `IP fallback: ${data.bestLanIp}:${port}` : "--";
+  }
+  if (els.mdnsStatusBadge) {
+    const resolvable = !!data.mdns_resolvable;
+    els.mdnsStatusBadge.textContent = running ? (resolvable ? "Resolvable" : "IP fallback") : "Inactive";
+    els.mdnsStatusBadge.className = "badge " + (running ? (resolvable ? "badge-active" : "badge-private") : "badge-private");
+    els.mdnsStatusBadge.title = resolvable ? "mDNS hostname resolves" : "mDNS hostname not resolvable; use IP fallback";
+  }
+  if (els.mdnsOpenBtn) {
+    const port = data.port || "8787";
+    const resolvable = !!data.mdns_resolvable;
+    const openUrl = resolvable && data.mdns_hostname
+      ? `http://${data.mdns_hostname}:${port}/`
+      : data.lanBaseUrl || (data.bestLanIp ? `http://${data.bestLanIp}:${port}/` : null);
+    els.mdnsOpenBtn.href = openUrl || "#";
+    els.mdnsOpenBtn.style.display = openUrl && running ? "" : "none";
+  }
+  if (running && !data.mdns_resolvable && !stateMeta.mdnsUnresolvableToastShown) {
+    stateMeta.mdnsUnresolvableToastShown = true;
+    showUploadBanner("mDNS hostname not resolvable; using IP fallback.", "loading");
+    setTimeout(() => hideUploadBanner(), 3000);
+  }
+  if (els.networkDiscoveryHostname) els.networkDiscoveryHostname.textContent = data.mdns_hostname || "--";
+  if (els.networkDiscoveryIp) {
+    const port = data.port || (data.lanBaseUrl && data.lanBaseUrl.match(/:(\d+)/)?.[1]) || "8787";
+    els.networkDiscoveryIp.textContent = data.bestLanIp ? "IP fallback: " + data.bestLanIp + ":" + port : "--";
+  }
+  if (els.networkDiscoveryBadge) {
+    const resolvable = !!data.mdns_resolvable;
+    els.networkDiscoveryBadge.textContent = running ? (resolvable ? "Resolvable" : "IP fallback") : "Inactive";
+    els.networkDiscoveryBadge.className = "badge " + (running ? (resolvable ? "badge-active" : "badge-private") : "badge-private");
+    els.networkDiscoveryBadge.title = resolvable ? "Hostname resolves" : "Hostname not resolvable; use IP fallback";
+  }
+  if (els.networkDiscoveryOpenBtn) {
+    const port = data.port || "8787";
+    const resolvable = !!data.mdns_resolvable;
+    const openUrl = resolvable && data.mdns_hostname
+      ? "http://" + data.mdns_hostname + ":" + port + "/"
+      : data.lanBaseUrl || (data.bestLanIp ? "http://" + data.bestLanIp + ":" + port + "/" : null);
+    els.networkDiscoveryOpenBtn.href = openUrl || "#";
+    els.networkDiscoveryOpenBtn.style.display = openUrl && running ? "" : "none";
+  }
+  if (els.uptimeDisplay && Number.isFinite(data.uptime_seconds)) {
+    els.uptimeDisplay.textContent = `Uptime: ${formatUptime(data.uptime_seconds)}`;
+  }
+}
+
+function updateHeaderStatus(running) {
+  state.sharingEnabled = !!running;
+  els.status.innerHTML = `<span class="status-dot ${running ? "running" : "stopped"}" id="status-dot"></span> Status: ${running ? "Running" : "Stopped"}`;
+  els.statusDot = document.getElementById("status-dot");
+  if (els.toggleSharing) {
+    els.toggleSharing.textContent = running ? "Stop" : "Start";
+  }
+}
+
+async function loadRuntimeStatus() {
+  const res = await apiFetch("/api/v1/status", {}, true);
+  if (!res.ok) return;
+  const data = await res.json();
+  updateHeaderStatus(!!data.running);
+}
+
+async function loadFiles(pathValue) {
+  setRefreshLoading(els.refreshFiles, true);
+  try {
+    const res = await apiFetch(`/api/files?path=${encodeURIComponent(pathValue)}`);
+    const data = await res.json();
+    state.path = data.path;
+    state.rawItems = Array.isArray(data.items) ? data.items : [];
+    renderBreadcrumbs();
+    renderFiles();
+  } finally {
+    setRefreshLoading(els.refreshFiles, false);
+  }
 }
 
 async function loadShares() {
-  els.refreshShares.textContent = "Loading...";
-  els.refreshShares.disabled = true;
-  const res = await fetch("/api/shares");
-  state.shares = await res.json();
-  renderShares();
-  els.refreshShares.textContent = "Refresh";
-  els.refreshShares.disabled = false;
+  setRefreshLoading(els.refreshShares, true);
+  try {
+    const res = await apiFetch("/api/shares");
+    state.shares = await res.json();
+    renderShares();
+  } finally {
+    setRefreshLoading(els.refreshShares, false);
+  }
 }
+
+async function loadLogs() {
+  setRefreshLoading(els.refreshLogs, true);
+  try {
+    const res = await apiFetch("/api/v1/logs");
+    renderLogs(await res.json());
+  } finally {
+    setRefreshLoading(els.refreshLogs, false);
+  }
+}
+
+async function loadShareVisitSummary() {
+  if (!state.isAdmin) {
+    els.shareVisitTotal.textContent = "Total: host only";
+    els.shareVisitToday.textContent = "Today: host only";
+    return;
+  }
+  const res = await apiFetch("/api/v1/telemetry/summary");
+  const data = await res.json();
+  els.shareVisitTotal.textContent = `Total: ${Number(data.share_page_visits || 0)}`;
+  els.shareVisitToday.textContent = `Downloads: ${Number(data.total_downloads || 0)}`;
+}
+
+async function loadNetwork() {
+  renderNetwork();
+}
+
+async function loadTelemetrySettings() {
+  const res = await apiFetch("/api/v1/telemetry/settings");
+  const data = await res.json();
+  els.telemetryToggle.checked = !!data.enabled;
+}
+
+async function updateTelemetrySettings(enabled) {
+  await apiFetch("/api/v1/telemetry/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+async function loadTechnicalConfig() {
+  if (!els.technicalConfigContent || !isHostRole()) return;
+  try {
+    const res = await apiFetch("/api/v1/technical-config");
+    if (!res.ok) {
+      els.technicalConfigContent.textContent = "Available on host only.";
+      return;
+    }
+    const data = await res.json();
+    const lines = [
+      `Host ID: ${data.host_id || "-"}`,
+      `Local IPs: ${(data.local_ips || []).join(", ") || "-"}`,
+      `Port: ${data.port || "-"}`,
+      `App version: ${data.app_version || "-"}`,
+    ];
+    els.technicalConfigContent.textContent = lines.join("\n");
+  } catch (_err) {
+    els.technicalConfigContent.textContent = "Failed to load.";
+  }
+}
+
+async function loadNetworkSettings() {
+  const res = await apiFetch("/api/v1/network/settings");
+  const data = await res.json();
+  const currentName = String(data.display_name || "Join");
+  const normalized = currentName.toLowerCase().startsWith("join") ? currentName : `Join ${currentName}`.trim();
+  if (normalized !== currentName) {
+    await apiFetch("/api/v1/network/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ display_name: normalized }),
+    });
+  }
+  state.displayName = normalized;
+  updateHeaderProfile();
+  els.networkNameSuffix.value = displayNameToSuffix(normalized);
+  const visibility = !!data.network_visibility;
+  els.networkVisibility.checked = visibility;
+  if (els.networkVisibilityNetwork) els.networkVisibilityNetwork.checked = visibility;
+}
+
+async function loadNetwork() {
+  if (!els.networkList) return;
+  try {
+    const res = await apiFetch("/api/v1/network");
+    const peers = await res.json();
+    if (!peers.length) {
+      els.networkList.innerHTML = '<div class="value value-muted">No peers discovered. Use Manual Connect if mDNS is unavailable.</div>';
+    } else {
+    els.networkList.innerHTML = "";
+    peers.forEach((p) => {
+      const row = document.createElement("div");
+      row.className = "pending-item";
+      const addr = p.bestIp ? `${p.bestIp}:${p.port || 8787}` : (p.hostname || "-");
+      row.innerHTML = `
+        <div class="pending-item-meta">
+          <div class="item-title">${escapeHtml(p.display_name || "Unknown")}</div>
+          <div class="item-sub mono">${escapeHtml(addr)}</div>
+          <div class="item-sub">${p.hostname ? escapeHtml(p.hostname) + " · " : ""}${p.status || "online"} ${p.source === "manual" ? "(manual)" : ""}</div>
+        </div>
+      `;
+      if (p.bestIp) {
+        const openBtn = document.createElement("button");
+        openBtn.className = "button secondary";
+        openBtn.textContent = "Open";
+        openBtn.onclick = () => window.open(`http://${p.bestIp}:${p.port || 8787}`, "_blank");
+        row.appendChild(openBtn);
+      }
+      els.networkList.appendChild(row);
+    });
+    }
+  } catch (_) {
+    els.networkList.innerHTML = '<div class="value value-muted">Failed to load peers.</div>';
+  }
+  await loadConnectedUsers();
+}
+
+const stateNetwork = { searching: false, lastPeers: [] };
+
+async function loadConnectedUsers() {
+  if (!els.connectedUsersList || !isHostRole()) return;
+  try {
+    const res = await apiFetch("/api/v1/access/devices");
+    const devices = await res.json();
+    if (!devices.length) {
+      els.connectedUsersList.innerHTML = '<div class="value value-muted">No connected users yet.</div>';
+      return;
+    }
+    els.connectedUsersList.innerHTML = "";
+    devices.forEach((d) => {
+      const row = document.createElement("div");
+      row.className = "pending-item";
+      const lastSeen = d.last_seen_at ? new Date(d.last_seen_at).toLocaleString() : "-";
+      row.innerHTML = `
+        <div class="pending-item-meta">
+          <div class="item-title">${escapeHtml(d.device_name || "Unknown")}</div>
+          <div class="item-sub mono">${escapeHtml((d.device_id || "").slice(0, 12))}</div>
+          <div class="item-sub">Last seen: ${escapeHtml(lastSeen)}</div>
+        </div>
+      `;
+      const removeBtn = document.createElement("button");
+      removeBtn.className = "button danger";
+      removeBtn.textContent = "Remove";
+      removeBtn.onclick = async () => {
+        await apiFetch("/api/v1/access/devices/remove", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fingerprint: d.fingerprint }),
+        });
+        await loadConnectedUsers();
+        await loadApprovedDevices();
+        await loadNetwork();
+      };
+      row.appendChild(removeBtn);
+      els.connectedUsersList.appendChild(row);
+    });
+  } catch (_) {
+    if (els.connectedUsersList) els.connectedUsersList.innerHTML = '<div class="value value-muted">Failed to load.</div>';
+  }
+}
+
+async function discoverySearch() {
+  if (!els.networkList || stateNetwork.searching) return;
+  stateNetwork.searching = true;
+  if (els.networkSearchBtn) {
+    els.networkSearchBtn.disabled = true;
+    if (els.networkSearchBtnText) els.networkSearchBtnText.textContent = "Searching nearby devices…";
+  }
+  try {
+    const searchRes = await apiFetch("/api/v1/network/search?wait=4", { method: "POST" });
+    const peers = await searchRes.json();
+    stateNetwork.lastPeers = peers;
+    const approvedRes = isHostRole() ? await apiFetch("/api/v1/access/devices") : { ok: false };
+    const approvedDevices = approvedRes.ok ? await approvedRes.json() : [];
+    const approvedIds = new Set(approvedDevices.map((d) => d.device_id || d.fingerprint));
+    if (!peers.length) {
+      els.networkList.innerHTML = '<div class="network-empty-state"><div class="network-empty-title">No users found</div><div class="network-empty-sub">No nearby devices discovered. Try again or use Manual Connect.</div><button class="button secondary" id="network-try-again-btn">Try again</button></div>';
+      const tryBtn = document.getElementById("network-try-again-btn");
+      if (tryBtn) tryBtn.onclick = () => discoverySearch();
+    } else {
+      els.networkList.innerHTML = "";
+      peers.forEach((p) => {
+        const row = document.createElement("div");
+        row.className = "pending-item";
+        const friendlyName = p.display_name || p.displayName || "Unknown";
+        const shortId = (p.deviceId || "").replace(/^jc_|^dev_/i, "").slice(0, 8).toLowerCase() || "-";
+        const addr = p.bestIp ? p.bestIp + ":" + (p.port || 8787) : "-";
+        const status = approvedIds.has(p.deviceId) ? "Connected" : "Available";
+        row.innerHTML = `
+          <div class="pending-item-meta">
+            <div class="item-title">${escapeHtml(friendlyName)}</div>
+            <div class="item-sub mono">${escapeHtml(shortId)} · ${escapeHtml(addr)}</div>
+            <div class="item-sub">${status} ${p.source === "manual" ? "(manual)" : ""}</div>
+          </div>
+        `;
+        if (p.bestIp) {
+          const openBtn = document.createElement("button");
+          openBtn.className = "button secondary";
+          openBtn.textContent = "Open";
+          openBtn.onclick = () => window.open("http://" + p.bestIp + ":" + (p.port || 8787), "_blank");
+          row.appendChild(openBtn);
+        }
+        els.networkList.appendChild(row);
+      });
+    }
+    await loadConnectedUsers();
+  } catch (_) {
+    els.networkList.innerHTML = '<div class="value value-muted">Search failed. <button class="button secondary" onclick="discoverySearch()">Try again</button></div>';
+  } finally {
+    stateNetwork.searching = false;
+    if (els.networkSearchBtn) {
+      els.networkSearchBtn.disabled = false;
+      if (els.networkSearchBtnText) els.networkSearchBtnText.textContent = "Search";
+    }
+  }
+}
+
+const stateTeams = { teams: [], invites: [], currentTeamId: null, addMembersTeamId: null, addMembersSelected: new Set() };
+
+async function loadTeams() {
+  if (!els.teamsList) return;
+  if (!isTeamsEnabledByEntitlement()) {
+    els.teamsList.innerHTML = '<div class="value value-muted">Teams are available on the Teams plan. Upgrade to create and manage teams.</div>';
+    return;
+  }
+  try {
+    const res = await apiFetch("/api/v1/teams");
+    const data = await res.json();
+    stateTeams.teams = data.teams || [];
+    stateTeams.invites = data.invites || [];
+    renderTeams();
+  } catch (_) {
+    els.teamsList.innerHTML = '<div class="value value-muted">Failed to load teams.</div>';
+  }
+}
+
+function renderTeams() {
+  if (!els.teamsList) return;
+  if (stateTeams.currentTeamId) return;
+  els.teamsList.style.display = "";
+  if (els.teamsEmptyState) els.teamsEmptyState.style.display = "flex";
+  if (els.teamDetail) els.teamDetail.style.display = "none";
+  if (els.teamsLayout) els.teamsLayout.classList.remove("teams-has-team");
+  if (stateTeams.invites.length > 0) {
+    const inviteHtml = stateTeams.invites.map((i) => {
+      const teamName = i.teamName || stateTeams.teams.find((t) => t.teamId === i.teamId)?.teamName || "Unknown";
+      return `<div class="pending-item"><span>Invite to ${escapeHtml(teamName)}</span><button class="button secondary accept-invite" data-invite-id="${escapeHtml(i.inviteId)}">Accept</button></div>`;
+    }).join("");
+    els.teamsList.innerHTML = `<div class="label">Pending Invites</div>${inviteHtml}<div class="label" style="margin-top:12px">Your Teams</div>`;
+    els.teamsList.querySelectorAll(".accept-invite").forEach((btn) => {
+      btn.onclick = async () => {
+        await apiFetch(`/api/v1/teams/invites/${btn.dataset.inviteId}/accept`, { method: "POST" });
+        await loadTeams();
+      };
+    });
+  } else {
+    els.teamsList.innerHTML = '<div class="label">Your Teams</div>';
+  }
+  if (!stateTeams.teams.length) {
+    els.teamsList.innerHTML += '<div class="value value-muted">No teams yet. Create one to get started.</div>';
+    return;
+  }
+  stateTeams.teams.forEach((t) => {
+    const row = document.createElement("div");
+    row.className = "pending-item";
+    row.innerHTML = `<div class="item-title">${escapeHtml(t.teamName)}</div><div class="item-sub">${t.members?.length || 0} members</div>`;
+    const openBtn = document.createElement("button");
+    openBtn.className = "button secondary";
+    openBtn.textContent = "Open";
+    openBtn.onclick = () => showTeamDetail(t.teamId);
+    row.appendChild(openBtn);
+    els.teamsList.appendChild(row);
+  });
+}
+
+async function showTeamDetail(teamId) {
+  stateTeams.currentTeamId = teamId;
+  els.teamsList.style.display = "none";
+  if (els.teamsEmptyState) els.teamsEmptyState.style.display = "none";
+  if (els.teamDetail) els.teamDetail.style.display = "flex";
+  if (els.teamsLayout) els.teamsLayout.classList.add("teams-has-team");
+  const team = stateTeams.teams.find((t) => t.teamId === teamId);
+  if (els.teamDetailName) els.teamDetailName.textContent = team?.teamName || "Team";
+  await loadTeamMessages(teamId);
+}
+
+async function loadTeamMessages(teamId) {
+  if (!els.teamChatFeed) return;
+  try {
+    const res = await apiFetch(`/api/v1/teams/${teamId}/messages`);
+    const data = await res.json();
+    const messages = data.messages || [];
+    els.teamChatFeed.innerHTML = messages.map((m) => {
+      const text = m.type === "text" ? (m.payload?.text || "") : m.type === "file" ? `[File: ${m.payload?.filename || "?"}]` : m.type === "note" ? `[Note: ${m.payload?.text || ""}]` : "";
+      return `<div class="team-message"><span class="team-message-sender">${escapeHtml(m.senderDeviceId?.slice(0, 8) || "?")}</span>: ${escapeHtml(text)}</div>`;
+    }).join("") || '<div class="value value-muted">No messages yet.</div>';
+    els.teamChatFeed.scrollTop = els.teamChatFeed.scrollHeight;
+  } catch (_) {
+    els.teamChatFeed.innerHTML = '<div class="value value-muted">Failed to load messages.</div>';
+  }
+}
+
+async function sendTeamMessage() {
+  const teamId = stateTeams.currentTeamId;
+  if (!teamId || !els.teamMessageInput) return;
+  const text = els.teamMessageInput.value.trim();
+  if (!text) return;
+  els.teamMessageInput.value = "";
+  try {
+    await apiFetch("/api/v1/teams/message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teamId, type: "text", payload: { text } }),
+    });
+    await loadTeamMessages(teamId);
+  } catch (_) {}
+}
+
+async function inviteToTeam() {
+  const teamId = stateTeams.currentTeamId;
+  if (!teamId) return;
+  const networkRes = await apiFetch("/api/v1/network").catch(() => ({ json: () => [] }));
+  const peers = await (networkRes.ok ? networkRes.json() : []);
+  const team = stateTeams.teams.find((t) => t.teamId === teamId);
+  const existingIds = new Set(team?.members || []);
+  const candidates = peers.filter((p) => p.deviceId && !existingIds.has(p.deviceId));
+  if (!candidates.length) {
+    alert("No peers available to invite. Discover devices in the Network tab first.");
+    return;
+  }
+  const list = candidates.map((c, i) => `${i + 1}. ${c.display_name || c.displayName || c.deviceId} (${c.deviceId})`).join("\n");
+  const choice = prompt(`Enter number or device ID to invite:\n${list}`);
+  if (!choice) return;
+  const num = parseInt(choice, 10);
+  const peer = Number.isFinite(num) && num >= 1 && num <= candidates.length
+    ? candidates[num - 1]
+    : candidates.find((c) => c.deviceId === choice.trim() || (c.display_name || c.displayName) === choice.trim());
+  if (!peer) {
+    alert("Invalid selection.");
+    return;
+  }
+  try {
+    await apiFetch(`/api/v1/teams/${teamId}/invite`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toDeviceId: peer.deviceId }),
+    });
+    alert("Invite sent to " + (peer.display_name || peer.displayName || peer.deviceId) + ".");
+  } catch (e) {
+    alert("Failed to send invite.");
+  }
+}
+
+function openCreateTeamModal() {
+  if (els.createTeamModal) {
+    if (els.createTeamName) els.createTeamName.value = "";
+    if (els.createTeamDepartment) els.createTeamDepartment.value = "";
+    els.createTeamModal.classList.add("active");
+  }
+}
+
+function closeCreateTeamModal() {
+  if (els.createTeamModal) els.createTeamModal.classList.remove("active");
+}
+
+function openAddMembersModal(teamId) {
+  stateTeams.addMembersTeamId = teamId;
+  if (els.addMembersModal) {
+    els.addMembersModal.classList.add("active");
+    renderAddMembersList(teamId);
+  }
+}
+
+function closeAddMembersModal() {
+  stateTeams.addMembersTeamId = null;
+  if (els.addMembersModal) els.addMembersModal.classList.remove("active");
+}
+
+async function renderAddMembersList(teamId) {
+  if (!els.addMembersList) return;
+  const team = stateTeams.teams.find((t) => t.teamId === teamId);
+  const existingIds = new Set(team?.members || []);
+  stateTeams.addMembersSelected = new Set();
+  try {
+    const networkRes = await apiFetch("/api/v1/network");
+    const peers = await networkRes.json();
+    const candidates = peers.filter((p) => p.deviceId && p.bestIp && !existingIds.has(p.deviceId)).slice(0, 5);
+    if (!candidates.length) {
+      els.addMembersList.innerHTML = '<div class="value value-muted">No connected users available. Connect devices in the Network tab first.</div>';
+      return;
+    }
+    els.addMembersList.innerHTML = candidates.map((c) => {
+      const name = c.display_name || c.displayName || c.deviceId?.slice(0, 8) || "Unknown";
+      return `<label class="pending-item" style="cursor:pointer"><input type="checkbox" data-device-id="${escapeHtml(c.deviceId)}" /> ${escapeHtml(name)} (${escapeHtml((c.deviceId || "").slice(0, 12))})</label>`;
+    }).join("");
+    els.addMembersList.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+      cb.onchange = () => {
+        if (cb.checked) stateTeams.addMembersSelected.add(cb.dataset.deviceId);
+        else stateTeams.addMembersSelected.delete(cb.dataset.deviceId);
+      };
+    });
+  } catch (_) {
+    els.addMembersList.innerHTML = '<div class="value value-muted">Failed to load.</div>';
+  }
+}
+
+async function createTeam() {
+  if (!isTeamsEnabledByEntitlement()) {
+    showUploadBanner("Upgrade to Teams to create up to 2 teams.", "error");
+    setTimeout(hideUploadBanner, 2400);
+    return;
+  }
+  openCreateTeamModal();
+}
+
+async function submitCreateTeam() {
+  if (!isTeamsEnabledByEntitlement()) {
+    showUploadBanner("Upgrade to Teams to create up to 2 teams.", "error");
+    setTimeout(hideUploadBanner, 2400);
+    return;
+  }
+  const name = els.createTeamName?.value?.trim();
+  const department = els.createTeamDepartment?.value?.trim();
+  if (!name) {
+    showUploadBanner("Team name is required.", "error");
+    setTimeout(hideUploadBanner, 2000);
+    return;
+  }
+  try {
+    const res = await apiFetch("/api/v1/teams", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teamName: name, department: department || undefined }),
+    });
+    const team = await res.json();
+    closeCreateTeamModal();
+    await loadTeams();
+    if (team && team.teamId) openAddMembersModal(team.teamId);
+  } catch (_) {
+    showUploadBanner("Failed to create team.");
+    setTimeout(hideUploadBanner, 2000);
+  }
+}
+
+async function sendAddMembersInvites() {
+  const teamId = stateTeams.addMembersTeamId;
+  if (!teamId) return;
+  const selected = stateTeams.addMembersSelected ? Array.from(stateTeams.addMembersSelected) : [];
+  if (!selected.length) {
+    closeAddMembersModal();
+    return;
+  }
+  for (const toDeviceId of selected) {
+    try {
+      await apiFetch(`/api/v1/teams/${teamId}/invite`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ toDeviceId }),
+      });
+    } catch (_) {}
+  }
+  showUploadBanner("Invites sent to " + selected.length + " member(s).", "success");
+  setTimeout(hideUploadBanner, 2500);
+  closeAddMembersModal();
+  await loadTeams();
+}
+
+async function manualConnect() {
+  if (!els.manualConnectBtn || !els.manualConnectIp) return;
+  const ip = els.manualConnectIp.value.trim();
+  const port = parseInt(els.manualConnectPort?.value || "8787", 10) || 8787;
+  if (!ip) {
+    if (els.manualConnectStatus) els.manualConnectStatus.textContent = "Enter IP address.";
+    return;
+  }
+  els.manualConnectBtn.disabled = true;
+  if (els.manualConnectStatus) els.manualConnectStatus.textContent = "Connecting...";
+  try {
+    const res = await apiFetch("/api/v1/network/manual-connect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ip, port }),
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      if (els.manualConnectStatus) els.manualConnectStatus.textContent = `Added ${data.displayName || data.deviceId}.`;
+      await loadNetwork();
+    } else {
+      if (els.manualConnectStatus) els.manualConnectStatus.textContent = data.message || data.error || "Connection failed.";
+    }
+  } catch (_) {
+    if (els.manualConnectStatus) els.manualConnectStatus.textContent = "Connection failed.";
+  } finally {
+    els.manualConnectBtn.disabled = false;
+  }
+}
+
+async function saveNetworkName() {
+  const displayName = buildDisplayNameFromSuffix(els.networkNameSuffix.value);
+  const res = await apiFetch("/api/v1/network/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ display_name: displayName }),
+  });
+  const data = await res.json();
+  const savedName = String(data.display_name || "Join");
+  state.displayName = savedName;
+  updateHeaderProfile();
+  els.networkNameSuffix.value = displayNameToSuffix(savedName);
+}
+
+const stateShare = { lastShareUrl: null, lastShareId: null, lastPath: null };
 
 function openShareModal(pathValue) {
   els.shareResult.textContent = "";
-  els.copyShare.style.display = "none";
+  if (els.shareExtraActions) els.shareExtraActions.style.display = "none";
+  if (els.copyShare) els.copyShare.style.display = "none";
   els.sharePath.value = pathValue;
+  const needActivation = !canAddDeviceOrCreateShare();
+  if (els.activationBlock) {
+    els.activationBlock.style.display = needActivation ? "block" : "none";
+  }
+  if (els.activationMessage) els.activationMessage.textContent = "";
+  const upgradeUrl = (state.upgradeUrl || "").trim();
+  if (els.activationUpgradeWrap) {
+    els.activationUpgradeWrap.style.display = needActivation && upgradeUrl ? "block" : "none";
+  }
+  if (els.activationUpgradeLink && upgradeUrl) {
+    els.activationUpgradeLink.href = upgradeUrl;
+  }
   els.shareModal.classList.add("active");
 }
 
@@ -676,158 +2276,1396 @@ function closeShareModal() {
   els.shareModal.classList.remove("active");
 }
 
-async function createShare() {
-  const pathValue = els.sharePath.value;
-  const selectedScope = Array.from(els.shareScope).find((el) => el.checked)?.value || "local";
-  if (selectedScope === "public" && !stateMeta.publicActive) {
-    const confirmEnable = confirm("Public access is required. Enable now?");
-    if (!confirmEnable) return;
-    els.shareResult.textContent = "Enabling public access. This may take a few seconds.";
-    await togglePublicAccess();
-    const ready = await waitForPublicAccess(10000);
-    if (!ready) {
-      els.shareResult.textContent = "Public sharing is unavailable on this system";
+function setActivationMessage(msg, isError) {
+  if (!els.activationMessage) return;
+  els.activationMessage.textContent = msg || "";
+  els.activationMessage.style.color = isError ? "#c00" : "";
+}
+
+async function activationRegister() {
+  const email = (els.activationEmail && els.activationEmail.value || "").trim();
+  const password = els.activationPassword && els.activationPassword.value;
+  if (!email || !password) {
+    setActivationMessage("Enter email and password.", true);
+    return;
+  }
+  setActivationMessage("Registering…");
+  try {
+    const res = await apiFetch("/api/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setActivationMessage(data.message || "Registration failed", true);
       return;
     }
+    setActivationMessage("Registered. Sign in on the web to link this device.");
+  } catch (e) {
+    setActivationMessage("Network error. Try again.", true);
   }
-  const permission = els.sharePermission.value;
+}
+
+async function activationLogin() {
+  const email = (els.activationEmail && els.activationEmail.value || "").trim();
+  const password = els.activationPassword && els.activationPassword.value;
+  if (!email || !password) {
+    setActivationMessage("Enter email and password.", true);
+    return;
+  }
+  setActivationMessage("Logging in…");
+  try {
+    const res = await apiFetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setActivationMessage(data.message || "Login failed", true);
+      return;
+    }
+    setActivationMessage("Logged in. Sign in on the web to link this device.");
+  } catch (e) {
+    setActivationMessage("Network error. Try again.", true);
+  }
+}
+
+async function activationActivate() {
+  setActivationMessage("Activating…");
+  try {
+    const res = await apiFetch("/api/license/activate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setActivationMessage(data.message || "Activation failed", true);
+      return;
+    }
+    setActivationMessage("Device activated. You can create shares now.");
+    await loadControlPlaneConfig();
+    if (els.activationBlock) els.activationBlock.style.display = "none";
+  } catch (e) {
+    setActivationMessage("Network error. Try again.", true);
+  }
+}
+
+async function createShare() {
+  if (!canAddDeviceOrCreateShare()) {
+    if (els.shareResult) {
+      els.shareResult.textContent = state.activationRequired || state.licenseState === "UNREGISTERED"
+        ? "Activate your account to create shares. You can still browse and use existing shares."
+        : "License expired. You can still use existing shares and LAN transfer.";
+    }
+    return;
+  }
+  const pathValue = els.sharePath.value;
   const ttlSelection = els.shareTtl.value;
   if (ttlSelection === "custom" && !els.shareTtlCustom.value) {
     els.shareResult.textContent = "Enter expiry in minutes.";
     return;
   }
-  const ttlMs =
-    ttlSelection === "custom"
-      ? Number(els.shareTtlCustom.value) * 60 * 1000
-      : Number(ttlSelection);
-
-  const res = await fetch("/api/share", {
+  const ttlMs = ttlSelection === "custom" ? Number(els.shareTtlCustom.value) * 60 * 1000 : Number(ttlSelection);
+  const res = await apiFetch("/api/share", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: pathValue, permission, ttlMs, scope: selectedScope }),
+    body: JSON.stringify({ path: pathValue, permission: els.sharePermission.value, ttlMs, scope: "local" }),
   });
   const data = await res.json();
   if (!res.ok) {
     els.shareResult.textContent = data.error || "Failed to create share";
     return;
   }
-  const baseUrl =
-    selectedScope === "public" && stateMeta.publicActive
-      ? stateMeta.publicUrl
-      : stateMeta.lanBaseUrl;
-  const shareUrl = `${baseUrl}/share/${data.shareId}`;
-  els.shareResult.textContent = `Share created: ${shareUrl}`;
-  els.copyShare.style.display = "inline-flex";
-  els.copyShare.onclick = async () => {
-    await navigator.clipboard.writeText(shareUrl);
-    els.copyShare.textContent = "Copied!";
-    setTimeout(() => (els.copyShare.textContent = "Copy Link"), 1500);
-  };
+  const shareUrl = data.urlIp || data.url || `${stateMeta.lanBaseUrl}/share/${data.shareId}`;
+  stateShare.lastShareUrl = shareUrl;
+  stateShare.lastShareId = data.shareId;
+  stateShare.lastPath = pathValue;
+  els.shareResult.innerHTML = `
+    <div>Share created.</div>
+    <div class="share-link-box share-url-secondary">${escapeHtml(shareUrl)}</div>
+  `;
+  if (els.shareExtraActions) els.shareExtraActions.style.display = "flex";
+  if (els.copyShare) {
+    els.copyShare.style.display = "inline-flex";
+    els.copyShare.onclick = async () => {
+      const ok = await copyToClipboard(shareUrl);
+      if (ok) {
+        els.copyShare.textContent = "Copied!";
+        setTimeout(() => (els.copyShare.textContent = "Copy Link"), 2000);
+      } else {
+        showCopyFallback(shareUrl, els.shareResult);
+      }
+    };
+  }
   await loadShares();
   await loadLogs();
 }
 
 async function revokeShare(shareId) {
   state.shares = state.shares.filter((share) => share.shareId !== shareId);
+  state.selectedShares.delete(shareId);
   renderShares();
-  await fetch(`/api/share/${shareId}`, { method: "DELETE" });
+  await apiFetch(`/api/share/${shareId}`, { method: "DELETE" });
   await loadShares();
   await loadLogs();
 }
 
-async function waitForPublicAccess(timeoutMs) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    await refreshPublicAccess();
-    if (stateMeta.publicActive) return true;
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  return false;
+async function revokeSelectedShares() {
+  const tokens = Array.from(state.selectedShares);
+  if (!tokens.length) return;
+  await apiFetch("/api/v1/shares/revoke", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tokens }),
+  });
+  state.selectedShares.clear();
+  await loadShares();
+  await loadLogs();
 }
 
-async function refreshPublicAccess() {
-  const res = await fetch("/api/public-access/status");
-  const data = await res.json();
-  stateMeta.publicActive = data.status === "active";
-  stateMeta.publicUrl = data.publicUrl || null;
-  if (data.status === "active") {
-    els.publicStatus.textContent = "Public access enabled";
-    els.publicUrl.textContent = data.publicUrl;
-    els.publicReason.textContent = "";
-    els.togglePublic.textContent = "Disable Public Sharing";
-    els.togglePublic.disabled = false;
-  } else if (data.status === "starting" || data.status === "restarting") {
-    els.publicStatus.textContent = "Starting public access…";
-    els.publicUrl.textContent = "--";
-    els.publicReason.textContent = "";
-    els.togglePublic.textContent = "Starting…";
-    els.togglePublic.disabled = true;
-  } else if (data.status === "stopping") {
-    els.publicStatus.textContent = "Stopping public access…";
-    els.publicUrl.textContent = "--";
-    els.publicReason.textContent = "";
-    els.togglePublic.textContent = "Stopping…";
-    els.togglePublic.disabled = true;
-  } else {
-    els.publicStatus.textContent =
-      data.status === "failed" || data.status === "error"
-        ? "Public access unavailable"
-        : "Public access disabled";
-    els.publicUrl.textContent = "--";
-    els.publicReason.textContent = data.reason ? `Reason: ${data.reason}` : "";
-    els.togglePublic.textContent = "Enable Public Sharing";
-    els.togglePublic.disabled = false;
+async function revokeAllShares() {
+  await apiFetch("/api/v1/shares/revoke_all", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  state.selectedShares.clear();
+  await loadShares();
+  await loadLogs();
+}
+
+function openShareTeamPicker() {
+  if (!stateShare.lastShareUrl) {
+    showUploadBanner("Create a share first.");
+    setTimeout(hideUploadBanner, 2000);
+    return;
+  }
+  if (!stateTeams.teams.length) {
+    showUploadBanner("No teams found. Create a team first.", "error");
+    setTimeout(hideUploadBanner, 3000);
+    return;
+  }
+  if (!els.shareTeamPickerModal || !els.shareTeamPickerList) return;
+  els.shareTeamPickerList.innerHTML = stateTeams.teams.map((t) => {
+    const count = t.members?.length || 0;
+    return `<button class="button secondary share-team-pick-btn" data-team-id="${escapeHtml(t.teamId)}">
+      <span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg></span>
+      <div style="text-align:left;flex:1"><strong>${escapeHtml(t.teamName)}</strong><div class="item-sub" style="margin-top:2px">${count} member${count !== 1 ? "s" : ""}</div></div>
+    </button>`;
+  }).join("");
+  els.shareTeamPickerList.querySelectorAll(".share-team-pick-btn").forEach((btn) => {
+    btn.onclick = async () => {
+      const teamId = btn.dataset.teamId;
+      if (els.shareTeamPickerModal) els.shareTeamPickerModal.classList.remove("active");
+      await postShareToTeam(teamId);
+    };
+  });
+  els.shareTeamPickerModal.classList.add("active");
+}
+
+function closeShareTeamPicker() {
+  if (els.shareTeamPickerModal) els.shareTeamPickerModal.classList.remove("active");
+}
+
+async function shareWithTeam() {
+  openShareTeamPicker();
+}
+
+async function postShareToTeam(teamId) {
+  const filename = stateShare.lastPath?.split("/").filter(Boolean).pop() || "file";
+  try {
+    await apiFetch("/api/v1/teams/message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        teamId,
+        type: "file",
+        payload: { shareUrl: stateShare.lastShareUrl, filename, shareId: stateShare.lastShareId },
+      }),
+    });
+    showUploadBanner("Shared with team.", "success");
+    setTimeout(hideUploadBanner, 2000);
+  } catch (err) {
+    showUploadBanner(err.message || "Failed to share with team.");
+    setTimeout(hideUploadBanner, 2500);
   }
 }
 
-async function togglePublicAccess() {
-  if (stateMeta.publicActive) {
-    els.togglePublic.disabled = true;
-    await fetch("/api/public-access/stop", { method: "POST" });
-  } else {
-    els.togglePublic.disabled = true;
-    const response = await fetch("/api/public-access/start", { method: "POST" });
-    const data = await response.json();
-    if (data.status === "failed" || data.status === "error") {
-      alert(data.message || "Public sharing is unavailable on this system");
+async function shareWithUser() {
+  if (!stateShare.lastShareUrl) {
+    showUploadBanner("Create a share first.");
+    setTimeout(hideUploadBanner, 2000);
+    return;
+  }
+  try {
+    const networkRes = await apiFetch("/api/v1/network");
+    const peers = await networkRes.json();
+    const candidates = peers.filter((p) => p.deviceId && p.bestIp);
+    if (!candidates.length) {
+      showUploadBanner("No users available. Connect devices in Network first.");
+      setTimeout(hideUploadBanner, 2000);
+      return;
+    }
+    const list = candidates.map((c, i) => `${i + 1}. ${c.display_name || c.displayName || c.deviceId}`).join("\n");
+    const choice = prompt(`Select user to share with:\n${list}`);
+    if (!choice) return;
+    const num = parseInt(choice, 10);
+    const peer = Number.isFinite(num) && num >= 1 && num <= candidates.length
+      ? candidates[num - 1]
+      : candidates.find((c) => (c.display_name || c.displayName) === choice.trim());
+    if (!peer) {
+      showUploadBanner("User not found.");
+      setTimeout(hideUploadBanner, 2000);
+      return;
+    }
+    const filename = stateShare.lastPath?.split("/").filter(Boolean).pop() || "file";
+    const displayName = els.headerDisplayName?.textContent?.trim() || getSuggestedDeviceName();
+    const baseUrl = `http://${peer.bestIp}:${peer.port || 8787}`;
+    const res = await fetch(`${baseUrl}/api/v1/share/notify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        fromDeviceId: stateMeta.fingerprint ? `dev_${stateMeta.fingerprint.slice(0, 16)}` : "host",
+        fromDisplayName: displayName,
+        shareUrl: stateShare.lastShareUrl,
+        filename,
+      }),
+    });
+    if (res.ok) {
+      showUploadBanner("Share sent to " + (peer.display_name || peer.displayName || "user") + ".", "success");
+    } else {
+      showUploadBanner("Failed to send. User may be offline.");
+    }
+    setTimeout(hideUploadBanner, 2000);
+  } catch (err) {
+    showUploadBanner(err.message || "Failed to share.");
+    setTimeout(hideUploadBanner, 2500);
+  }
+}
+
+function openStopModal() {
+  if (els.stopModal) {
+    els.stopModal.classList.add("active");
+  }
+}
+
+function closeStopModal() {
+  if (els.stopModal) {
+    els.stopModal.classList.remove("active");
+  }
+}
+
+async function stopSharing() {
+  await apiFetch("/api/v1/sharing/stop", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  closeStopModal();
+  await loadRuntimeStatus();
+  await loadLogs();
+}
+
+async function startSharing() {
+  await apiFetch("/api/v1/sharing/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  await loadRuntimeStatus();
+  await loadLogs();
+}
+
+async function addFileViaNativePicker() {
+  if (!window.joincloud || !window.joincloud.selectFiles) {
+    if (els.uploadInput && !els.uploadInput.disabled) {
+      els.uploadInput.click();
+    }
+    return;
+  }
+  if (isRemoteRole() && state.deviceFolderRel && !isInMyFolder(state.path)) {
+    await loadFiles(state.deviceFolderRel);
+  }
+  const selectedPaths = await window.joincloud.selectFiles();
+  if (!selectedPaths || !selectedPaths.length) return;
+  const importTarget = state.path;
+  await apiFetch("/api/v1/files/import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: importTarget, sourcePaths: selectedPaths }),
+  });
+  await loadFiles(importTarget);
+  await loadLogs();
+}
+
+async function uploadFiles(files) {
+  if (!files || files.length === 0) return;
+  const fileList = Array.from(files);
+  const count = fileList.length;
+  const label = count === 1 ? fileList[0].name : `${count} files`;
+  showUploadBanner(`Uploading ${label}...`, "loading");
+
+  const formData = new FormData();
+  fileList.forEach((file) => formData.append("files", file));
+  const uploadPath = state.path;
+  formData.append("path", uploadPath);
+
+  try {
+    const res = await apiFetch("/api/upload", { method: "POST", body: formData });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const reason = payload.error || "Upload failed.";
+      showUploadBanner(reason, "error");
+      if (els.uploadScopeHint) {
+        els.uploadScopeHint.textContent = reason;
+      }
+      return;
+    }
+    const savedTo = String(payload.saved_to || uploadPath || "/");
+    showUploadBanner("Upload complete", "success");
+    setTimeout(hideUploadBanner, 2500);
+    await loadFiles(savedTo);
+    await loadLogs();
+  } catch (err) {
+    showUploadBanner(err.message || "Upload failed", "error");
+    if (els.uploadScopeHint) {
+      els.uploadScopeHint.textContent = err.message || "Upload failed";
     }
   }
-  await refreshPublicAccess();
-  await loadShares();
-  els.togglePublic.disabled = false;
+}
+
+async function loadPendingAccessRequests() {
+  if (!state.isAdmin) {
+    els.pendingAccessCount.textContent = "0";
+    els.pendingAccessList.innerHTML = '<div class="value value-muted">Available only on the host machine.</div>';
+    if (els.pendingBadge) els.pendingBadge.style.display = "none";
+    return;
+  }
+  const res = await apiFetch("/api/v1/access/pending");
+  const pending = await res.json();
+  els.pendingAccessCount.textContent = String(pending.length);
+  if (els.pendingBadge) {
+    if (pending.length > 0) {
+      els.pendingBadge.style.display = "inline-flex";
+      els.pendingBadge.textContent = `${pending.length} Pending`;
+    } else {
+      els.pendingBadge.style.display = "none";
+    }
+  }
+  if (pending.length > stateMeta.lastPendingCount && document.visibilityState === "visible") {
+    try {
+      if ("Notification" in window) {
+        if (Notification.permission === "granted") {
+          new Notification("JoinCloud", {
+            body: `${pending.length} device request(s) pending approval.`,
+          });
+        } else if (Notification.permission === "default") {
+          Notification.requestPermission().then(() => {});
+        }
+      }
+    } catch (_error) {
+      // ignore notification errors
+    }
+  }
+  stateMeta.lastPendingCount = pending.length;
+  if (!pending.length) {
+    els.pendingAccessList.innerHTML = '<div class="value value-muted">No pending requests.</div>';
+    return;
+  }
+  els.pendingAccessList.innerHTML = "";
+  pending.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "pending-item";
+    row.innerHTML = `
+      <div class="pending-item-meta">
+        <div class="item-title">${item.device_name || "Unknown Device"}</div>
+        <div class="item-sub mono">${item.fingerprint}</div>
+        <div class="item-sub">${new Date(item.created_at).toLocaleString()}</div>
+      </div>
+    `;
+    const approveBtn = document.createElement("button");
+    approveBtn.className = "button";
+    const canApprove = canAddDeviceOrCreateShare();
+    approveBtn.disabled = !canApprove;
+    approveBtn.textContent = canApprove ? "Approve" : (state.licenseState === "expired" ? "License expired" : "Activate required");
+    approveBtn.onclick = async () => {
+      if (!canAddDeviceOrCreateShare()) return;
+      await apiFetch("/api/v1/access/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request_id: item.request_id }),
+      });
+      await loadPendingAccessRequests();
+    };
+    const denyBtn = document.createElement("button");
+    denyBtn.className = "button secondary";
+    denyBtn.textContent = "Deny";
+    denyBtn.onclick = async () => {
+      await apiFetch("/api/v1/access/deny", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request_id: item.request_id }),
+      });
+      await loadPendingAccessRequests();
+    };
+    row.appendChild(approveBtn);
+    row.appendChild(denyBtn);
+    els.pendingAccessList.appendChild(row);
+  });
+}
+
+async function loadApprovedDevices() {
+  if (!state.isAdmin) {
+    els.approvedDevicesList.innerHTML = '<div class="value value-muted">Devices management is available on the host machine only.</div>';
+    return;
+  }
+  setRefreshLoading(els.refreshDevices, true);
+  try {
+    const res = await apiFetch("/api/v1/access/devices");
+    const devices = await res.json();
+  if (!devices.length) {
+    els.approvedDevicesList.innerHTML = '<div class="value value-muted">No approved devices.</div>';
+    return;
+  }
+  els.approvedDevicesList.innerHTML = "";
+  devices.forEach((device) => {
+    const row = document.createElement("div");
+    row.className = "pending-item";
+    row.innerHTML = `
+      <div class="pending-item-meta">
+        <div class="item-title">${device.device_name || "Unknown Device"}</div>
+        <div class="item-sub mono" title="${device.fingerprint}">${shortenFingerprint(device.fingerprint)}</div>
+        <div class="item-sub mono">Folder: ${device.device_folder_rel || "-"}</div>
+        <div class="item-sub">Approved: ${device.approved_at ? new Date(device.approved_at).toLocaleString() : "-"}</div>
+        <div class="item-sub">Last seen: ${device.last_seen_at ? new Date(device.last_seen_at).toLocaleString() : "Never"}</div>
+      </div>
+    `;
+    if (device.device_folder_rel) {
+      const openFolderBtn = document.createElement("button");
+      openFolderBtn.className = "button secondary";
+      openFolderBtn.textContent = "Open Device Folder";
+      openFolderBtn.onclick = async () => {
+        setActiveSection("files");
+        await loadFiles(device.device_folder_rel);
+      };
+      row.appendChild(openFolderBtn);
+    }
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "button danger";
+    removeBtn.textContent = "Remove";
+    removeBtn.onclick = async () => {
+      await apiFetch("/api/v1/access/devices/remove", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fingerprint: device.fingerprint }),
+      });
+      await loadApprovedDevices();
+      await loadPendingAccessRequests();
+    };
+    row.appendChild(removeBtn);
+    els.approvedDevicesList.appendChild(row);
+  });
+  } finally {
+    setRefreshLoading(els.refreshDevices, false);
+  }
+}
+
+async function loadActivitySummary() {
+  if (!state.isAdmin) {
+    if (els.activitySummary) els.activitySummary.textContent = "Host-only dashboard.";
+    return;
+  }
+  setRefreshLoading(els.refreshActivity, true);
+  try {
+  const [activityRes, storageRes] = await Promise.all([
+    apiFetch("/api/v1/activity/summary"),
+    apiFetch("/api/storage"),
+  ]);
+  const data = await activityRes.json();
+  const storage = await storageRes.json();
+  const telemetry = data.telemetry || {};
+  const devices = Array.isArray(data.devices) ? data.devices : [];
+  const uploadsFromDevices = devices.reduce((sum, device) => sum + Number(device.uploads || 0), 0);
+  const downloadsFromDevices = devices.reduce((sum, device) => sum + Number(device.downloads || 0), 0);
+  const activeSince = Date.now() - 24 * 60 * 60 * 1000;
+  const active24h = devices.filter((device) => {
+    const ts = device.last_seen_at ? new Date(device.last_seen_at).getTime() : 0;
+    return ts > activeSince;
+  }).length;
+  const sharesCreated = Number(telemetry.total_shares_created || 0);
+  const shareDownloads = Number(telemetry.total_downloads || 0);
+  const totalUploads = Number(telemetry.total_uploads || 0) || uploadsFromDevices;
+  const totalDownloads = Math.max(downloadsFromDevices, shareDownloads);
+  const connectedDevices = Number(data.connected_devices || devices.length || 0);
+  const storageUsed = Number(storage.usedBytes || 0);
+
+  if (els.metricTotalUploads) els.metricTotalUploads.textContent = String(totalUploads);
+  if (els.metricTotalDownloads) els.metricTotalDownloads.textContent = String(totalDownloads);
+  if (els.metricSharesCreated) els.metricSharesCreated.textContent = String(sharesCreated);
+  if (els.metricConnectedDevices) els.metricConnectedDevices.textContent = String(connectedDevices);
+  if (els.metricStorageUsed) els.metricStorageUsed.textContent = formatBytes(storageUsed);
+  if (els.metricShareDownloads) els.metricShareDownloads.textContent = String(shareDownloads);
+  if (els.activitySummary) {
+    els.activitySummary.textContent = `Pending requests: ${Number(data.pending_count || 0)} | Active (24h): ${active24h} devices`;
+  }
+  drawActivityChart([
+    { label: "Uploads", value: totalUploads },
+    { label: "Downloads", value: totalDownloads },
+    { label: "Shares", value: sharesCreated },
+    { label: "Devices", value: connectedDevices },
+    { label: "Share DL", value: shareDownloads },
+  ]);
+  } finally {
+    setRefreshLoading(els.refreshActivity, false);
+  }
+}
+
+function showToastBanner(text, targetRoute) {
+  const el = document.getElementById("notification-toast");
+  if (!el) return;
+  el.textContent = text;
+  el.dataset.targetRoute = targetRoute || "";
+  el.classList.remove("notification-toast-hidden");
+  el.setAttribute("aria-hidden", "false");
+  el.onclick = () => {
+    if (targetRoute) {
+      setActiveSection(targetRoute.startsWith("teams") ? "teams" : targetRoute);
+    }
+    el.classList.add("notification-toast-hidden");
+  };
+  setTimeout(() => {
+    el.classList.add("notification-toast-hidden");
+    el.setAttribute("aria-hidden", "true");
+  }, 4000);
+}
+
+function updateMuteButton() {
+  if (!els.muteIcon) return;
+  els.muteIcon.textContent = stateMeta.notificationsMuted ? "\uD83D\uDD15" : "\uD83D\uDD14";
+  if (els.muteNotificationsBtn) {
+    els.muteNotificationsBtn.title = stateMeta.notificationsMuted ? "Unmute notifications" : "Mute notifications";
+  }
+}
+
+async function loadNotifications() {
+  if (!els.notificationsList) return;
+  try {
+    const res = await apiFetch("/api/v1/notifications", {}, true);
+    if (!res.ok) return;
+    const data = await res.json();
+    const list = data.notifications || [];
+    const unreadCount = data.unreadCount ?? list.filter((n) => !n.read).length;
+    if (els.notificationsUnreadBadge) {
+      els.notificationsUnreadBadge.textContent = String(unreadCount);
+      els.notificationsUnreadBadge.style.display = unreadCount > 0 ? "inline-flex" : "none";
+    }
+    const knownIds = new Set(stateMeta.lastNotificationIds);
+    for (const n of list) {
+      if (!knownIds.has(n.id) && !n.read && document.visibilityState === "visible" && !stateMeta.notificationsMuted) {
+        showToastBanner((n.title || "") + (n.body ? ": " + n.body : ""), n.targetRoute);
+      }
+      knownIds.add(n.id);
+    }
+    stateMeta.lastNotificationIds = new Set(list.slice(0, 20).map((x) => x.id));
+    stateMeta.unreadTeamIds = new Set(list.filter((n) => !n.read && n.teamId).map((n) => n.teamId));
+    if (!list.length) {
+      els.notificationsList.innerHTML = '<div class="value value-muted">No notifications.</div>';
+      return;
+    }
+    els.notificationsList.innerHTML = list.map((n) =>
+      `<div class="pending-item notification-item ${n.read ? "" : "notification-unread"}" data-id="${escapeHtml(n.id)}">
+        <div class="pending-item-meta">
+          <div class="item-title">${escapeHtml(n.title || "")}</div>
+          ${n.body ? "<div class=\"item-sub\">" + escapeHtml(n.body) + "</div>" : ""}
+          <div class="item-sub value-muted" style="font-size:11px">${new Date(n.timestamp).toLocaleString()}</div>
+        </div>
+        <button class="button ghost button-compact notification-delete" data-id="${escapeHtml(n.id)}" title="Delete">\u2715</button>
+      </div>`
+    ).join("");
+    els.notificationsList.querySelectorAll(".notification-delete").forEach((btn) => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await apiFetch("/api/v1/notifications/" + btn.dataset.id, { method: "DELETE" });
+        await loadNotifications();
+      });
+    });
+  } catch (_) {
+    if (els.notificationsList) els.notificationsList.innerHTML = '<div class="value value-muted">Failed to load.</div>';
+  }
+}
+
+async function pollAccessStatus(requestId) {
+  const res = await apiFetch(`/api/v1/access/status?request_id=${encodeURIComponent(requestId)}`, {}, true);
+  if (!res.ok) return;
+  const data = await res.json();
+  if (data.status === "approved" && data.session_token) {
+    localStorage.setItem("joincloud:session-token", data.session_token);
+    stateMeta.sessionToken = data.session_token;
+    localStorage.removeItem("joincloud:request-id");
+    await bootstrapApp();
+  } else if (data.status === "denied") {
+    localStorage.removeItem("joincloud:request-id");
+    state.requestId = null;
+    showAccessGate("Request denied by admin.");
+  } else {
+    showAccessGate("Waiting for admin approval...");
+  }
+}
+
+async function requestAccessApproval() {
+  const deviceName = String(els.accessDeviceNameInput?.value || "").trim() || getSuggestedDeviceName();
+  const body = {
+    device_name: deviceName,
+    user_agent: navigator.userAgent,
+    fingerprint: stateMeta.fingerprint,
+  };
+  const res = await apiFetch("/api/v1/access/request", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }, true);
+  if (!res.ok) {
+    showAccessGate("Failed to request access.");
+    return;
+  }
+  const data = await res.json();
+  state.requestId = data.request_id;
+  localStorage.setItem("joincloud:request-id", state.requestId);
+  showAccessGate("Waiting for admin approval...");
+}
+
+async function checkSessionAccess() {
+  const res = await apiFetch("/api/v1/access/session", {}, true);
+  if (res.status === 423) {
+    const payload = await res.json().catch(() => ({}));
+    return { authorized: false, reason: payload.reason || "sharing_stopped" };
+  }
+  if (!res.ok) return null;
+  return res.json();
+}
+
+async function loadSupportMessages() {
+  try {
+    const res = await apiFetch("/api/support/messages");
+    const data = await res.json().catch(() => ({}));
+    state.supportMessages = Array.isArray(data.messages) ? data.messages : [];
+    renderSupportMessages();
+  } catch (_) {
+    state.supportMessages = [];
+    renderSupportMessages();
+  }
+}
+
+function renderSupportMessages() {
+  if (!els.supportMessages) return;
+  const list = state.supportMessages || [];
+  els.supportMessages.innerHTML = list.length === 0
+    ? "<div class=\"value value-muted\">No messages yet. Send a message to start the conversation.</div>"
+    : list.map((m) => {
+        const isDevice = (m.sender || "").toLowerCase() === "device";
+        const label = isDevice ? "You" : "Support";
+        const cls = isDevice ? "support-message device" : "support-message admin";
+        const time = m.timestamp ? new Date(m.timestamp).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "";
+        return `<div class="${cls}"><span class="value value-muted" style="font-size:11px">${label} ${time}</span><br/>${escapeHtml(m.text || "")}</div>`;
+      }).join("");
+  els.supportMessages.scrollTop = els.supportMessages.scrollHeight;
+}
+
+function escapeHtml(s) {
+  const div = document.createElement("div");
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+async function sendSupportMessage() {
+  if (!els.supportMessageInput) return;
+  const text = (els.supportMessageInput.value || "").trim();
+  if (!text) return;
+  try {
+    const res = await apiFetch("/api/support/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.message || "Failed to send message.");
+      return;
+    }
+    els.supportMessageInput.value = "";
+    await loadSupportMessages();
+  } catch (_) {
+    alert("Network error. Try again.");
+  }
+}
+
+async function bootstrapApp() {
+  const session = await checkSessionAccess();
+  if (!session || !session.authorized) {
+    state.requestId = localStorage.getItem("joincloud:request-id");
+    if (session && session.reason === "sharing_stopped") {
+      showAccessGate("Sharing is currently stopped by the admin.");
+    } else {
+      showAccessGate(state.requestId ? "Waiting for admin approval..." : "This device requires admin approval.");
+    }
+    return;
+  }
+  state.isAdmin = session.role === "admin";
+  state.accessRole = state.isAdmin ? "host" : "remote";
+  await loadAccessMe();
+  updateAdminUi();
+  await loadBuildInfo();
+  await fetchStatus();
+
+  // Remote users accessing the shared cloud don't need license/activation checks
+  if (!isRemoteRole()) {
+    var needsActivation = state.activationRequired || state.licenseState === "UNREGISTERED";
+    if (needsActivation) {
+      for (let attempt = 0; attempt <= 2; attempt++) {
+        try {
+          await fetchStatus();
+          const deviceId = state.hostUuidFromConfig || state.deviceId || "";
+          const bootstrapRes = await fetch("/api/v1/devices/bootstrap-trial", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(deviceId ? { deviceId } : {}),
+          });
+          if (bootstrapRes.ok) {
+            await fetchStatus();
+            break;
+          }
+        } catch (_) {}
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 1500));
+      }
+      needsActivation = state.activationRequired || state.licenseState === "UNREGISTERED";
+    }
+    // Block app if signed out AND no valid license (trial/pro/teams/custom/grace).
+    // User must sign in or have a valid license to use the app.
+    updateAppGate();
+    if (!canUseApp()) {
+      return; // Activation gate is shown; bootstrap stops until user signs in or gets license
+    }
+  }
+  showMainApp();
+  const initial = window.location.hash.replace("#", "") || "home";
+  setActiveSection(initial);
+  
+  try {
+    await loadRuntimeStatus();
+  } catch (_) {}
+  try {
+    await loadCloudUrl();
+  } catch (_) {}
+  try {
+    await loadFiles("/");
+  } catch (_) {}
+  try {
+    await loadShares();
+  } catch (_) {}
+  try {
+    await loadLogs();
+  } catch (_) {}
+  try {
+    await loadNetwork();
+  } catch (_) {}
+  try {
+    await loadTelemetrySettings();
+  } catch (_) {}
+  try {
+    await loadNetworkSettings();
+  } catch (_) {}
+  try {
+    await loadTechnicalConfig();
+  } catch (_) {}
+  try {
+    await loadPrivacyPolicy();
+  } catch (_) {}
+  try {
+    await loadPendingAccessRequests();
+  } catch (_) {}
+  try {
+    await loadApprovedDevices();
+  } catch (_) {}
+  try {
+    await loadShareVisitSummary();
+  } catch (_) {}
+  try {
+    await loadActivitySummary();
+  } catch (_) {}
+  try {
+    await loadNotifications();
+  } catch (_) {}
+  updateMuteButton();
+
+  setInterval(() => {
+    if (document.querySelector(".section.active")?.dataset.section === "support") loadSupportMessages();
+  }, 8000);
+}
+
+async function continueBootstrapAfterActivation() {
+  showMainApp();
+  const initial = window.location.hash.replace("#", "") || "home";
+  setActiveSection(initial);
+  
+  try {
+    await loadRuntimeStatus();
+  } catch (_) {}
+  try {
+    await loadCloudUrl();
+  } catch (_) {}
+  try {
+    await loadFiles("/");
+  } catch (_) {}
+  try {
+    await loadShares();
+  } catch (_) {}
+  try {
+    await loadLogs();
+  } catch (_) {}
+  try {
+    await loadNetwork();
+  } catch (_) {}
+  try {
+    await loadTelemetrySettings();
+  } catch (_) {}
+  try {
+    await loadNetworkSettings();
+  } catch (_) {}
+  try {
+    await loadPrivacyPolicy();
+  } catch (_) {}
+  try {
+    await loadPendingAccessRequests();
+  } catch (_) {}
+  try {
+    await loadApprovedDevices();
+  } catch (_) {}
+  try {
+    await loadShareVisitSummary();
+  } catch (_) {}
+  try {
+    await loadActivitySummary();
+  } catch (_) {}
+  try {
+    await loadNotifications();
+  } catch (_) {}
+  updateMuteButton();
+  setInterval(() => {
+    if (document.querySelector(".section.active")?.dataset.section === "support") loadSupportMessages();
+  }, 8000);
+}
+
+function setActiveSection(sectionId) {
+  const adminOnly = new Set(["devices", "activity"]);
+  const remoteHidden = new Set(["logs", "network", "support"]);
+  let safeSection = sectionId;
+  if (!state.isAdmin && adminOnly.has(sectionId)) safeSection = "home";
+  if (isRemoteRole() && remoteHidden.has(sectionId)) safeSection = "home";
+  if (window.location.hash !== `#${safeSection}`) window.location.hash = safeSection;
+  els.sections.forEach((section) => section.classList.toggle("active", section.dataset.section === safeSection));
+  els.navButtons.forEach((button) => button.classList.toggle("active", button.dataset.section === safeSection));
+  if (safeSection === "support") loadSupportMessages();
+  if (safeSection === "network") loadNetwork();
+  if (safeSection === "teams") loadTeams();
+}
+
+function updateAdminUi() {
+  const devicesButton = Array.from(els.navButtons).find((button) => button.dataset.section === "devices");
+  const devicesSection = Array.from(els.sections).find((section) => section.dataset.section === "devices");
+  const activityButton = Array.from(els.navButtons).find((button) => button.dataset.section === "activity");
+  const activitySection = Array.from(els.sections).find((section) => section.dataset.section === "activity");
+  const teamsButton = Array.from(els.navButtons).find((button) => button.dataset.section === "teams");
+  const teamsSection = Array.from(els.sections).find((section) => section.dataset.section === "teams");
+  const pendingRole = state.accessRole === "pending";
+  const hostRole = isHostRole();
+  const remoteRole = isRemoteRole();
+  const teamsVisible = shouldShowTeamsMenu();
+  const teamsEnabled = isTeamsEnabledByEntitlement();
+  if (devicesButton) {
+    devicesButton.style.display = hostRole ? "" : "none";
+  }
+  if (devicesSection && !hostRole) {
+    devicesSection.classList.remove("active");
+  }
+  if (activityButton) {
+    activityButton.style.display = hostRole ? "" : "none";
+  }
+  if (activitySection && !hostRole) {
+    activitySection.classList.remove("active");
+  }
+  if (teamsButton) {
+    teamsButton.style.display = teamsVisible ? "" : "none";
+    teamsButton.style.opacity = teamsEnabled ? "" : "0.7";
+    teamsButton.title = teamsEnabled ? "Teams" : "Upgrade to Teams to unlock this feature";
+  }
+  if (teamsSection && !teamsVisible) {
+    teamsSection.classList.remove("active");
+  }
+  if (els.addFileHeader) {
+    els.addFileHeader.style.display = pendingRole ? "none" : "";
+    els.addFileHeader.textContent = remoteRole ? "Add File" : "Add File";
+  }
+  if (els.toggleSharing) {
+    els.toggleSharing.style.display = hostRole && !pendingRole ? "" : "none";
+  }
+  if (els.revokeAll) {
+    els.revokeAll.style.display = hostRole ? "" : "none";
+  }
+  if (els.revokeSelected) {
+    els.revokeSelected.style.display = hostRole ? "" : "none";
+  }
+  if (els.myFolderShortcut) {
+    els.myFolderShortcut.style.display = "none";
+  }
+  const logsButton = Array.from(els.navButtons).find((b) => b.dataset.section === "logs");
+  const networkButton = Array.from(els.navButtons).find((b) => b.dataset.section === "network");
+  const supportButton = Array.from(els.navButtons).find((b) => b.dataset.section === "support");
+  const logsSection = Array.from(els.sections).find((s) => s.dataset.section === "logs");
+  const networkSection = Array.from(els.sections).find((s) => s.dataset.section === "network");
+  const supportSection = Array.from(els.sections).find((s) => s.dataset.section === "support");
+  const hideForRemote = remoteRole;
+  if (logsButton) logsButton.style.display = hideForRemote ? "none" : "";
+  if (networkButton) networkButton.style.display = hideForRemote ? "none" : "";
+  if (supportButton) supportButton.style.display = hideForRemote ? "none" : "";
+  if (logsSection && hideForRemote) logsSection.classList.remove("active");
+  if (networkSection && hideForRemote) networkSection.classList.remove("active");
+  if (supportSection && hideForRemote) supportSection.classList.remove("active");
+  if (els.homeStorageSection) {
+    els.homeStorageSection.style.display = hideForRemote ? "none" : "";
+  }
+}
+
+function showUploadBanner(text, type = "loading") {
+  if (!els.uploadBanner || !els.uploadBannerText) return;
+  els.uploadBanner.className = `upload-banner upload-banner-${type}`;
+  els.uploadBanner.classList.remove("upload-banner-hidden");
+  els.uploadBanner.setAttribute("aria-hidden", "false");
+  els.uploadBannerText.textContent = text;
+  if (els.uploadBannerDismiss) {
+    els.uploadBannerDismiss.style.display = type === "loading" ? "none" : "inline-flex";
+  }
+}
+
+function hideUploadBanner() {
+  if (!els.uploadBanner) return;
+  els.uploadBanner.classList.add("upload-banner-hidden");
+  els.uploadBanner.setAttribute("aria-hidden", "true");
+}
+
+function setRefreshLoading(buttonEl, loading) {
+  if (!buttonEl) return;
+  if (loading) {
+    buttonEl.classList.add("loading");
+    buttonEl.disabled = true;
+  } else {
+    buttonEl.classList.remove("loading");
+    buttonEl.disabled = false;
+  }
+}
+
+function refreshRemoteUploadUi() {
+  const uploadAllowed = true;
+  if (els.uploadInput) {
+    els.uploadInput.disabled = !uploadAllowed;
+  }
+  if (els.uploadButtonLabel) {
+    els.uploadButtonLabel.classList.toggle("disabled", !uploadAllowed);
+  }
+  if (els.dropZone) {
+    els.dropZone.classList.toggle("disabled", !uploadAllowed);
+    els.dropZone.textContent = "Drag & drop files here";
+  }
+  if (els.uploadScopeHint) {
+    els.uploadScopeHint.textContent = "";
+  }
+  if (els.uploadDestinationLabel) {
+    els.uploadDestinationLabel.textContent = "";
+  }
+}
+
+els.menuToggle.addEventListener("click", () => {
+  if (window.innerWidth < 768) {
+    document.body.classList.toggle("sidebar-open");
+  } else {
+    document.body.classList.toggle("sidebar-collapsed");
+  }
+});
+
+els.navButtons.forEach((button) => {
+  button.addEventListener("click", () => {
+    setActiveSection(button.dataset.section);
+    document.body.classList.remove("sidebar-open");
+  });
+});
+
+window.addEventListener("hashchange", () => {
+  const target = window.location.hash.replace("#", "");
+  if (target) setActiveSection(target);
+});
+
+els.copyCloudUrl.addEventListener("click", async () => {
+  const ok = await copyToClipboard(`${stateMeta.cloudUrl}?pair=1`);
+  if (ok) {
+    els.copyCloudUrl.textContent = "Copied!";
+    setTimeout(() => (els.copyCloudUrl.textContent = "Copy"), 2000);
+  } else {
+    showCopyFallback(`${stateMeta.cloudUrl}?pair=1`, els.copyCloudUrl);
+  }
+});
+
+if (els.manualConnectBtn) {
+  els.manualConnectBtn.addEventListener("click", manualConnect);
+}
+if (els.networkSearchBtn) {
+  els.networkSearchBtn.addEventListener("click", () => discoverySearch());
+}
+if (els.createTeamBtn) {
+  els.createTeamBtn.addEventListener("click", createTeam);
+}
+if (els.createTeamModalSubmit) els.createTeamModalSubmit.addEventListener("click", submitCreateTeam);
+if (els.createTeamModalClose) els.createTeamModalClose.addEventListener("click", closeCreateTeamModal);
+if (els.createTeamModalCancel) els.createTeamModalCancel.addEventListener("click", closeCreateTeamModal);
+
+async function startNewPeerChat() {
+  if (!isTeamsEnabledByEntitlement()) {
+    showUploadBanner("Teams are available on the Teams plan. Upgrade to start peer chats.", "error");
+    setTimeout(hideUploadBanner, 2400);
+    return;
+  }
+  try {
+    const networkRes = await apiFetch("/api/v1/network");
+    const peers = await networkRes.json();
+    const candidates = peers.filter((p) => p.deviceId && p.bestIp);
+    if (!candidates.length) {
+      showUploadBanner("No peers available. Go to Network to discover devices or use Manual Connect.", "error");
+      setTimeout(hideUploadBanner, 3500);
+      return;
+    }
+    const list = candidates.map((c, i) => `${i + 1}. ${c.display_name || c.displayName || c.deviceId}`).join("\n");
+    const choice = prompt(`Select a peer to start a chat:\n${list}`);
+    if (!choice) return;
+    const num = parseInt(choice, 10);
+    const peer = Number.isFinite(num) && num >= 1 && num <= candidates.length
+      ? candidates[num - 1]
+      : candidates.find((c) => (c.display_name || c.displayName || c.deviceId) === choice.trim());
+    if (!peer) {
+      showUploadBanner("Peer not found.");
+      setTimeout(hideUploadBanner, 2000);
+      return;
+    }
+    const teamName = peer.display_name || peer.displayName || peer.deviceId?.slice(0, 8) || "Peer";
+    const res = await apiFetch("/api/v1/teams", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teamName: `Chat with ${teamName}`, department: undefined }),
+    });
+    const team = await res.json();
+    if (!team || !team.teamId) {
+      showUploadBanner("Failed to create chat.");
+      setTimeout(hideUploadBanner, 2000);
+      return;
+    }
+    await apiFetch(`/api/v1/teams/${team.teamId}/invite`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toDeviceId: peer.deviceId }),
+    });
+    await loadTeams();
+    showUploadBanner("Chat created. Invite sent to " + (peer.display_name || peer.displayName || peer.deviceId) + ".", "success");
+    setTimeout(hideUploadBanner, 2500);
+    await showTeamDetail(team.teamId);
+  } catch (err) {
+    showUploadBanner(err?.message || "Failed to start chat.");
+    setTimeout(hideUploadBanner, 2500);
+  }
+}
+if (els.startNewPeerChatBtn) {
+  els.startNewPeerChatBtn.addEventListener("click", startNewPeerChat);
+}
+if (els.addMembersModalSend) els.addMembersModalSend.addEventListener("click", sendAddMembersInvites);
+if (els.addMembersModalClose) els.addMembersModalClose.addEventListener("click", closeAddMembersModal);
+if (els.addMembersModalCancel) els.addMembersModalCancel.addEventListener("click", closeAddMembersModal);
+if (els.notificationsClearAll) {
+  els.notificationsClearAll.addEventListener("click", async () => {
+    await apiFetch("/api/v1/notifications/clear", { method: "POST" });
+    await loadNotifications();
+  });
+}
+if (els.muteNotificationsBtn) {
+  els.muteNotificationsBtn.addEventListener("click", () => {
+    stateMeta.notificationsMuted = !stateMeta.notificationsMuted;
+    localStorage.setItem("joincloud:mute-notifications", stateMeta.notificationsMuted ? "1" : "0");
+    updateMuteButton();
+  });
+}
+if (els.teamDetailBack) {
+  els.teamDetailBack.addEventListener("click", () => {
+    stateTeams.currentTeamId = null;
+    loadTeams();
+  });
+}
+function toggleTeamsRightPanel() {
+  if (els.teamsLayout) els.teamsLayout.classList.toggle("right-collapsed");
+}
+if (els.teamToggleRight) {
+  els.teamToggleRight.addEventListener("click", toggleTeamsRightPanel);
+}
+if (els.teamsRightCollapseBtn) {
+  els.teamsRightCollapseBtn.addEventListener("click", toggleTeamsRightPanel);
+}
+if (els.teamSendBtn) {
+  els.teamSendBtn.addEventListener("click", sendTeamMessage);
+}
+if (els.teamInviteBtn) {
+  els.teamInviteBtn.addEventListener("click", inviteToTeam);
+}
+if (els.teamMessageInput) {
+  els.teamMessageInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendTeamMessage();
+    }
+  });
+}
+if (els.networkVisibility) {
+  els.networkVisibility.addEventListener("change", async () => {
+    await apiFetch("/api/v1/network/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ network_visibility: els.networkVisibility.checked }),
+    });
+    if (els.networkVisibilityNetwork) els.networkVisibilityNetwork.checked = els.networkVisibility.checked;
+  });
+}
+if (els.networkVisibilityNetwork) {
+  els.networkVisibilityNetwork.addEventListener("change", async () => {
+    await apiFetch("/api/v1/network/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ network_visibility: els.networkVisibilityNetwork.checked }),
+    });
+    if (els.networkVisibility) els.networkVisibility.checked = els.networkVisibilityNetwork.checked;
+  });
+}
+
+els.requestApproval.addEventListener("click", async () => {
+  await requestAccessApproval();
+});
+
+els.addFileHeader.addEventListener("click", async () => {
+  await addFileViaNativePicker();
+});
+
+els.toggleSharing.addEventListener("click", async () => {
+  if (state.sharingEnabled) {
+    openStopModal();
+    return;
+  }
+  await startSharing();
+});
+
+els.closeStopModal.addEventListener("click", closeStopModal);
+els.cancelStopModal.addEventListener("click", closeStopModal);
+els.stopSharingOnly.addEventListener("click", async () => {
+  await stopSharing();
+});
+els.closeApplication.addEventListener("click", async () => {
+  closeStopModal();
+  if (window.joincloud && window.joincloud.quitApp) {
+    await window.joincloud.quitApp();
+    return;
+  }
+  await apiFetch("/api/v1/app/quit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+});
+if (els.closePreviewModal) {
+  els.closePreviewModal.addEventListener("click", closePreviewModal);
+}
+if (els.previewModal) {
+  els.previewModal.addEventListener("click", (event) => {
+    if (event.target === els.previewModal) closePreviewModal();
+  });
+}
+if (els.closeShareQrModal) {
+  els.closeShareQrModal.addEventListener("click", closeShareQrModal);
+}
+if (els.shareQrModal) {
+  els.shareQrModal.addEventListener("click", (event) => {
+    if (event.target === els.shareQrModal) closeShareQrModal();
+  });
 }
 
 els.refreshFiles.onclick = () => loadFiles(state.path);
 els.refreshShares.onclick = () => loadShares();
-els.refreshNetwork.onclick = () => loadNetwork();
+els.revokeSelected.onclick = () => revokeSelectedShares();
+els.revokeAll.onclick = () => revokeAllShares();
+els.refreshLogs.onclick = () => loadLogs();
+els.refreshDevices.onclick = () => loadApprovedDevices();
+if (els.refreshActivity) {
+  els.refreshActivity.onclick = () => loadActivitySummary();
+}
 els.closeModal.onclick = closeShareModal;
 els.cancelShare.onclick = closeShareModal;
 els.createShare.onclick = createShare;
-if (els.uploadButton) {
-  els.uploadButton.onclick = () => {
-    els.uploadInput?.click();
+if (els.shareWithUserBtn) els.shareWithUserBtn.onclick = shareWithUser;
+if (els.shareWithTeamBtn) els.shareWithTeamBtn.onclick = shareWithTeam;
+if (els.shareTeamPickerClose) els.shareTeamPickerClose.onclick = closeShareTeamPicker;
+if (els.activationRegister) els.activationRegister.onclick = activationRegister;
+if (els.activationLogin) els.activationLogin.onclick = activationLogin;
+function getHostUuidForDesktopAuth() {
+  // Use real host UUID from config; never use "host" (that's the session role from access/me)
+  if (state.hostUuidFromConfig && state.hostUuidFromConfig.length >= 8 && state.hostUuidFromConfig.length <= 128) {
+    return state.hostUuidFromConfig;
+  }
+  if (state.deviceId && state.deviceId !== "host" && state.deviceId.length >= 8) {
+    return state.deviceId;
+  }
+  return "";
+}
+if (els.activationSigninWeb) {
+  els.activationSigninWeb.onclick = () => {
+    const hostUuid = getHostUuidForDesktopAuth();
+    const webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+    const loginUrl = hostUuid ? `${webUrl}/auth/desktop?deviceId=${encodeURIComponent(hostUuid)}` : `${webUrl}/auth/desktop`;
+    if (window.joincloud && window.joincloud.openAuthModal) {
+      window.joincloud.openAuthModal(loginUrl);
+    } else {
+      window.open(loginUrl, "_blank", "noopener,noreferrer");
+    }
   };
+}
+if (els.activationGateSigninWeb) {
+  els.activationGateSigninWeb.onclick = () => {
+    const hostUuid = getHostUuidForDesktopAuth();
+    if (!hostUuid) {
+      setActivationGateMessage("Loading device ID... Try again in a moment, or restart the app.");
+      loadControlPlaneConfig().then(() => {
+        const retry = getHostUuidForDesktopAuth();
+        if (retry) {
+          setActivationGateMessage("Loading sign-in...");
+          const webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+          const loginUrl = `${webUrl}/auth/desktop?deviceId=${encodeURIComponent(retry)}`;
+          if (window.joincloud && window.joincloud.openAuthModal) {
+            window.joincloud.openAuthModal(loginUrl);
+          } else {
+            window.open(loginUrl, "_blank", "noopener,noreferrer");
+          }
+        }
+      });
+      return;
+    }
+    const webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+    const loginUrl = `${webUrl}/auth/desktop?deviceId=${encodeURIComponent(hostUuid)}`;
+    setActivationGateMessage("Loading sign-in...");
+    if (window.joincloud && window.joincloud.openAuthModal) {
+      window.joincloud.openAuthModal(loginUrl);
+    } else {
+      window.open(loginUrl, "_blank", "noopener,noreferrer");
+    }
+  };
+}
+if (els.activationGateExtendTrial) {
+  els.activationGateExtendTrial.onclick = () => {
+    const hostUuid = getHostUuidForDesktopAuth();
+    if (!hostUuid) {
+      setActivationGateMessage("Loading device ID... Try again in a moment, or restart the app.");
+      return;
+    }
+    const webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+    const extendUrl = `${webUrl}/auth/desktop?deviceId=${encodeURIComponent(hostUuid)}&mode=extendTrial`;
+    setActivationGateMessage("Loading sign-in...");
+    if (window.joincloud && window.joincloud.openAuthModal) {
+      window.joincloud.openAuthModal(extendUrl);
+    } else {
+      window.open(extendUrl, "_blank", "noopener,noreferrer");
+    }
+  };
+}
+if (typeof window !== "undefined" && window.joincloud && window.joincloud.onLicenseUpdated) {
+  window.joincloud.onLicenseUpdated(async () => {
+    console.log("[joincloud] license-updated IPC received, reloading config...");
+    setActivationGateMessage("");
+    await loadControlPlaneConfig();
+    console.log("[joincloud] config reloaded, canUseApp:", canUseApp(), "isAuthenticated:", state.isAuthenticated, "licenseState:", state.licenseState, "licenseTier:", state.licenseTier);
+    if (canUseApp()) {
+      showMainApp();
+      bootstrapOnceAfterAuth();
+    }
+  });
+}
+if (els.subscriptionManageBtn) els.subscriptionManageBtn.onclick = openBillingPortal;
+if (els.settingsLogout) {
+  els.settingsLogout.onclick = async () => {
+    if (!state.isAuthenticated) {
+      const webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+      const deviceId = state.hostUuidFromConfig || state.deviceId || "";
+      const signInUrl = deviceId ? `${webUrl}/auth/desktop?deviceId=${encodeURIComponent(deviceId)}` : `${webUrl}/auth/desktop`;
+      if (window.joincloud && window.joincloud.openAuthModal) {
+        window.joincloud.openAuthModal(signInUrl);
+      } else {
+        window.open(signInUrl, "_blank", "noopener,noreferrer");
+      }
+      return;
+    }
+    try {
+      const res = await apiFetch("/api/v1/auth/logout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (res.ok) {
+        if (window.joincloud && window.joincloud.onLicenseUpdated) {
+          window.joincloud.onLicenseUpdated();
+        }
+        // Refresh config and UI immediately (no reload) so Settings shows signed-out state
+        await loadControlPlaneConfig();
+      }
+    } catch (_) {
+      window.location.reload();
+    }
+  };
+}
+if (els.supportSend) els.supportSend.onclick = sendSupportMessage;
+if (els.supportMessageInput) {
+  els.supportMessageInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); sendSupportMessage(); }
+  });
+}
+els.shareTtl.onchange = () => {
+  els.shareTtlCustom.style.display = els.shareTtl.value === "custom" ? "block" : "none";
+};
+els.fileSearch.addEventListener("input", (event) => {
+  state.fileSearch = String(event.target.value || "");
+  renderFiles();
+});
+els.fileSort.addEventListener("change", (event) => {
+  state.fileSort = String(event.target.value || "name_asc");
+  renderFiles();
+});
+els.foldersOnly.addEventListener("change", (event) => {
+  state.foldersOnly = !!event.target.checked;
+  renderFiles();
+});
+els.viewList.addEventListener("click", () => {
+  state.fileView = "list";
+  renderFiles();
+});
+els.viewThumb.addEventListener("click", () => {
+  state.fileView = "thumb";
+  renderFiles();
+});
+if (els.myFolderShortcut) {
+  els.myFolderShortcut.addEventListener("click", async () => {
+    await loadFiles(state.path);
+  });
 }
 els.backButton.onclick = () => {
   if (state.path === "/") return;
   const parts = state.path.split("/").filter(Boolean);
   parts.pop();
-  const parent = `/${parts.join("/")}` || "/";
-  loadFiles(parent);
-};
-
-els.shareTtl.onchange = () => {
-  if (els.shareTtl.value === "custom") {
-    els.shareTtlCustom.style.display = "block";
-  } else {
-    els.shareTtlCustom.style.display = "none";
-  }
-};
-els.togglePublic.onclick = togglePublicAccess;
-els.retryPublic.onclick = () => togglePublicAccess();
-els.switchLan.onclick = async () => {
-  await fetch("/api/public-access/stop", { method: "POST" });
-  await refreshPublicAccess();
+  loadFiles(`/${parts.join("/")}` || "/");
 };
 els.openStorage.onclick = async () => {
   if (window.joincloud && window.joincloud.openStorageFolder) {
@@ -836,328 +3674,196 @@ els.openStorage.onclick = async () => {
     alert("Storage folder is available in the desktop app only.");
   }
 };
-
-if (els.stopServer) {
-  if (window.joincloud && window.joincloud.stopServer) {
-    els.stopServer.classList.remove("hidden");
-    els.stopServer.onclick = async () => {
-      const confirmed = confirm("Stop JoinCloud and close the app?");
-      if (!confirmed) return;
-      els.stopServer.disabled = true;
-      await window.joincloud.stopServer();
-    };
-  } else {
-    els.stopServer.classList.add("hidden");
-  }
-}
-
-async function uploadFiles(files) {
-  if (!files || files.length === 0) return;
-  const formData = new FormData();
-  Array.from(files).forEach((file) => formData.append("files", file));
-  formData.append("path", state.path);
-  const res = await fetch("/api/upload", {
-    method: "POST",
-    body: formData,
-  });
-  if (res.ok) {
-    await loadFiles(state.path);
-    await loadLogs();
-  }
-}
-
 els.uploadInput.onchange = (event) => {
   uploadFiles(event.target.files);
   els.uploadInput.value = "";
 };
-
 els.dropZone.addEventListener("dragover", (event) => {
+  if (els.uploadInput?.disabled) return;
   event.preventDefault();
   els.dropZone.classList.add("active");
 });
-
-els.dropZone.addEventListener("dragleave", () => {
-  els.dropZone.classList.remove("active");
-});
-
-els.dropZone.addEventListener("drop", (event) => {
+els.dropZone.addEventListener("dragleave", () => els.dropZone.classList.remove("active"));
+els.dropZone.addEventListener("drop", async (event) => {
+  if (els.uploadInput?.disabled) return;
   event.preventDefault();
   els.dropZone.classList.remove("active");
+  const items = event.dataTransfer?.items;
+  if (items && items.length > 0) {
+    const collected = await collectFilesFromItems(items);
+    if (collected.length > 0) {
+      uploadFilesWithPaths(collected);
+      return;
+    }
+  }
   uploadFiles(event.dataTransfer.files);
 });
 
-function formatLogTime(timestamp) {
-  try {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  } catch {
-    return timestamp;
-  }
-}
-
-function getLogIcon(level, message) {
-  const msg = message.toLowerCase();
-  if (msg.includes("upload")) return "📤";
-  if (msg.includes("download")) return "📥";
-  if (msg.includes("share")) return "🔗";
-  if (msg.includes("revoke")) return "🚫";
-  if (msg.includes("started") || msg.includes("app started")) return "🚀";
-  if (msg.includes("telemetry")) return "📊";
-  if (msg.includes("visibility")) return "👁️";
-  if (msg.includes("display name")) return "✏️";
-  if (level === "error") return "❌";
-  if (level === "warn") return "⚠️";
-  return "ℹ️";
-}
-
-function renderLogs(entries) {
-  els.logList.innerHTML = "";
-  if (!entries.length) {
-    const emptyState = document.createElement("div");
-    emptyState.className = "empty-state";
-    emptyState.innerHTML = `
-      <div class="empty-state-title">No logs yet</div>
-      <div class="empty-state-sub">Activity will appear here</div>
-    `;
-    els.logList.appendChild(emptyState);
-    return;
-  }
-  entries.forEach((entry) => {
-    const row = document.createElement("div");
-    row.className = `log-item log-${entry.level}`;
-    const icon = getLogIcon(entry.level, entry.message);
-    const time = formatLogTime(entry.timestamp);
-    row.innerHTML = `
-      <span class="log-icon">${icon}</span>
-      <span class="log-time">${time}</span>
-      <span class="log-message">${entry.message}</span>
-    `;
-    els.logList.appendChild(row);
-  });
-}
-
-async function loadLogs() {
-  els.refreshLogs.textContent = "Loading...";
-  els.refreshLogs.disabled = true;
-  const res = await fetch("/api/v1/logs");
-  const data = await res.json();
-  renderLogs(data);
-  els.refreshLogs.textContent = "Refresh";
-  els.refreshLogs.disabled = false;
-}
-
-function renderNetwork(entries) {
-  els.networkList.innerHTML = "";
-  if (!entries.length) {
-    const emptyState = document.createElement("div");
-    emptyState.className = "empty-state";
-    emptyState.innerHTML = `
-      <div class="empty-state-title">No available devices found</div>
-      <div class="empty-state-sub">No other JoinCloud users detected on this network</div>
-    `;
-    els.networkList.appendChild(emptyState);
-    return;
-  }
-  entries.forEach((entry) => {
-    const row = document.createElement("div");
-    row.className = "item network-item";
-    const info = document.createElement("div");
-    info.innerHTML = `<div class="item-title">${entry.display_name}</div>`;
-    row.appendChild(info);
-    const statusBadge = document.createElement("span");
-    statusBadge.className = `badge ${entry.status === "online" ? "badge-public" : "badge-private"}`;
-    statusBadge.textContent = entry.status === "online" ? "Online" : "Offline";
-    row.appendChild(statusBadge);
-    els.networkList.appendChild(row);
-  });
-}
-
-// Task 3: Network refresh with feedback
-async function loadNetwork() {
-  els.refreshNetwork.textContent = "Searching...";
-  els.refreshNetwork.disabled = true;
-  
-  // Show searching state
-  els.networkList.innerHTML = "";
-  const searchingState = document.createElement("div");
-  searchingState.className = "empty-state";
-  searchingState.innerHTML = `
-    <div class="empty-state-title">Searching for devices…</div>
-    <div class="empty-state-sub">Looking for JoinCloud users on your network</div>
-  `;
-  els.networkList.appendChild(searchingState);
-  
-  // Wait a bounded delay for discovery
-  await new Promise((r) => setTimeout(r, 2000));
-  
-  const res = await fetch("/api/v1/network");
-  const data = await res.json();
-  renderNetwork(data);
-  els.refreshNetwork.textContent = "Refresh";
-  els.refreshNetwork.disabled = false;
-}
-
-// Task 1: Load system information
-async function loadSystemInfo() {
-  try {
-    const res = await fetch("/api/v1/system");
-    const data = await res.json();
-    if (els.sysUserId) els.sysUserId.textContent = data.user_id || "--";
-    if (els.sysDeviceUuid) els.sysDeviceUuid.textContent = data.device_uuid || "--";
-    if (els.sysOs) els.sysOs.textContent = data.os || "--";
-    if (els.sysArch) els.sysArch.textContent = data.arch || "--";
-    if (els.sysVersion) els.sysVersion.textContent = `v${data.app_version}` || "--";
-    if (els.sysStatus) els.sysStatus.textContent = data.backend_status || "--";
-  } catch (error) {
-    // Silently fail
-  }
-}
-
-async function loadTelemetrySettings() {
-  const res = await fetch("/api/v1/telemetry/settings");
-  const data = await res.json();
-  els.telemetryToggle.checked = !!data.enabled;
-}
-
-async function updateTelemetrySettings(enabled) {
-  await fetch("/api/v1/telemetry/settings", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ enabled }),
-  });
-}
-
-async function loadNetworkSettings() {
-  const res = await fetch("/api/v1/network/settings");
-  const data = await res.json();
-  els.networkName.value = data.display_name || "";
-  els.networkVisibility.checked = !!data.network_visibility;
-}
-
-async function saveNetworkName() {
-  const value = els.networkName.value.trim();
-  const res = await fetch("/api/v1/network/settings", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ display_name: value }),
-  });
-  const data = await res.json();
-  els.networkName.value = data.display_name || "";
-  await loadNetwork();
-}
-
-async function updateNetworkVisibility(enabled) {
-  await fetch("/api/v1/network/settings", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ network_visibility: enabled }),
-  });
-  await loadNetwork();
-}
-
-function setActiveSection(sectionId) {
-  if (window.location.hash !== `#${sectionId}`) {
-    window.location.hash = sectionId;
-  }
-  els.sections.forEach((section) => {
-    section.classList.toggle("active", section.dataset.section === sectionId);
-  });
-  els.navButtons.forEach((button) => {
-    button.classList.toggle("active", button.dataset.section === sectionId);
-  });
-  handleSectionChange(sectionId);
-}
-
-function handleSectionChange(sectionId) {
-  if (sectionId === "messages") {
-    renderMessages();
-    scrollMessagesToBottom();
-    markMessagesRead();
-  }
-}
-
-els.navButtons.forEach((button) => {
-  button.addEventListener("click", () => {
-    setActiveSection(button.dataset.section);
-  });
-});
-
-window.addEventListener("hashchange", () => {
-  const target = window.location.hash.replace("#", "");
-  if (target) {
-    setActiveSection(target);
-  }
-});
-
-fetchStatus();
-loadFiles("/");
-loadShares();
-refreshPublicAccess();
-loadLogs();
-loadNetwork();
-loadTelemetrySettings();
-loadNetworkSettings();
-loadSystemInfo();
-startHeartbeatMonitor();
-loadCachedMessages();
-renderMessages();
-updateUnreadCount();
-startMessagesPolling();
-const initial = window.location.hash.replace("#", "") || "home";
-setActiveSection(initial);
-
-setInterval(() => {
-  loadLogs();
-}, 10000);
-
-if (els.messageSend) {
-  els.messageSend.addEventListener("click", sendMessage);
-}
-
-if (els.messageInput) {
-  els.messageInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !event.shiftKey) {
-      event.preventDefault();
-      sendMessage();
+async function collectFilesFromItems(items) {
+  const result = [];
+  const readDirEntries = (dirReader) =>
+    new Promise((resolve, reject) => {
+      const all = [];
+      function read() {
+        dirReader.readEntries(
+          (entries) => {
+            if (entries.length === 0) {
+              resolve(all);
+              return;
+            }
+            all.push(...entries);
+            read();
+          },
+          (err) => (err ? reject(err) : resolve(all))
+        );
+      }
+      read();
+    });
+  const readEntry = async (entry, basePath = "") => {
+    if (entry.isFile) {
+      return new Promise((resolve) => {
+        entry.file(
+          (file) => {
+            const relPath = basePath ? `${basePath}/${file.name}` : file.name;
+            result.push({ file, relativePath: relPath });
+            resolve();
+          },
+          () => resolve()
+        );
+      });
     }
-  });
+    if (entry.isDirectory) {
+      const dirPath = basePath ? `${basePath}/${entry.name}` : entry.name;
+      const entries = await readDirEntries(entry.createReader());
+      for (const e of entries) {
+        if (e.name.startsWith(".") || e.name.startsWith("._")) continue;
+        await readEntry(e, dirPath);
+      }
+    }
+  };
+  for (let i = 0; i < items.length; i++) {
+    const entry = items[i].webkitGetAsEntry ? items[i].webkitGetAsEntry() : null;
+    if (entry) await readEntry(entry);
+  }
+  return result;
 }
 
-// Task 2: Refresh logs after settings changes
+async function uploadFilesWithPaths(items) {
+  if (!items || items.length === 0) return;
+  const label = items.length === 1 ? items[0].relativePath : `${items.length} files`;
+  showUploadBanner(`Uploading ${label}...`, "loading");
+  const formData = new FormData();
+  formData.append("path", state.path);
+  for (const { file, relativePath } of items) {
+    formData.append("fileRelPath", relativePath);
+    formData.append("files", file);
+  }
+  try {
+    const res = await apiFetch("/api/upload", { method: "POST", body: formData });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const reason = payload.error || "Upload failed.";
+      showUploadBanner(reason, "error");
+      if (els.uploadScopeHint) els.uploadScopeHint.textContent = reason;
+      return;
+    }
+    const savedTo = String(payload.saved_to || state.path || "/");
+    showUploadBanner("Upload complete", "success");
+    setTimeout(hideUploadBanner, 2500);
+    await loadFiles(savedTo);
+    await loadLogs();
+  } catch (err) {
+    showUploadBanner(err.message || "Upload failed", "error");
+    if (els.uploadScopeHint) els.uploadScopeHint.textContent = err.message || "Upload failed";
+  }
+}
 els.telemetryToggle.addEventListener("change", async (event) => {
   await updateTelemetrySettings(event.target.checked);
-  await loadLogs();
 });
-
 els.saveNetworkName.addEventListener("click", async () => {
   await saveNetworkName();
-  await loadLogs();
+});
+els.copyPrivacyPolicy.addEventListener("click", async () => {
+  if (!stateMeta.privacyPolicyRaw) return;
+  await copyToClipboard(stateMeta.privacyPolicyRaw);
+  els.copyPrivacyPolicy.textContent = "Copied!";
+  setTimeout(() => {
+    els.copyPrivacyPolicy.textContent = "Copy";
+  }, 1200);
+});
+els.downloadPrivacyPolicy.addEventListener("click", () => {
+  if (!stateMeta.privacyPolicyRaw) return;
+  const blob = new Blob([stateMeta.privacyPolicyRaw], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "JoinCloud-Privacy-Policy.md";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 });
 
-els.networkVisibility.addEventListener("change", async (event) => {
-  await updateNetworkVisibility(event.target.checked);
-  await loadLogs();
-});
+// Privacy Policy Modal
+const privacyModal = document.getElementById("privacy-policy-modal");
+const openPrivacyBtn = document.getElementById("open-privacy-policy-modal");
+const closePrivacyBtn = document.getElementById("close-privacy-modal");
 
-// Task 1: Copy User ID button
-if (els.copyUserId) {
-  els.copyUserId.addEventListener("click", async () => {
-    const userId = els.sysUserId?.textContent;
-    if (userId && userId !== "--") {
-      await navigator.clipboard.writeText(userId);
-      els.copyUserId.textContent = "✓";
-      setTimeout(() => (els.copyUserId.textContent = "📋"), 1500);
+if (openPrivacyBtn && privacyModal) {
+  openPrivacyBtn.addEventListener("click", () => {
+    privacyModal.style.display = "flex";
+  });
+}
+
+if (closePrivacyBtn && privacyModal) {
+  closePrivacyBtn.addEventListener("click", () => {
+    privacyModal.style.display = "none";
+  });
+}
+
+if (privacyModal) {
+  privacyModal.addEventListener("click", (e) => {
+    if (e.target === privacyModal) {
+      privacyModal.style.display = "none";
     }
   });
 }
 
-if (els.copyDeviceUuid) {
-  els.copyDeviceUuid.addEventListener("click", async () => {
-    const deviceUuid = els.sysDeviceUuid?.textContent;
-    if (deviceUuid && deviceUuid !== "--") {
-      await navigator.clipboard.writeText(deviceUuid);
-      els.copyDeviceUuid.textContent = "✓";
-      setTimeout(() => (els.copyDeviceUuid.textContent = "📋"), 1500);
-    }
-  });
+if (els.uploadBannerDismiss) {
+  els.uploadBannerDismiss.addEventListener("click", hideUploadBanner);
 }
+if (els.accessDeviceNameInput) {
+  els.accessDeviceNameInput.value = getSuggestedDeviceName();
+}
+els.accessFingerprint.textContent = stateMeta.fingerprint;
+bootstrapApp();
+
+setInterval(async () => {
+  if (els.appLayout.style.display === "none") return;
+  try {
+    var prevTier = state.licenseTier;
+    var prevState = state.licenseState;
+    await loadControlPlaneConfig();
+    if (state.licenseTier !== prevTier || state.licenseState !== prevState) {
+      updateGraceBanner();
+      updateSubscriptionSection();
+      updateHeaderProfile();
+    }
+  } catch (_) {}
+}, 60 * 1000);
+
+setInterval(async () => {
+  if (els.appLayout.style.display !== "none") {
+    await loadRuntimeStatus();
+    await loadLogs();
+    await loadNotifications();
+    if (state.isAdmin) {
+      await loadPendingAccessRequests();
+      await loadApprovedDevices();
+      await loadShareVisitSummary();
+      await loadActivitySummary();
+    }
+  } else if (state.requestId) {
+    await pollAccessStatus(state.requestId);
+  }
+}, 3000);

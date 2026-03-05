@@ -10,6 +10,15 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { 
   Settings as SettingsIcon, 
   RefreshCw, 
@@ -22,7 +31,9 @@ import {
   MessageSquare,
   BookOpen,
   Send,
-  Info
+  Info,
+  Shield,
+  FileText
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { StorageInfo } from "@shared/schema";
@@ -31,7 +42,6 @@ import { PageContainer, SectionHeading } from "@/ui-kit";
 function SyncSettings({ storagePath }: { storagePath?: string }) {
   const { toast } = useToast();
   const [autoSync, setAutoSync] = useState(true);
-  const [tunnelProvider, setTunnelProvider] = useState("ngrok");
 
   const handleSyncNow = () => {
     toast({
@@ -44,13 +54,6 @@ function SyncSettings({ storagePath }: { storagePath?: string }) {
         description: "All files are up to date",
       });
     }, 2000);
-  };
-
-  const handleSaveSettings = () => {
-    toast({
-      title: "Settings Saved",
-      description: "Your sync preferences have been updated",
-    });
   };
 
   return (
@@ -101,144 +104,11 @@ function SyncSettings({ storagePath }: { storagePath?: string }) {
             Storage Location
           </Label>
           <div className="p-3 rounded-md bg-muted font-mono text-sm" data-testid="text-storage-path">
-            {storagePath || "~/AREVEI"}
+            {storagePath || "~/JoinCloud"}
           </div>
           <p className="text-xs text-muted-foreground">
             This is where your cloud files are stored locally
           </p>
-        </div>
-
-        {/* <div className="space-y-2">
-          <Label className="flex items-center gap-2">
-            <Network className="h-4 w-4" />
-            Tunnel Provider
-          </Label>
-          <Select value={tunnelProvider} onValueChange={setTunnelProvider}>
-            <SelectTrigger data-testid="select-tunnel-provider">
-              <SelectValue placeholder="Select tunnel provider" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">None (Local Only)</SelectItem>
-              <SelectItem value="ngrok">ngrok</SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            Choose how you want to access your cloud from outside your network
-          </p>
-        </div> */}
-
-        {/* <Button onClick={handleSaveSettings} className="w-full" data-testid="button-save-sync">
-          Save Settings
-        </Button> */}
-      </CardContent>
-    </Card>
-  );
-}
-
-function DomainSettings() {
-  const { toast } = useToast();
-  const [customSubdomain, setCustomSubdomain] = useState("");
-  const [showCustomInput, setShowCustomInput] = useState(false);
-
-  const handleAddCustomDomain = () => {
-    if (!customSubdomain) {
-      toast({
-        title: "Invalid Subdomain",
-        description: "Please enter a valid subdomain name",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    toast({
-      title: "Coming Soon",
-      description: "Custom subdomains will be available in a future update",
-    });
-  };
-
-  return (
-    <Card data-testid="card-domain-settings">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Globe className="h-5 w-5 text-primary" />
-          Domain Settings
-        </CardTitle>
-        <CardDescription>Manage your cloud access URLs</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        <div className="space-y-3">
-          <Label>Your Cloud Access</Label>
-          <div className="flex items-center gap-3 p-4 rounded-lg border bg-muted/50">
-            <div className="flex-1">
-              <p className="font-mono text-sm mb-1">via ngrok tunnel</p>
-              <div className="flex items-center gap-2">
-                <Badge variant="default">Dynamic</Badge>
-                <span className="text-xs text-muted-foreground">URL generated per share</span>
-              </div>
-            </div>
-            <Info className="h-4 w-4 text-muted-foreground" />
-          </div>
-        </div>
-
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <Label className="flex items-center gap-2">
-              <Crown className="h-4 w-4 text-primary" />
-              Custom Subdomain
-            </Label>
-            <Badge variant="secondary">Coming Soon</Badge>
-          </div>
-
-          {!showCustomInput ? (
-            <Button 
-              variant="outline" 
-              className="w-full"
-              onClick={() => setShowCustomInput(true)}
-              data-testid="button-add-subdomain"
-            >
-              <Crown className="h-4 w-4 mr-2" />
-              Add Custom Subdomain
-            </Button>
-          ) : (
-            <div className="space-y-3 p-4 rounded-lg border">
-              <div className="space-y-2">
-                <Label htmlFor="custom-subdomain">Choose Your Subdomain</Label>
-                <div className="flex gap-2">
-                  <Input
-                    id="custom-subdomain"
-                    placeholder="mybrand"
-                    value={customSubdomain}
-                    onChange={(e) => setCustomSubdomain(e.target.value)}
-                    data-testid="input-subdomain"
-                  />
-                  <div className="flex items-center px-3 rounded-md bg-muted text-sm text-muted-foreground whitespace-nowrap">
-                    .arevei.cloud
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-3 rounded-md bg-muted">
-                <p className="text-sm font-medium mb-1">Premium Feature</p>
-                <p className="text-xs text-muted-foreground mb-2">
-                  Custom subdomains will be available in a future update
-                </p>
-                <ul className="text-xs text-muted-foreground space-y-1">
-                  <li>Professional branded URL</li>
-                  <li>SSL certificate included</li>
-                  <li>Instant activation</li>
-                </ul>
-              </div>
-
-              <div className="flex gap-2">
-                <Button onClick={handleAddCustomDomain} className="flex-1" data-testid="button-confirm-subdomain">
-                  Request Access
-                </Button>
-                <Button variant="ghost" onClick={() => setShowCustomInput(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          )}
         </div>
       </CardContent>
     </Card>
@@ -276,9 +146,9 @@ function SupportSection() {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <HelpCircle className="h-5 w-5 text-primary" />
-          Support & Help
+          Help & Support
         </CardTitle>
-        <CardDescription>Get assistance with your AREVEI Cloud</CardDescription>
+        <CardDescription>Get assistance with JoinCloud</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -334,6 +204,137 @@ function SupportSection() {
   );
 }
 
+function PrivacyPolicyDialog() {
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button variant="link" className="h-auto p-0 text-primary hover:text-primary/80">
+          <Shield className="h-4 w-4 mr-2" />
+          Privacy Policy
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-2xl max-h-[80vh]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Shield className="h-5 w-5 text-primary" />
+            Privacy Policy
+          </DialogTitle>
+          <DialogDescription>
+            Last updated: February 2026
+          </DialogDescription>
+        </DialogHeader>
+        <ScrollArea className="h-[50vh] pr-4">
+          <div className="space-y-4 text-sm">
+            <section>
+              <h3 className="font-semibold text-base mb-2">1. Introduction</h3>
+              <p className="text-muted-foreground">
+                JoinCloud ("we", "our", or "us") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, and safeguard your information when you use our desktop application and related services.
+              </p>
+            </section>
+
+            <section>
+              <h3 className="font-semibold text-base mb-2">2. Information We Collect</h3>
+              <p className="text-muted-foreground mb-2">
+                JoinCloud is designed with privacy in mind. We collect minimal information:
+              </p>
+              <ul className="list-disc list-inside text-muted-foreground space-y-1 ml-2">
+                <li>Account information (email address) when you create an account</li>
+                <li>Device identifiers for secure device linking</li>
+                <li>Usage analytics to improve our services (optional)</li>
+              </ul>
+            </section>
+
+            <section>
+              <h3 className="font-semibold text-base mb-2">3. Local-First Architecture</h3>
+              <p className="text-muted-foreground">
+                JoinCloud operates on a local-first principle. Your files are stored on your own device and are never uploaded to our servers. File sharing happens directly between devices on your local network or through secure peer-to-peer connections.
+              </p>
+            </section>
+
+            <section>
+              <h3 className="font-semibold text-base mb-2">4. Data Security</h3>
+              <p className="text-muted-foreground">
+                We implement industry-standard security measures to protect your account information. All data transmissions are encrypted using TLS. Your files remain under your control on your local device.
+              </p>
+            </section>
+
+            <section>
+              <h3 className="font-semibold text-base mb-2">5. Third-Party Services</h3>
+              <p className="text-muted-foreground">
+                JoinCloud may use third-party services for features like tunneling (for external access) and payment processing. These services have their own privacy policies, and we encourage you to review them.
+              </p>
+            </section>
+
+            <section>
+              <h3 className="font-semibold text-base mb-2">6. Your Rights</h3>
+              <p className="text-muted-foreground mb-2">
+                You have the right to:
+              </p>
+              <ul className="list-disc list-inside text-muted-foreground space-y-1 ml-2">
+                <li>Access your personal information</li>
+                <li>Request deletion of your account</li>
+                <li>Opt out of analytics collection</li>
+                <li>Export your data</li>
+              </ul>
+            </section>
+
+            <section>
+              <h3 className="font-semibold text-base mb-2">7. Contact Us</h3>
+              <p className="text-muted-foreground">
+                If you have any questions about this Privacy Policy, please contact us at privacy@joincloud.in
+              </p>
+            </section>
+          </div>
+        </ScrollArea>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AboutSection() {
+  return (
+    <Card data-testid="card-about">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Info className="h-5 w-5 text-primary" />
+          About JoinCloud
+        </CardTitle>
+        <CardDescription>Application information and legal</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+          <div>
+            <p className="text-sm text-muted-foreground">Version</p>
+            <p className="font-medium">0.3.4</p>
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground">License</p>
+            <p className="font-medium text-green-400">FREE</p>
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground">Platform</p>
+            <p className="font-medium">Desktop App</p>
+          </div>
+        </div>
+
+        <p className="text-sm text-muted-foreground">
+          JoinCloud is a personal cloud network for secure, high-speed LAN file sharing and collaboration. Your files stay on your device – share them securely with temporary links, password protection, and download limits.
+        </p>
+
+        <div className="flex flex-wrap gap-4 pt-2 border-t border-border">
+          <PrivacyPolicyDialog />
+          <Button variant="link" className="h-auto p-0 text-primary hover:text-primary/80" asChild>
+            <a href="https://joincloud.in/terms" target="_blank" rel="noopener noreferrer">
+              <FileText className="h-4 w-4 mr-2" />
+              Terms of Service
+            </a>
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Settings() {
   const { data: storagePath } = useQuery<string>({
     queryKey: ["storage:basePath"],
@@ -341,18 +342,23 @@ export default function Settings() {
       if (typeof window !== 'undefined' && window.electronAPI?.storage) {
         return window.electronAPI.storage.getBasePath();
       }
-      return '~/AREVEI';
+      return '~/JoinCloud';
     },
   });
 
   return (
-    <PageContainer className="space-y-6">
+    <PageContainer className="space-y-8">
       <SectionHeading
         title="Settings"
-        description="Manage your AREVEI Cloud preferences"
+        description="Manage your JoinCloud preferences"
       />
 
-      <div className="grid grid-cols-1  gap-6">
+      {/* General Settings Section */}
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+          <SettingsIcon className="h-5 w-5 text-muted-foreground" />
+          General
+        </h2>
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -360,64 +366,37 @@ export default function Settings() {
         >
           <SyncSettings storagePath={storagePath} />
         </motion.div>
+      </section>
 
-        {/* <motion.div
+      {/* Support Section */}
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+          <HelpCircle className="h-5 w-5 text-muted-foreground" />
+          Support
+        </h2>
+        <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1, duration: 0.3 }}
         >
-          <DomainSettings />
-        </motion.div> */}
-      </div>
+          <SupportSection />
+        </motion.div>
+      </section>
 
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2, duration: 0.3 }}
-      >
-        <SectionHeading title="Support" description="Get help or contact us" />
-        <SupportSection />
-      </motion.div>
-
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.3, duration: 0.3 }}
-      >
-        <SectionHeading title="About" description="Product details" />
-        <Card data-testid="card-about">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <SettingsIcon className="h-5 w-5 text-primary" />
-              About AREVEI
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div>
-                <p className="text-sm text-muted-foreground">Version</p>
-                <p className="font-medium">1.0.0</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">License</p>
-                <p className="font-medium text-green-400">FREE</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Platform</p>
-                <p className="font-medium">Desktop App</p>
-              </div>
-              {/* <div>
-                <p className="text-sm text-muted-foreground">Tunnel</p>
-                <p className="font-medium">ngrok</p>
-              </div> */}
-            </div>
-            <p className="text-sm text-muted-foreground">
-              AREVEI is a secure, local-first file management system that allows you to store files on your own computer
-              and share them securely with temporary links, password protection, and download limits.
-            </p>
-          </CardContent>
-        </Card>
-      </motion.div>
+      {/* About Section */}
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
+          <Info className="h-5 w-5 text-muted-foreground" />
+          About
+        </h2>
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2, duration: 0.3 }}
+        >
+          <AboutSection />
+        </motion.div>
+      </section>
     </PageContainer>
   );
 }

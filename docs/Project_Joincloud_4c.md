@@ -367,7 +367,7 @@ CREATE TABLE daily_metrics (
 {
   user_id: "jc_uuid",
   date: "2026-01-26",
-  app_version: "0.3.1",
+  app_version: "0.3.3",
   os: "macOS",
   uptime_seconds: 3600,
   metrics: {

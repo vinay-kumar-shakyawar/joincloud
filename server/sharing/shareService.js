@@ -25,11 +25,19 @@ class ShareService {
       const raw = await fs.readFile(this.storagePath, "utf8");
       const data = JSON.parse(raw);
       if (Array.isArray(data)) {
-        data.forEach((share) => {
+        for (const share of data) {
           if (share && share.shareId) {
+            if (!share.targetType && share.targetPath) {
+              try {
+                const stats = await fs.stat(share.targetPath);
+                share.targetType = stats.isDirectory() ? "folder" : "file";
+              } catch (_error) {
+                share.targetType = "file";
+              }
+            }
             this.shares.set(share.shareId, share);
           }
-        });
+        }
       }
     } catch (error) {
       if (error.code !== "ENOENT") {
@@ -68,6 +76,7 @@ class ShareService {
     const share = {
       shareId,
       targetPath: validatedTarget,
+      targetType: stat.isDirectory() ? "folder" : "file",
       permission: normalizePermission(permission, this.defaultPermission),
       scope: scope || "local",
       expiryTime: expiresAt.toISOString(),
@@ -128,6 +137,10 @@ class ShareService {
     return share;
   }
 
+  getShareRecord(shareId) {
+    return this.shares.get(shareId) || null;
+  }
+
   expireShares() {
     const now = Date.now();
     for (const share of this.shares.values()) {
@@ -148,6 +161,35 @@ class ShareService {
       results.push({ ...share, status });
     }
     return results;
+  }
+
+  async revokeMany(shareIds) {
+    let revokedCount = 0;
+    for (const shareId of shareIds || []) {
+      const share = this.shares.get(shareId);
+      if (!share || share.revoked) continue;
+      share.revoked = true;
+      this.shares.set(shareId, share);
+      revokedCount += 1;
+    }
+    if (revokedCount > 0) {
+      await this.saveToDisk();
+    }
+    return revokedCount;
+  }
+
+  async revokeAll() {
+    let revokedCount = 0;
+    for (const share of this.shares.values()) {
+      if (share.revoked) continue;
+      share.revoked = true;
+      this.shares.set(share.shareId, share);
+      revokedCount += 1;
+    }
+    if (revokedCount > 0) {
+      await this.saveToDisk();
+    }
+    return revokedCount;
   }
 }
 

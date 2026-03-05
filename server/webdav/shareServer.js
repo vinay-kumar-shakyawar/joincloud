@@ -4,7 +4,7 @@ const fs = require("fs/promises");
 const mime = require("mime-types");
 const { resolveRights } = require("../sharing/permissionResolver");
 
-function createShareServer({ share, realm, telemetry, logger }) {
+function createShareServer({ share, realm, telemetry, runtimeTelemetry, usageAggregation, logger }) {
   const userManager = new v2.SimpleUserManager();
   const privilegeManager = new v2.SimplePathPrivilegeManager();
 
@@ -56,6 +56,12 @@ function createShareServer({ share, realm, telemetry, logger }) {
           share_id: share.shareId,
           bytes,
         });
+        if (runtimeTelemetry && typeof runtimeTelemetry.increment === "function") {
+          runtimeTelemetry.increment("bytes_downloaded", bytes);
+        }
+        if (usageAggregation && typeof usageAggregation.recordTransferActivity === "function") {
+          usageAggregation.recordTransferActivity();
+        }
       }
     }
     callback();

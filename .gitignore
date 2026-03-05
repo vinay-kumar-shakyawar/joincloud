@@ -1,4 +1,5 @@
 .DS_Store
+.env
 node_modules
 server/node_modules/
 dist
@@ -8,3 +9,7 @@ logs
 *.log
 *.db
 npm-debug.log*
+build/*
+!build/icon.icns
+!build/icon.ico
+release-artifacts/

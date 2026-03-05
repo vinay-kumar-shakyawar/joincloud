@@ -1,6 +1,5 @@
 const fs = require("fs");
 const path = require("path");
-const sqlite3 = require("sqlite3").verbose();
 
 function ensureDir(filePath) {
   const dir = path.dirname(filePath);
@@ -9,7 +8,118 @@ function ensureDir(filePath) {
   }
 }
 
+function createFallbackStore(dbPath) {
+  const fallbackPath = `${dbPath}.json`;
+  ensureDir(fallbackPath);
+
+  let state = { daily_metrics: {} };
+  try {
+    if (fs.existsSync(fallbackPath)) {
+      const raw = fs.readFileSync(fallbackPath, "utf8");
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && parsed.daily_metrics) {
+        state = parsed;
+      }
+    }
+  } catch (_error) {
+    state = { daily_metrics: {} };
+  }
+
+  function persist() {
+    try {
+      fs.writeFileSync(fallbackPath, JSON.stringify(state, null, 2));
+    } catch (_error) {
+      // best effort fallback store
+    }
+  }
+
+  function todayKey() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function ensureRow(date) {
+    if (!state.daily_metrics[date]) {
+      state.daily_metrics[date] = {
+        date,
+        uptime_seconds: 0,
+        files_uploaded: 0,
+        files_downloaded: 0,
+        bytes_uploaded: 0,
+        bytes_downloaded: 0,
+        shares_created: 0,
+        public_shares: 0,
+        lan_shares: 0,
+      };
+    }
+    return state.daily_metrics[date];
+  }
+
+  function increment(date, updates) {
+    const row = ensureRow(date);
+    Object.keys(updates || {}).forEach((key) => {
+      row[key] = Number(row[key] || 0) + Number(updates[key] || 0);
+    });
+    persist();
+  }
+
+  function trackEvent(name, meta) {
+    const date = todayKey();
+    if (name === "file_uploaded") {
+      increment(date, {
+        files_uploaded: meta?.count || 0,
+        bytes_uploaded: meta?.bytes || 0,
+      });
+      return;
+    }
+    if (name === "file_downloaded") {
+      increment(date, {
+        files_downloaded: 1,
+        bytes_downloaded: meta?.bytes || 0,
+      });
+      return;
+    }
+    if (name === "share_created") {
+      increment(date, {
+        shares_created: 1,
+        public_shares: meta?.scope === "public" ? 1 : 0,
+        lan_shares: meta?.scope === "local" ? 1 : 0,
+      });
+    }
+  }
+
+  function addUptime(seconds) {
+    if (!seconds || seconds <= 0) return;
+    increment(todayKey(), { uptime_seconds: seconds });
+  }
+
+  function getDailyMetric(date) {
+    const key = date || todayKey();
+    return Promise.resolve(state.daily_metrics[key] || null);
+  }
+
+  function listDailyMetrics(sinceDate) {
+    const rows = Object.values(state.daily_metrics || {}).sort((a, b) => a.date.localeCompare(b.date));
+    if (!sinceDate) return Promise.resolve(rows);
+    return Promise.resolve(rows.filter((row) => row.date >= sinceDate));
+  }
+
+  return {
+    trackEvent,
+    addUptime,
+    listDailyMetrics,
+    getDailyMetric,
+  };
+}
+
 function createTelemetryStore(dbPath) {
+  let sqlite3 = null;
+  try {
+    // Native sqlite binary may be unavailable in cross-platform packaged builds.
+    sqlite3 = require("sqlite3").verbose();
+  } catch (_error) {
+    return createFallbackStore(dbPath);
+  }
+
   ensureDir(dbPath);
   const db = new sqlite3.Database(dbPath);
 

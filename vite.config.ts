@@ -6,6 +6,10 @@ export default defineConfig({
   root: path.resolve(__dirname, "client"),
   base: "./",
   plugins: [react()],
+  optimizeDeps: {
+    // Prevent dependency scanner from treating build output HTML as an entry.
+    entries: [path.resolve(__dirname, "client/index.html")],
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "client", "src"),
