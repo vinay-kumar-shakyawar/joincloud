@@ -59,12 +59,15 @@
           <div style="margin-bottom:16px;">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.7"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
           </div>
-          <h2 style="margin:0 0 8px">Sign in to JoinCloud</h2>
-          <p id="activation-gate-trial-text" class="value value-muted" style="margin:0 0 24px; line-height:1.5;">A free trial starts automatically when you sign in. Create shares and manage your files - no credit card required.</p>
-          <button class="button" id="activation-gate-signin-web" style="width:100%; padding:12px 0; font-size:15px;">Sign In / Create Account</button>
+          <h2 style="margin:0 0 8px">Setting up JoinCloud</h2>
+          <p id="activation-gate-trial-text" class="value value-muted" style="margin:0 0 24px; line-height:1.5;">A free device trial starts automatically on first install. Open Dashboard from Settings to manage your account. Use the links below to extend trial or upgrade.</p>
+          <button class="button" id="activation-gate-signin-web" style="width:100%; padding:12px 0; font-size:15px; display:none;">Sign In (optional)</button>
           <button class="button secondary" id="activation-gate-extend-trial" style="width:100%; padding:12px 0; font-size:14px; margin-top:8px; display:none;">Extend Trial</button>
           <div id="activation-gate-message" class="modal-result" style="margin-top:12px;"></div>
-          <p class="value value-muted" style="margin-top:20px; font-size:12px; line-height:1.4;">Your browser will open to sign in or create an account.<br>You'll be redirected back here automatically.</p>
+          <p class="value value-muted" style="margin-top:12px; font-size:12px; line-height:1.4;">Dashboard is available from the app without signing in.</p>
+          <button class="button secondary" id="activation-gate-retry" style="width:100%; padding:10px 0; font-size:13px; margin-top:8px; display:none;">
+            Retry activation
+          </button>
           <p id="activation-gate-upgrade-wrap" style="display:none; margin-top:12px;">
             <a id="activation-gate-upgrade-link" class="link" href="#" target="_blank" rel="noopener noreferrer">Upgrade / Purchase</a>
             <span id="activation-gate-extend-sep" class="value value-muted" style="margin:0 8px; display:none;">·</span>
@@ -410,7 +413,7 @@
             <div class="value value-muted" id="subscription-helper-text" style="margin-top:8px; font-size: 12px;"></div>
           </div>
           <div class="row" style="margin-top:12px;">
-            <button class="button secondary" id="settings-logout" type="button">Sign out</button>
+            <button class="button secondary" id="settings-logout" type="button" style="display:none;">Sign out</button>
           </div>
         </div>
 
@@ -640,11 +643,7 @@
         </div>
         <div class="modal-body">
           <div id="activation-block" class="activation-block" style="display:none">
-            <p class="value value-muted">Sign in once to link this device to your account. You can then create shares and use all features without signing in again.</p>
-            <div class="activation-actions">
-              <button class="button" id="activation-signin-web">Sign In / Create Account</button>
-            </div>
-            <p class="value value-muted" style="margin-top:8px;font-size:12px;">Opens the JoinCloud website in your browser. You'll be redirected back here automatically.</p>
+            <p class="value value-muted">Upgrade or activate a plan to create shares.</p>
             <div id="activation-message" class="modal-result"></div>
             <p class="activation-upgrade-wrap" id="activation-upgrade-wrap" style="display:none; margin-top: 12px;">
               <a id="activation-upgrade-link" class="link" href="#" target="_blank" rel="noopener noreferrer">Upgrade Plan</a>

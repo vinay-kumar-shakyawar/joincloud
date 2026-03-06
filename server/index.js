@@ -149,6 +149,25 @@ function writeLocalUsage(payload) {
   } catch (_) {}
 }
 
+/** Returns current license state from local entitlements or license file, or null if unreadable. */
+function getLicenseStateFromLocalState() {
+  try {
+    const paths = getActivationPaths();
+    if (paths) {
+      const entPath = path.join(paths.systemDir, "entitlements.json");
+      if (fsSync.existsSync(entPath)) {
+        const ent = JSON.parse(fsSync.readFileSync(entPath, "utf8"));
+        return String(ent?.licenseState ?? "").toLowerCase();
+      }
+      if (fsSync.existsSync(paths.licensePath)) {
+        const lic = JSON.parse(fsSync.readFileSync(paths.licensePath, "utf8"));
+        return String(lic?.state ?? "").toLowerCase();
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
 function getShareLimitFromLocalState() {
   try {
     const paths = getActivationPaths();
@@ -1079,9 +1098,14 @@ async function bootstrap() {
       res.status(503).json({ message: "Control Plane not configured. Set JOINCLOUD_ADMIN_HOST." });
       return;
     }
-    const deviceId = req.body?.deviceId || getHostUuidForConfig();
+    // Prefer host_uuid from disk so the license is keyed by the same id used for config and dashboard link (avoids "host" or wrong id from UI)
+    const hostUuidFromFile = getHostUuidForConfig();
+    const bodyDeviceId = req.body?.deviceId && String(req.body.deviceId).trim();
+    const deviceId = (hostUuidFromFile && hostUuidFromFile.length >= 8)
+      ? hostUuidFromFile
+      : (bodyDeviceId && bodyDeviceId.length >= 8 && bodyDeviceId !== "host" ? bodyDeviceId : null);
     if (!deviceId || deviceId.length < 8) {
-      res.status(400).json({ message: "deviceId required (min 8 chars)" });
+      res.status(400).json({ message: "deviceId required (min 8 chars). Open the app from this device so the host id is available." });
       return;
     }
     controlPlanePost(adminHost, "/api/v1/devices/bootstrap-trial", { deviceId }, null, (err, result) => {
@@ -2173,6 +2197,15 @@ async function bootstrap() {
       const access = getRequestContext(req);
       if (access.role !== "host") {
         res.status(403).json({ error: "remote_devices_are_read_only_for_sharing" });
+        return;
+      }
+      const licenseState = getLicenseStateFromLocalState();
+      const isExpiredOrUnregistered = licenseState === "expired" || licenseState === "unregistered";
+      if (isExpiredOrUnregistered) {
+        res.status(403).json({
+          error: "plan_ended",
+          message: "Your plan has ended. Upgrade or activate a plan to create shares.",
+        });
         return;
       }
       const { path: sharePath, permission, ttlMs, scope } = req.body || {};

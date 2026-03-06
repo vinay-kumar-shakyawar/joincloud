@@ -50,6 +50,7 @@ const els = {
   activationGateUpgradeWrap: document.getElementById("activation-gate-upgrade-wrap"),
   activationGateExtendLink: document.getElementById("activation-gate-extend-link"),
   activationGateUpgradeLink: document.getElementById("activation-gate-upgrade-link"),
+  activationGateRetry: document.getElementById("activation-gate-retry"),
   accessDeviceNameInput: document.getElementById("access-device-name-input"),
   accessFingerprint: document.getElementById("access-fingerprint"),
   accessStatus: document.getElementById("access-status"),
@@ -1207,7 +1208,12 @@ function updateButtonStates() {
       primaryBtn.href = dashboardUrl;
       primaryBtn.style.display = "";
     }
-    // State: Trial without account - show "Sign In"
+    // State: Trial without account - show "Open Dashboard" (device-first; dashboard works with deviceId)
+    else if ((ls === "trial_active" || ls === "trialing") && deviceId) {
+      primaryBtn.textContent = "Open Dashboard";
+      primaryBtn.href = dashboardUrl;
+      primaryBtn.style.display = "";
+    }
     else {
       primaryBtn.textContent = "Sign In";
       primaryBtn.href = signInUrl;
@@ -1215,18 +1221,10 @@ function updateButtonStates() {
     }
   }
   
-  // Secondary button (Sign out) visibility
+  // Secondary button is not used in this build – keep it hidden so users
+  // always stay in the device-first flow without email sign-out/sign-in.
   if (secondaryBtn) {
-    if (isAuth) {
-      secondaryBtn.textContent = "Sign out";
-      secondaryBtn.style.display = "";
-    } else if (ls === "trial_active" || ls === "trialing") {
-      // During trial without account, hide sign out
-      secondaryBtn.style.display = "none";
-    } else {
-      secondaryBtn.textContent = "Sign in";
-      secondaryBtn.style.display = "";
-    }
+    secondaryBtn.style.display = "none";
   }
   
   // Upgrade link visibility
@@ -1251,10 +1249,10 @@ function updateActivationGateTrialText() {
     var planName = (state.licenseTier || "").replace(/^./, (c) => c.toUpperCase());
     el.textContent = "Sign in to continue using your " + planName + " plan. Pro, Teams, and Custom plans require an active sign-in.";
   } else if (state.licenseState === "UNREGISTERED" || state.licenseState === "EXPIRED" || state.licenseState === "expired") {
-    el.textContent = "Sign in to start a free trial, or purchase a Pro, Teams, or Custom plan to use JoinCloud.";
+    el.textContent = "A free trial starts automatically on first install (device-based). Sign in only if you want to extend your trial or upgrade to a paid plan.";
   } else {
     var days = state.trialDays || 7;
-    el.textContent = "A free " + days + "-day trial starts automatically when you sign in. Create shares and manage your files - no credit card required.";
+    el.textContent = "You're on a free " + days + "-day device trial. Create shares and manage your files — no credit card required. Sign in only to extend or upgrade.";
   }
 }
 
@@ -1309,25 +1307,40 @@ function updateGraceBanner() {
     return;
   }
 
+  // Trial Active: show banner below header
   if (state.licenseState === "trial_active" && state.licenseExpiresAt) {
     var now = Math.floor(Date.now() / 1000);
     var remaining = state.licenseExpiresAt - now;
     var daysLeft = Math.ceil(remaining / 86400);
+    els.graceBanner.style.display = "block";
     if (daysLeft <= 3 && daysLeft > 0) {
-      els.graceBanner.style.display = "block";
       if (bannerText) bannerText.textContent = "Your free trial expires in " + daysLeft + " day" + (daysLeft !== 1 ? "s" : "") + ". Upgrade to keep using JoinCloud.";
-      if (bannerUpgrade) {
-        bannerUpgrade.style.display = "inline";
-        bannerUpgrade.textContent = "Upgrade now";
-        bannerUpgrade.href = webUrl + "/billing?" + params.toString();
-      }
-      return;
+    } else {
+      if (bannerText) bannerText.textContent = "Trial is Active. Upgrade to a paid plan.";
     }
+    if (bannerUpgrade) {
+      bannerUpgrade.style.display = "inline";
+      bannerUpgrade.textContent = "Upgrade now";
+      bannerUpgrade.href = webUrl + "/billing?" + params.toString();
+    }
+    return;
+  }
+  // trialing (paid subscription trial) - same banner as trial_active
+  if (state.licenseState === "trialing") {
+    els.graceBanner.style.display = "block";
+    if (bannerText) bannerText.textContent = "Trial is Active. Upgrade to a paid plan.";
+    if (bannerUpgrade) {
+      bannerUpgrade.style.display = "inline";
+      bannerUpgrade.textContent = "Upgrade now";
+      bannerUpgrade.href = webUrl + "/billing?" + params.toString();
+    }
+    return;
   }
 
+  // Trial End
   if (state.licenseState === "expired" || state.licenseState === "EXPIRED") {
     els.graceBanner.style.display = "block";
-    if (bannerText) bannerText.textContent = "Trial ended - Upgrade to continue.";
+    if (bannerText) bannerText.textContent = "Your trial is expired. Upgrade to a paid plan or move to Free tier.";
     if (bannerUpgrade) {
       bannerUpgrade.style.display = "inline";
       bannerUpgrade.textContent = "Upgrade now";
@@ -1345,10 +1358,10 @@ function updateGraceBanner() {
     if (deviceId3) params3.set("deviceId", deviceId3);
     var pricingHref = webUrl3 + "/billing" + (params3.toString() ? "?" + params3.toString() : "");
     var extendHref = deviceId3
-      ? `${webUrl3}/auth/desktop?deviceId=${encodeURIComponent(deviceId3)}&mode=extendTrial`
-      : `${webUrl3}/auth/desktop?mode=extendTrial`;
+      ? webUrl3 + "/auth/desktop?deviceId=" + encodeURIComponent(deviceId3) + "&mode=extendTrial"
+      : webUrl3 + "/auth/desktop?mode=extendTrial";
     if (bannerText) {
-      bannerText.innerHTML = `Trial ended - Upgrade to unlock Teams and increase share limits. <a href="${pricingHref}" target="_blank" rel="noopener noreferrer" style="text-decoration:underline;color:inherit">Upgrade / Purchase</a> · <a href="${extendHref}" target="_blank" rel="noopener noreferrer" style="text-decoration:underline;color:inherit">Extend Trial</a>.`;
+      bannerText.innerHTML = "Your trial is expired. Upgrade to a paid plan or move to Free tier. <a href=\"" + pricingHref + "\" target=\"_blank\" rel=\"noopener noreferrer\" style=\"text-decoration:underline;color:inherit\">Upgrade / Purchase</a> \u00b7 <a href=\"" + extendHref + "\" target=\"_blank\" rel=\"noopener noreferrer\" style=\"text-decoration:underline;color:inherit\">Extend Trial</a>.";
     }
     if (bannerUpgrade) bannerUpgrade.style.display = "none";
     return;
@@ -1548,8 +1561,8 @@ function updateSubscriptionSection() {
     els.settingsOpenDashboardLink.rel = "noopener noreferrer";
   }
   if (els.settingsLogout) {
-    els.settingsLogout.style.display = "";
-    els.settingsLogout.textContent = isAuth ? "Sign out" : "Sign in";
+    // Hide settings logout/sign-in button in this build.
+    els.settingsLogout.style.display = "none";
   }
   if (els.subscriptionHelperText) {
     if (isAuth) {
@@ -1608,12 +1621,11 @@ function isTeamsEnabledByEntitlement() {
 }
 
 function shouldShowTeamsMenu() {
+  // Only show Teams section for Free Trial and Teams plan; hide for Free (post-trial), Pro, and Custom.
   if (state.entitlements?.uiTeasers && typeof state.entitlements.uiTeasers.showTeamsMenu === "boolean") {
     return state.entitlements.uiTeasers.showTeamsMenu;
   }
-  const tier = String(state.licenseTier || "").toLowerCase();
-  if (isTeamsEnabledByEntitlement() || tier === "pro") return true;
-  return tier === "free" || tier === "trial" || state.licenseState === "UNREGISTERED" || state.licenseState === "trial_active";
+  return isTeamsEnabledByEntitlement();
 }
 
 function showNetworkToast() {
@@ -3031,10 +3043,30 @@ async function bootstrapApp() {
             body: JSON.stringify(deviceId ? { deviceId } : {}),
           });
           if (bootstrapRes.ok) {
-            await fetchStatus();
+            // Refresh control-plane config so licenseState/activationRequired reflect the new trial
+            await loadControlPlaneConfig();
             break;
+          } else if (bootstrapRes.status === 502 || bootstrapRes.status === 503 || bootstrapRes.status === 500) {
+            if (els.activationGateMessage) {
+              els.activationGateMessage.textContent =
+                "Cannot reach JoinCloud Control Plane. Check your internet connection or ask your admin to start JoinCloudAdmin, then click Retry activation.";
+              els.activationGateMessage.style.color = "#f97316";
+            }
+            if (els.activationGateRetry) {
+              els.activationGateRetry.style.display = "block";
+            }
           }
-        } catch (_) {}
+        } catch (_) {
+          // Network/offline error – show offline activation helper with retry.
+          if (els.activationGateMessage) {
+            els.activationGateMessage.textContent =
+              "Cannot reach JoinCloud Control Plane. Please check your internet connection or ask your admin to complete registration, then click Retry activation.";
+            els.activationGateMessage.style.color = "#f97316";
+          }
+          if (els.activationGateRetry) {
+            els.activationGateRetry.style.display = "block";
+          }
+        }
         if (attempt < 2) await new Promise((r) => setTimeout(r, 1500));
       }
       needsActivation = state.activationRequired || state.licenseState === "UNREGISTERED";
@@ -3596,35 +3628,11 @@ if (typeof window !== "undefined" && window.joincloud && window.joincloud.onLice
   });
 }
 if (els.subscriptionManageBtn) els.subscriptionManageBtn.onclick = openBillingPortal;
-if (els.settingsLogout) {
-  els.settingsLogout.onclick = async () => {
-    if (!state.isAuthenticated) {
-      const webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
-      const deviceId = state.hostUuidFromConfig || state.deviceId || "";
-      const signInUrl = deviceId ? `${webUrl}/auth/desktop?deviceId=${encodeURIComponent(deviceId)}` : `${webUrl}/auth/desktop`;
-      if (window.joincloud && window.joincloud.openAuthModal) {
-        window.joincloud.openAuthModal(signInUrl);
-      } else {
-        window.open(signInUrl, "_blank", "noopener,noreferrer");
-      }
-      return;
-    }
-    try {
-      const res = await apiFetch("/api/v1/auth/logout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      if (res.ok) {
-        if (window.joincloud && window.joincloud.onLicenseUpdated) {
-          window.joincloud.onLicenseUpdated();
-        }
-        // Refresh config and UI immediately (no reload) so Settings shows signed-out state
-        await loadControlPlaneConfig();
-      }
-    } catch (_) {
-      window.location.reload();
-    }
+// settingsLogout intentionally has no click handler in this build (button is hidden).
+if (els.activationGateRetry) {
+  els.activationGateRetry.onclick = () => {
+    // Reload to retry activation/bootstrap when network or Control Plane is back.
+    window.location.reload();
   };
 }
 if (els.supportSend) els.supportSend.onclick = sendSupportMessage;
