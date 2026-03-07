@@ -1,6 +1,7 @@
 "use strict";
 
 const https = require("https");
+const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
@@ -16,21 +17,28 @@ function normalizePlatform(platform) {
 }
 
 function parseHost(host) {
-  if (!host || typeof host !== "string") return { hostname: "", port: 443 };
-  const idx = host.indexOf(":");
-  if (idx === -1) return { hostname: host.trim(), port: 443 };
-  return {
-    hostname: host.slice(0, idx).trim(),
-    port: parseInt(host.slice(idx + 1), 10) || 443,
-  };
+  if (!host || typeof host !== "string") return null;
+  const withProtocol = host.indexOf("://") === -1 ? `https://${host}` : host;
+  try {
+    const u = new URL(withProtocol);
+    return {
+      hostname: u.hostname,
+      port: u.port ? parseInt(u.port, 10) : (u.protocol === "https:" ? 443 : 80),
+      isHttps: u.protocol === "https:",
+    };
+  } catch (_) {
+    return null;
+  }
 }
 
 function post(host, pathname, payload, timeoutMs) {
-  const { hostname, port } = parseHost(host);
-  if (!hostname) return Promise.resolve({ ok: false, error: "no host" });
+  const parsed = parseHost(host);
+  if (!parsed || !parsed.hostname) return Promise.resolve({ ok: false, error: "no host" });
+  const { hostname, port, isHttps } = parsed;
+  const lib = isHttps ? https : http;
   return new Promise((resolve) => {
     const data = JSON.stringify(payload);
-    const req = https.request(
+    const req = lib.request(
       {
         method: "POST",
         hostname,

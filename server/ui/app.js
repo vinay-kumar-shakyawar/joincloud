@@ -444,9 +444,9 @@ function canUseApp() {
     ls === "grace" ||
     ls === "trialing";
 
-  // Paid plans must be authenticated
+  // Paid plans: allow access when license is active (sign-in optional)
   if (isPaidTier) {
-    return state.isAuthenticated === true && isValidLicenseState;
+    return isValidLicenseState;
   }
 
   // Trial/free devices can use app if trial is active

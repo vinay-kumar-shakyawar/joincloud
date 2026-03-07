@@ -18,7 +18,7 @@ function postTelemetry(adminHost, payload) {
           "Content-Type": "application/json",
           "Content-Length": Buffer.byteLength(data),
         },
-        timeout: 5000,
+        timeout: 15000,
       },
       (res) => {
         res.resume();
