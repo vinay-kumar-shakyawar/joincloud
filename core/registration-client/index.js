@@ -55,14 +55,16 @@ function post(host, pathname, payload, timeoutMs) {
         res.on("data", (chunk) => { body += chunk; });
         res.on("end", () => {
           const ok = res.statusCode >= 200 && res.statusCode < 300;
-          resolve({ ok, statusCode: res.statusCode, body });
+          let parsedBody = null;
+          try { parsedBody = JSON.parse(body); } catch (_) {}
+          resolve({ ok, statusCode: res.statusCode, body, parsedBody });
         });
       }
     );
-    req.on("error", (err) => resolve({ ok: false, error: err.message }));
+    req.on("error", (err) => resolve({ ok: false, error: `network error: ${err.code || err.message} – ${err.message}` }));
     req.on("timeout", () => {
       req.destroy();
-      resolve({ ok: false, error: "timeout" });
+      resolve({ ok: false, error: `timeout after ${timeoutMs}ms – control plane host: ${hostname}:${port}` });
     });
     req.write(data);
     req.end();
@@ -91,9 +93,17 @@ async function registerHost(identity, options) {
   } = options || {};
 
   if (!controlPlaneHost || !identity?.host_uuid) {
-    if (!controlPlaneHost) log("registration skipped", { reason: "no control plane host" });
+    if (!controlPlaneHost) log("registration skipped", { reason: "no control plane host configured (JOINCLOUD_CONTROL_PLANE_URL not set)" });
+    else log("registration skipped", { reason: "missing host_uuid in identity" });
     return { success: false };
   }
+
+  const parsed = parseHost(controlPlaneHost);
+  log("registration attempt", {
+    url: `${controlPlaneHost}/api/v1/hosts/register`,
+    resolvedHost: parsed ? `${parsed.isHttps ? "https" : "http"}://${parsed.hostname}:${parsed.port}` : "(unparseable host)",
+    host_uuid_truncated: (identity.host_uuid || "").slice(0, 8) + "…",
+  });
 
   const payload = {
     host_uuid: identity.host_uuid,
@@ -123,7 +133,14 @@ async function registerHost(identity, options) {
     return { success: true };
   }
 
-  log("registration failed", { statusCode: result.statusCode, error: result.error });
+  const serverMessage = result.parsedBody?.message || result.parsedBody?.error || null;
+  log("registration failed", {
+    url: `${controlPlaneHost}/api/v1/hosts/register`,
+    statusCode: result.statusCode ?? null,
+    error: result.error ?? null,
+    serverMessage,
+    rawBody: !serverMessage && result.body ? result.body.slice(0, 200) : undefined,
+  });
   savePendingPayload(pendingPath(identityPath), payload);
   return { success: false };
 }
@@ -157,7 +174,14 @@ async function sendHeartbeat(identity, options) {
     log("heartbeat ok", { host_uuid_truncated: (identity.host_uuid || "").slice(0, 8) + "…" });
     return { success: true };
   }
-  log("heartbeat failed", { statusCode: result.statusCode, error: result.error });
+  const serverMessage = result.parsedBody?.message || result.parsedBody?.error || null;
+  log("heartbeat failed", {
+    url: `${controlPlaneHost}/api/v1/hosts/heartbeat`,
+    statusCode: result.statusCode ?? null,
+    error: result.error ?? null,
+    serverMessage,
+    rawBody: !serverMessage && result.body ? result.body.slice(0, 200) : undefined,
+  });
   return { success: false };
 }
 

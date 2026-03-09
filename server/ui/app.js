@@ -96,6 +96,10 @@ const els = {
   teamsList: document.getElementById("teams-list"),
   teamsEmptyState: document.getElementById("teams-empty-state"),
   teamsLayout: document.getElementById("teams-layout"),
+  teamsLockedOverlay: document.getElementById("teams-locked-overlay"),
+  teamsLockedTitle: document.getElementById("teams-locked-title"),
+  teamsLockedText: document.getElementById("teams-locked-text"),
+  teamsLockedUpgrade: document.getElementById("teams-locked-upgrade"),
   teamDetail: document.getElementById("team-detail"),
   teamDetailBack: document.getElementById("team-detail-back"),
   teamToggleRight: document.getElementById("team-toggle-right"),
@@ -359,18 +363,31 @@ function showActivationGate() {
   if (els.activationGate) els.activationGate.classList.add("visible");
   setActivationGateMessage("");
   updateActivationGateTrialText();
-  var webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+  var webUrl = window.__JOINCLOUD_WEB_URL__ || "https://dashboard.joincloud.in";
+  var isRevoked = state.licenseState === "revoked";
   var deviceId = state.hostUuidFromConfig || state.deviceId || "";
   var accountId = state.accountId || "";
+  var titleEl = document.getElementById("activation-gate-title");
   var billingParams = new URLSearchParams();
   if (accountId) billingParams.set("accountId", accountId);
   if (deviceId) billingParams.set("deviceId", deviceId);
   var billingUrl = billingParams.toString() ? `${webUrl}/billing?${billingParams.toString()}` : (state.upgradeUrl || `${webUrl}/billing`);
+  var supportComposeUrl = "https://mail.google.com/mail/?view=cm&to=vinay@arevei.com&cc=rishabh@arevei.com&su=JoinCloud%20Support";
+  if (titleEl) {
+    titleEl.textContent = isRevoked ? "License revoked" : "Activating JoinCloud loading";
+  }
   if (els.activationGateUpgradeWrap) {
     els.activationGateUpgradeWrap.style.display = "block";
-    if (els.activationGateUpgradeLink) els.activationGateUpgradeLink.href = billingUrl;
+    if (els.activationGateUpgradeLink) {
+      els.activationGateUpgradeLink.href = isRevoked ? supportComposeUrl : billingUrl;
+      els.activationGateUpgradeLink.textContent = isRevoked ? "Contact Support" : "Upgrade / Purchase";
+    }
   }
-  const showExtendTrial = state.canExtendTrial && !isPaidPlanTier();
+  if (isRevoked) {
+    if (els.activationGateSigninWeb) els.activationGateSigninWeb.style.display = "none";
+    if (els.activationGateRetry) els.activationGateRetry.style.display = "none";
+  }
+  const showExtendTrial = !isRevoked && state.canExtendTrial && !isPaidPlanTier();
   if (els.activationGateExtendTrial) {
     els.activationGateExtendTrial.style.display = showExtendTrial ? "block" : "none";
   }
@@ -1202,8 +1219,8 @@ function updateButtonStates() {
       primaryBtn.href = signInUrl;
       primaryBtn.style.display = "";
     }
-    // State: Authenticated - show "Open Dashboard"
-    else if (isAuth) {
+    // State: Authenticated or active plan - show "Open Dashboard"
+    else if (isAuth || ls === "active" || ls === "trial_active" || ls === "trialing" || ls === "grace") {
       primaryBtn.textContent = "Open Dashboard";
       primaryBtn.href = dashboardUrl;
       primaryBtn.style.display = "";
@@ -1215,8 +1232,8 @@ function updateButtonStates() {
       primaryBtn.style.display = "";
     }
     else {
-      primaryBtn.textContent = "Sign In";
-      primaryBtn.href = signInUrl;
+      primaryBtn.textContent = "Open Dashboard";
+      primaryBtn.href = dashboardUrl;
       primaryBtn.style.display = "";
     }
   }
@@ -1245,9 +1262,11 @@ function updateButtonStates() {
 function updateActivationGateTrialText() {
   var el = document.getElementById("activation-gate-trial-text");
   if (!el) return;
-  if (isPaidPlanTier() && !state.isAuthenticated) {
-    var planName = (state.licenseTier || "").replace(/^./, (c) => c.toUpperCase());
-    el.textContent = "Sign in to continue using your " + planName + " plan. Pro, Teams, and Custom plans require an active sign-in.";
+  if (state.licenseState === "revoked") {
+    el.textContent = "Admin has revoked your device license due to unwanted activity. Contact customer support at vinay@arevei.com to review or restore access.";
+  } else if (isPaidPlanTier()) {
+    var planName = (state.licenseTier || "plan").replace(/^./, (c) => c.toUpperCase());
+    el.textContent = "Your " + planName + " plan is active. Open Dashboard from Settings to manage billing and account details. Sign in is optional on this device.";
   } else if (state.licenseState === "UNREGISTERED" || state.licenseState === "EXPIRED" || state.licenseState === "expired") {
     el.textContent = "A free trial starts automatically on first install (device-based). Sign in only if you want to extend your trial or upgrade to a paid plan.";
   } else {
@@ -1278,16 +1297,9 @@ function updateGraceBanner() {
     return;
   }
 
-  // Revoked state - critical banner
+  // Revoked state is handled in the activation gate modal instead of the top banner.
   if (state.licenseState === "revoked") {
-    els.graceBanner.style.display = "block";
-    els.graceBanner.className = "grace-banner banner-critical";
-    if (bannerText) bannerText.innerHTML = "<strong>License Revoked</strong> \u2013 Your license has been revoked. Please contact support for assistance.";
-    if (bannerUpgrade) {
-      bannerUpgrade.style.display = "inline";
-      bannerUpgrade.textContent = "Contact Support";
-      bannerUpgrade.href = webUrl + "/support?" + params.toString();
-    }
+    els.graceBanner.style.display = "none";
     return;
   }
 
@@ -1351,7 +1363,7 @@ function updateGraceBanner() {
 
   if (state.licenseState === "UNREGISTERED") {
     els.graceBanner.style.display = "block";
-    var webUrl3 = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+    var webUrl3 = window.__JOINCLOUD_WEB_URL__ || "https://dashboard.joincloud.in";
     var params3 = new URLSearchParams();
     var deviceId3 = state.hostUuidFromConfig || state.deviceId || "";
     if (state.accountId) params3.set("accountId", state.accountId);
@@ -1364,20 +1376,6 @@ function updateGraceBanner() {
       bannerText.innerHTML = "Your trial is expired. Upgrade to a paid plan or move to Free tier. <a href=\"" + pricingHref + "\" target=\"_blank\" rel=\"noopener noreferrer\" style=\"text-decoration:underline;color:inherit\">Upgrade / Purchase</a> \u00b7 <a href=\"" + extendHref + "\" target=\"_blank\" rel=\"noopener noreferrer\" style=\"text-decoration:underline;color:inherit\">Extend Trial</a>.";
     }
     if (bannerUpgrade) bannerUpgrade.style.display = "none";
-    return;
-  }
-
-  const isTrial = /^trial/i.test(String(state.licenseState || "")) || state.licenseState === "TRIAL" || state.licenseState === "TRIAL_ACTIVE";
-  if (!state.isAuthenticated && !isTrial) {
-    els.graceBanner.style.display = "block";
-    if (bannerText) bannerText.textContent = "Please activate a plan or sign in.";
-    if (bannerUpgrade) {
-      bannerUpgrade.style.display = "inline";
-      var webUrlAct = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
-      var paramsAct = new URLSearchParams();
-      if (state.hostUuidFromConfig || state.deviceId) paramsAct.set("deviceId", state.hostUuidFromConfig || state.deviceId);
-      bannerUpgrade.href = webUrlAct + "/billing" + (paramsAct.toString() ? "?" + paramsAct.toString() : "");
-    }
     return;
   }
 
@@ -1461,7 +1459,10 @@ function updateSubscriptionSection() {
     noTrialBanner.style.display = showNoTrialBanner ? "block" : "none";
     if (showNoTrialBanner) {
       const webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
-      noTrialSigninLink.href = deviceIdForDisplay ? `${webUrl}/auth/desktop?deviceId=${encodeURIComponent(deviceIdForDisplay)}` : `${webUrl}/auth/desktop`;
+      const params = new URLSearchParams();
+      if (deviceIdForDisplay) params.set("deviceId", deviceIdForDisplay);
+      if (state.accountId) params.set("accountId", state.accountId);
+      noTrialSigninLink.href = `${webUrl}/billing${params.toString() ? "?" + params.toString() : ""}`;
       noTrialSigninLink.target = "_blank";
       noTrialSigninLink.rel = "noopener noreferrer";
     }
@@ -1548,14 +1549,14 @@ function updateSubscriptionSection() {
     ? `${webUrl}/auth/desktop?deviceId=${encodeURIComponent(deviceIdSub2)}`
     : `${webUrl}/auth/desktop`;
   if (els.settingsOpenDashboardLink) {
-    if (isAuth) {
+    if (isAuth || ls === "active" || ls === "trial_active" || ls === "trialing" || ls === "grace") {
       els.settingsOpenDashboardLink.style.display = "";
       els.settingsOpenDashboardLink.textContent = "Open Dashboard";
       els.settingsOpenDashboardLink.href = dashboardUrl;
     } else {
       els.settingsOpenDashboardLink.style.display = "";
-      els.settingsOpenDashboardLink.textContent = "Sign in";
-      els.settingsOpenDashboardLink.href = signInUrl;
+      els.settingsOpenDashboardLink.textContent = "Open Dashboard";
+      els.settingsOpenDashboardLink.href = dashboardUrl;
     }
     els.settingsOpenDashboardLink.target = "_blank";
     els.settingsOpenDashboardLink.rel = "noopener noreferrer";
@@ -1565,7 +1566,7 @@ function updateSubscriptionSection() {
     els.settingsLogout.style.display = "none";
   }
   if (els.subscriptionHelperText) {
-    if (isAuth) {
+    if (isAuth || ls === "active" || ls === "grace" || ls === "trialing") {
       els.subscriptionHelperText.textContent = "Manage your subscription or extend trial.";
     } else if (isTrialActive) {
       els.subscriptionHelperText.textContent = "Sign in to link this device to your account and manage your subscription.";
@@ -1612,20 +1613,44 @@ function canAddDeviceOrCreateShare() {
 
 function isTeamsEnabledByEntitlement() {
   const ls = String(state.licenseState || "").toUpperCase().replace(/-/g, "_");
-  if (ls === "TRIAL" || ls === "TRIAL_ACTIVE") return true;
+  if (ls === "TRIAL" || ls === "TRIAL_ACTIVE" || ls === "FREE") return true;
   if (state.entitlements && typeof state.entitlements.teamEnabled === "boolean") {
-    return state.entitlements.teamEnabled;
+    if (state.entitlements.teamEnabled) return true;
   }
   const tier = String(state.licenseTier || "").toLowerCase();
-  return tier === "team" || tier === "teams";
+  return tier === "free" || tier === "team" || tier === "teams";
 }
 
 function shouldShowTeamsMenu() {
-  // Only show Teams section for Free Trial and Teams plan; hide for Free (post-trial), Pro, and Custom.
-  if (state.entitlements?.uiTeasers && typeof state.entitlements.uiTeasers.showTeamsMenu === "boolean") {
-    return state.entitlements.uiTeasers.showTeamsMenu;
+  return true;
+}
+
+function updateTeamsLockedState() {
+  const teamsEnabled = isTeamsEnabledByEntitlement();
+  const webUrl = window.__JOINCLOUD_WEB_URL__ || "https://joincloud.com";
+  const deviceId = state.hostUuidFromConfig || state.deviceId || "";
+  const params = new URLSearchParams();
+  if (deviceId) params.set("deviceId", deviceId);
+  const upgradeHref = webUrl + "/billing" + (params.toString() ? "?" + params.toString() : "");
+
+  if (els.teamsLayout) {
+    els.teamsLayout.classList.toggle("teams-locked", !teamsEnabled);
   }
-  return isTeamsEnabledByEntitlement();
+  if (els.teamsLockedOverlay) {
+    els.teamsLockedOverlay.style.display = teamsEnabled ? "none" : "flex";
+  }
+  if (els.teamsLockedTitle) {
+    els.teamsLockedTitle.textContent = teamsEnabled ? "" : "This plan does not include the Teams features";
+  }
+  if (els.teamsLockedText) {
+    els.teamsLockedText.textContent = teamsEnabled
+      ? ""
+      : "Upgrade to Teams or contact support for a Custom plan to unlock shared team spaces, team chat, and collaboration.";
+  }
+  if (els.teamsLockedUpgrade) {
+    els.teamsLockedUpgrade.href = upgradeHref;
+    els.teamsLockedUpgrade.style.display = teamsEnabled ? "none" : "inline-flex";
+  }
 }
 
 function showNetworkToast() {
@@ -1972,8 +1997,12 @@ const stateTeams = { teams: [], invites: [], currentTeamId: null, addMembersTeam
 
 async function loadTeams() {
   if (!els.teamsList) return;
+  updateTeamsLockedState();
   if (!isTeamsEnabledByEntitlement()) {
-    els.teamsList.innerHTML = '<div class="value value-muted">Teams are available on the Teams plan. Upgrade to create and manage teams.</div>';
+    els.teamsList.innerHTML = '<div class="value value-muted">Teams are locked for this plan.</div>';
+    if (els.teamsEmptyState) els.teamsEmptyState.style.display = "flex";
+    if (els.teamDetail) els.teamDetail.style.display = "none";
+    if (els.teamsLayout) els.teamsLayout.classList.remove("teams-has-team");
     return;
   }
   try {
@@ -3226,13 +3255,14 @@ function updateAdminUi() {
     activitySection.classList.remove("active");
   }
   if (teamsButton) {
-    teamsButton.style.display = teamsVisible ? "" : "none";
+    teamsButton.style.display = "";
     teamsButton.style.opacity = teamsEnabled ? "" : "0.7";
     teamsButton.title = teamsEnabled ? "Teams" : "Upgrade to Teams to unlock this feature";
   }
   if (teamsSection && !teamsVisible) {
     teamsSection.classList.remove("active");
   }
+  updateTeamsLockedState();
   if (els.addFileHeader) {
     els.addFileHeader.style.display = pendingRole ? "none" : "";
     els.addFileHeader.textContent = remoteRole ? "Add File" : "Add File";

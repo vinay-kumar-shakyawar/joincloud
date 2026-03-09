@@ -59,7 +59,7 @@
           <div style="margin-bottom:16px;">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity:.7"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
           </div>
-          <h2 style="margin:0 0 8px">Activating JoinCloud loading</h2>
+          <h2 id="activation-gate-title" style="margin:0 0 8px">Activating JoinCloud loading</h2>
           <p id="activation-gate-trial-text" class="value value-muted" style="margin:0 0 24px; line-height:1.5;">A free device trial starts automatically on first install. Open Dashboard from Settings to manage your account. Use the links below to extend trial or upgrade.</p>
           <button class="button" id="activation-gate-signin-web" style="width:100%; padding:12px 0; font-size:15px; display:none;">Sign In (optional)</button>
           <button class="button secondary" id="activation-gate-extend-trial" style="width:100%; padding:12px 0; font-size:14px; margin-top:8px; display:none;">Extend Trial</button>
@@ -73,7 +73,7 @@
             <span id="activation-gate-extend-sep" class="value value-muted" style="margin:0 8px; display:none;">·</span>
             <a id="activation-gate-extend-link" class="link" href="#" target="_blank" rel="noopener noreferrer" style="display:none;">Extend Trial</a>
           </p>
-          <p class="value value-muted" style="margin-top:16px; font-size:12px; line-height:1.5;">Need help? Contact support: <a class="link" href="https://mail.google.com/mail/?view=cm&to=vinay@arevei.com&cc=rishabh@arevei.com&su=JoinCloud%20Support" target="_blank" rel="noopener noreferrer">Desktop</a> · <a class="link" href="mailto:vinay@arevei.com" target="_blank" rel="noopener noreferrer">Mobile</a></p>
+          <p id="activation-gate-support" class="value value-muted" style="margin-top:16px; font-size:12px; line-height:1.5;">Need help? Contact support: <a class="link" href="https://mail.google.com/mail/?view=cm&to=vinay@arevei.com&cc=rishabh@arevei.com&su=JoinCloud%20Support" target="_blank" rel="noopener noreferrer">vinay@arevei.com</a></p>
         </section>
       </div>
     </section>
@@ -333,6 +333,13 @@
             </aside>
           </aside>
         </div>
+        <div class="teams-locked-overlay" id="teams-locked-overlay" style="display:none;">
+          <div class="teams-locked-card">
+            <div class="teams-locked-title" id="teams-locked-title">This plan does not include the Teams features</div>
+            <div class="teams-locked-text value value-muted" id="teams-locked-text">Upgrade to Teams or contact support for a Custom plan to unlock shared team spaces, team chat, and collaboration.</div>
+            <a class="button" id="teams-locked-upgrade" href="#" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">Upgrade to Teams</a>
+          </div>
+        </div>
       </section>
       
       <section class="card section" data-section="logs">
@@ -383,9 +390,9 @@
           </div>
           <!-- No-trial banner: shown when signed out and no active trial for this device -->
           <div id="settings-no-trial-banner" style="display:none; background:linear-gradient(135deg, rgba(47,183,255,0.15), rgba(47,183,255,0.05)); border:1px solid var(--accent,#2FB7FF); border-radius:10px; padding:14px 18px; margin-bottom:12px;">
-            <div style="font-weight:600; margin-bottom:4px;">Sign in required</div>
-            <div class="value value-muted" style="font-size:13px; margin-bottom:12px;">Trial works by device. Pro, Teams, and Custom plans require sign-in to use JoinCloud.</div>
-            <a id="settings-no-trial-signin-link" class="button" href="#" target="_blank" rel="noopener noreferrer" style="font-size:13px; padding:8px 16px; text-decoration:none; display:inline-block;">Sign in</a>
+            <div style="font-weight:600; margin-bottom:4px;">Plan activation required</div>
+            <div class="value value-muted" style="font-size:13px; margin-bottom:12px;">This device does not have an active plan yet. Activate or upgrade a plan to unlock all dashboard features.</div>
+            <a id="settings-no-trial-signin-link" class="button" href="#" target="_blank" rel="noopener noreferrer" style="font-size:13px; padding:8px 16px; text-decoration:none; display:inline-block;">Open billing</a>
           </div>
           <!-- Legacy profile row (hidden when rich card is shown) -->
           <div class="profile-row" id="settings-profile-row" style="display:none; margin-bottom: 12px; padding: 12px 0; border-bottom: 1px solid var(--border, #001C25);">
@@ -798,12 +805,6 @@
       <span class="upload-banner-text"></span>
       <button type="button" class="upload-banner-dismiss" aria-label="Dismiss">✕</button>
     </div>
-
-    <footer class="build-footer">
-      <span class="build-footer-left">JoinCloud</span>
-      <span id="build-id">BUILD: loading...</span>
-      <span class="build-footer-right" id="uptime-display"></span>
-    </footer>
 
     <script src="/vendor/qrious.min.js"></script>
     <script src="/app.js"></script>

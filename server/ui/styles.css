@@ -38,6 +38,7 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: var(--bg);
   color: var(--foreground);
+  min-height: 100vh;
 }
 body.activation-gate-active {
   overflow: hidden;
@@ -130,6 +131,10 @@ body.activation-gate-active {
   margin: var(--spacing-md) auto var(--spacing-sm);
   padding: 0 var(--spacing-md) var(--spacing-md);
   align-items: start;
+}
+
+#app-layout.layout {
+  min-height: calc(100vh - 72px);
 }
 
 @media (min-width: 769px) {
@@ -1595,6 +1600,7 @@ h3 {
 .teams-section.card {
   padding: 0;
   overflow: hidden;
+  position: relative;
 }
 
 /* Teams 3-column grid - no absolute positioning */
@@ -1603,6 +1609,44 @@ h3 {
   grid-template-columns: 280px 1fr;
   min-height: 480px;
   transition: grid-template-columns 200ms ease;
+}
+
+.teams-layout.teams-locked {
+  filter: blur(10px);
+  pointer-events: none;
+  user-select: none;
+}
+
+.teams-locked-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(0, 4, 5, 0.45);
+}
+
+.teams-locked-card {
+  width: min(460px, 100%);
+  text-align: center;
+  padding: 24px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--stroke);
+  background: rgba(10, 13, 17, 0.94);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+}
+
+.teams-locked-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--foreground);
+  margin-bottom: 8px;
+}
+
+.teams-locked-text {
+  margin-bottom: 16px;
 }
 
 .teams-layout.teams-has-team {
