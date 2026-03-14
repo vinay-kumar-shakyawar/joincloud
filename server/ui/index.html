@@ -388,6 +388,30 @@
               </div>
             </div>
           </div>
+          <!-- Usage progress bars (shown below profile card) -->
+          <div id="usage-bars-section" style="margin-top:12px; display:none;">
+            <div id="usage-bars-loader" class="usage-section-loader" style="display:none;">
+              <span class="usage-section-spinner"></span>
+              <span>Loading usage…</span>
+            </div>
+            <div id="usage-bars-error" class="usage-section-error" style="display:none;">
+              Connection error. Check your network and try again.
+            </div>
+            <div id="usage-bars-content" style="display:none;">
+              <h4 style="font-size:13px;font-weight:600;margin:0 0 10px;color:var(--fg,#fff);">Plan usage this month</h4>
+              <div id="shares-usage-bar" class="usage-bar-wrap">
+                <div class="usage-bar-label-title">Shares created</div>
+                <div class="usage-bar-track"><div class="usage-bar-fill"></div></div>
+                <div class="usage-bar-label"></div>
+              </div>
+              <div id="devices-usage-bar" class="usage-bar-wrap">
+                <div class="usage-bar-label-title">Devices linked</div>
+                <div class="usage-bar-track"><div class="usage-bar-fill"></div></div>
+                <div class="usage-bar-label"></div>
+              </div>
+              <div id="usage-near-limit-msg" class="usage-near-limit-msg" style="display:none; margin-top:10px; font-size:12px; color:var(--muted,#8B9CA3);"></div>
+            </div>
+          </div>
           <!-- No-trial banner: shown when signed out and no active trial for this device -->
           <div id="settings-no-trial-banner" style="display:none; background:linear-gradient(135deg, rgba(47,183,255,0.15), rgba(47,183,255,0.05)); border:1px solid var(--accent,#2FB7FF); border-radius:10px; padding:14px 18px; margin-bottom:12px;">
             <div style="font-weight:600; margin-bottom:4px;">Plan activation required</div>
@@ -799,6 +823,20 @@
         </div>
       </div>
     </div>
+    <!-- Device Limit Exceeded Modal: shown when approved devices exceed plan limit after downgrade -->
+    <div class="modal" id="device-limit-exceeded-modal">
+      <div class="modal-content" style="max-width:520px;">
+        <div class="modal-header">
+          <h3>Device Limit Exceeded</h3>
+        </div>
+        <div class="modal-body">
+          <div class="value" style="margin-bottom:8px;" id="device-limit-exceeded-desc"></div>
+          <div class="value value-muted" style="margin-bottom:14px;">Remove devices until you are within your plan limit to continue.</div>
+          <div id="device-limit-exceeded-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+        </div>
+      </div>
+    </div>
+
     <div id="notification-toast" class="notification-toast notification-toast-hidden" role="status" aria-live="polite" aria-hidden="true"></div>
 
     <div id="upload-banner" class="upload-banner upload-banner-hidden" role="status" aria-live="polite" aria-hidden="true">

@@ -40,6 +40,7 @@ import { motion } from "framer-motion";
 import { Link } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useLicenseUsage, isShareWithinLimit } from "@/lib/quota-guard";
 import type { StorageInfo, ShareLink, FileItem, CloudAgentStatus, AgentLog } from "@shared/schema";
 
 function formatBytes(bytes: number): string {
@@ -563,6 +564,14 @@ export default function ElectronDashboard() {
     queryKey: ["/api/agent/config"],
   });
 
+  const { data: licenseUsage } = useLicenseUsage();
+  const shareLimit = licenseUsage?.shares_limit ?? null;
+  const shareUsagePercent =
+    shareLimit && shareLimit > 0 ? Math.min(100, (licenseUsage!.shares_used / shareLimit) * 100) : null;
+  const devicesLimit = licenseUsage?.devices_limit ?? null;
+  const devicesUsagePercent =
+    devicesLimit && devicesLimit > 0 ? Math.min(100, ((licenseUsage?.devices_used ?? 0) / devicesLimit) * 100) : null;
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -577,6 +586,54 @@ export default function ElectronDashboard() {
         </div>
         <Badge variant="outline" className="text-xs">v1.0.0</Badge>
       </div>
+
+      {licenseUsage && (
+        <Card className="border-primary/40 bg-gradient-to-r from-primary/10 to-primary/5 mb-4">
+          <CardHeader className="py-3">
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Activity className="h-4 w-4 text-primary" />
+              License & Usage
+            </CardTitle>
+            <CardDescription className="text-xs">
+              State: {licenseUsage.license_state || "unknown"}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0 space-y-2">
+            {shareLimit && shareUsagePercent !== null && (
+              <div>
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span>Shares this month</span>
+                  <span>
+                    {licenseUsage.shares_used} / {shareLimit}
+                  </span>
+                </div>
+                <Progress value={shareUsagePercent} />
+                {licenseUsage.shares_remaining === 0 && (
+                  <p className="mt-1 text-xs text-red-500">
+                    Monthly share limit reached. Upgrade to continue sharing.
+                  </p>
+                )}
+              </div>
+            )}
+            {devicesLimit != null && devicesUsagePercent !== null && (
+              <div>
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span>Devices</span>
+                  <span>
+                    {licenseUsage.devices_used} / {devicesLimit}
+                  </span>
+                </div>
+                <Progress value={devicesUsagePercent} />
+                {licenseUsage.devices_used >= devicesLimit && (
+                  <p className="mt-1 text-xs text-red-500">
+                    Device limit reached. Upgrade to add more devices.
+                  </p>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}

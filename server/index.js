@@ -149,6 +149,19 @@ function writeLocalUsage(payload) {
   } catch (_) {}
 }
 
+function getCurrentShareUsageSummary() {
+  const ym = getYearMonthKey();
+  const usage = readLocalUsage();
+  const used = Number(usage.monthly_shares?.[ym] || 0);
+  const limit = getShareLimitFromLocalState();
+  const hasFiniteLimit = Number.isFinite(limit) && limit > 0;
+  return {
+    sharesUsed: used,
+    sharesLimit: hasFiniteLimit ? Number(limit) : null,
+    sharesRemaining: hasFiniteLimit ? Math.max(0, Number(limit) - used) : null,
+  };
+}
+
 /** Returns current license state from local entitlements or license file, or null if unreadable. */
 function getLicenseStateFromLocalState() {
   try {
@@ -176,16 +189,21 @@ function getShareLimitFromLocalState() {
       if (fsSync.existsSync(entPath)) {
         const ent = JSON.parse(fsSync.readFileSync(entPath, "utf8"));
         const licenseState = String(ent?.licenseState || "").toUpperCase();
-        if (licenseState === "TRIAL") return null;
         const limit = ent?.entitlements?.shareLimitMonthly;
-        if (limit === null || limit === undefined) return 10;
+        if (limit === null || limit === undefined) return licenseState === "TRIAL" ? 50 : 10;
         const n = Number(limit);
         if (Number.isFinite(n) && n >= 0) return n;
       }
       if (fsSync.existsSync(paths.licensePath)) {
         const lic = JSON.parse(fsSync.readFileSync(paths.licensePath, "utf8"));
         const st = String(lic?.state || "").toLowerCase();
-        if (st === "trial_active" || st === "active" || st === "grace") return null;
+        if (st === "trial_active") return 50;
+        const tier = String(lic?.tier || "").toLowerCase();
+        if (st === "active" || st === "grace") {
+          if (tier === "pro") return 50;
+          if (tier === "teams" || tier === "team") return 100;
+          return 10;
+        }
       }
     }
   } catch (_) {}
@@ -1130,6 +1148,67 @@ async function bootstrap() {
     });
   });
 
+  app.get("/api/license/usage", (req, res) => {
+    const hostUuid = getHostUuidForConfig && getHostUuidForConfig();
+    const adminHost = config.telemetry && config.telemetry.adminHost;
+    const refreshConfig = (adminHost && hostUuid && hostUuid.length >= 8) ? new Promise((resolve) => {
+      controlPlaneGet(adminHost, `/api/v1/config?host_uuid=${encodeURIComponent(hostUuid)}`, (err, result) => {
+        if (!err && result && result.statusCode === 200 && result.data) {
+          if (result.data.usage) {
+            if (!controlPlaneConfigCache) controlPlaneConfigCache = {};
+            controlPlaneConfigCache.usage = result.data.usage;
+          }
+          if (result.data.license && result.data.license.state && result.data.license.state !== "UNREGISTERED") {
+            if (!controlPlaneConfigCache) controlPlaneConfigCache = {};
+            controlPlaneConfigCache.license = result.data.license;
+            if (result.data.entitlements) controlPlaneConfigCache.entitlements = result.data.entitlements;
+          }
+        }
+        resolve();
+      });
+    }) : Promise.resolve();
+    refreshConfig.then(async () => {
+      try {
+      const licenseState = getLicenseStateFromLocalState();
+      const cp = getControlPlaneConfig();
+      const local = getCurrentShareUsageSummary();
+      // CP is the authoritative cycle-based source; local is only a fallback when CP is unavailable.
+      // Do NOT Math.max — plan changes reset the CP cycle count to 0 and local (calendar-month) must not override that.
+      const cpShares = (cp && cp.usage && typeof cp.usage.sharesThisMonth === "number") ? cp.usage.sharesThisMonth : null;
+      let sharesUsed = cpShares != null ? cpShares : local.sharesUsed;
+      let sharesLimit = null;
+      if (cp && cp.entitlements && (cp.entitlements.shareLimitMonthly === null || typeof cp.entitlements.shareLimitMonthly === "number")) {
+        const n = cp.entitlements.shareLimitMonthly;
+        if (n !== null && Number.isFinite(n) && n >= 0) sharesLimit = n;
+      }
+      if (sharesLimit === null) sharesLimit = local.sharesLimit;
+      const hasFiniteLimit = sharesLimit != null && Number.isFinite(sharesLimit) && sharesLimit > 0;
+      const sharesRemaining = hasFiniteLimit ? Math.max(0, sharesLimit - sharesUsed) : null;
+      let devicesUsed = 0;
+      let devicesLimit = null;
+      // Local approved devices are the source of truth; allow 0 when all devices are removed.
+      try {
+        const localApproved = await accessControl.listApprovedDevices();
+        devicesUsed = localApproved.length;
+      } catch (_) {}
+      if (cp && cp.license && typeof cp.license.device_limit === "number" && cp.license.device_limit >= 0) {
+        devicesLimit = cp.license.device_limit;
+      }
+      res.json({
+        license_state: licenseState || "unknown",
+        shares_used: sharesUsed,
+        shares_limit: sharesLimit,
+        shares_remaining: sharesRemaining,
+        devices_used: devicesUsed,
+        devices_limit: devicesLimit,
+      });
+    } catch (err) {
+      logger.warn("license usage summary error", { error: err?.message || String(err) });
+      res.status(500).json({ message: "Failed to compute license usage" });
+    }
+    });
+  });
+
   app.post("/api/v1/devices/usage/shares/increment", (req, res) => {
     const adminHost = config.telemetry.adminHost;
     if (!adminHost) {
@@ -1458,6 +1537,19 @@ async function bootstrap() {
       res.status(400).json({ error: "request_id is required" });
       return;
     }
+
+    // Enforce device limit before approving
+    const cp = getControlPlaneConfig();
+    const deviceLimit = (cp && cp.license && typeof cp.license.device_limit === "number") ? cp.license.device_limit : null;
+    const devicesLinked = (cp && cp.usage && typeof cp.usage.devicesLinked === "number") ? cp.usage.devicesLinked : 0;
+    if (deviceLimit !== null && devicesLinked >= deviceLimit) {
+      res.status(403).json({
+        code: "DEVICE_LIMIT_REACHED",
+        message: `Device limit reached (${devicesLinked}/${deviceLimit}). Remove a device to approve this one.`,
+      });
+      return;
+    }
+
     const approved = await accessControl.approveRequest(requestId);
     if (!approved) {
       res.status(404).json({ error: "pending request not found" });
@@ -1499,6 +1591,14 @@ async function bootstrap() {
     const result = await accessControl.removeApprovedDevice(fingerprint);
     logger.info("approved device removed");
     runtimeTelemetry.increment("devices_removed");
+    // Sync in-memory cache so the next /api/license/usage call reflects the removal immediately
+    try {
+      const remaining = await accessControl.listApprovedDevices();
+      if (controlPlaneConfigCache) {
+        if (!controlPlaneConfigCache.usage) controlPlaneConfigCache.usage = {};
+        controlPlaneConfigCache.usage.devicesLinked = remaining.length;
+      }
+    } catch (_) {}
     res.json({ status: "removed", fingerprint, ...result });
   });
 
@@ -2215,13 +2315,16 @@ async function bootstrap() {
       }
       const limit = getShareLimitFromLocalState();
       if (Number.isFinite(limit) && limit > 0) {
-        const ym = getYearMonthKey();
-        const usage = readLocalUsage();
-        const used = Number(usage.monthly_shares?.[ym] || 0);
-        if (used >= limit) {
+        // Use CP cycle-based count when available (resets on plan change); fall back to local calendar-month count
+        const cpForCheck = getControlPlaneConfig();
+        const cpSharesUsed = (cpForCheck && cpForCheck.usage && typeof cpForCheck.usage.sharesThisMonth === "number") ? cpForCheck.usage.sharesThisMonth : null;
+        const localYm = getYearMonthKey();
+        const localUsed = Number(readLocalUsage().monthly_shares?.[localYm] || 0);
+        const usedForCheck = cpSharesUsed != null ? cpSharesUsed : localUsed;
+        if (usedForCheck >= limit) {
           res.status(403).json({
             error: "share_limit_reached",
-            message: `Monthly share limit reached (${limit}). Upgrade to create more shares.`,
+            message: `Share limit reached (${limit}). Upgrade to create more shares.`,
             remaining: 0,
             limit,
           });
@@ -2240,6 +2343,18 @@ async function bootstrap() {
       if (!usage.monthly_shares || typeof usage.monthly_shares !== "object") usage.monthly_shares = {};
       usage.monthly_shares[ym] = Number(usage.monthly_shares[ym] || 0) + 1;
       writeLocalUsage(usage);
+      // Immediately bump the in-memory CP cache so the next /api/license/usage call reflects
+      // the new share before the async CP increment completes
+      if (controlPlaneConfigCache && controlPlaneConfigCache.usage && typeof controlPlaneConfigCache.usage.sharesThisMonth === "number") {
+        controlPlaneConfigCache.usage.sharesThisMonth += 1;
+      }
+      const adminHost = config.telemetry?.adminHost;
+      const deviceId = getHostUuidForConfig();
+      if (adminHost && deviceId && deviceId.length >= 8) {
+        controlPlanePost(adminHost, "/api/v1/devices/usage/shares/increment", { deviceId }, null, (err) => {
+          if (err) logger.warn("control plane share increment failed", { error: err.message });
+        });
+      }
       res.json({
         shareId: share.shareId,
         url: `${endpoints.ipUrl}/${share.shareId}`,
@@ -3205,10 +3320,18 @@ async function bootstrap() {
                   trialEndsAt: ent.trialEndsAt || null,
                   telemetry: (cp && cp.telemetry) || {},
                 };
-              } else if (ent.licenseState === "EXPIRED" || ent.licenseState === "FREE") {
+              } else if (ent.licenseState === "EXPIRED") {
                 cp = {
                   license: { state: "UNREGISTERED" },
                   activation: { required: true },
+                  entitlements: ent.entitlements || {},
+                  trialEndsAt: ent.trialEndsAt || null,
+                  telemetry: (cp && cp.telemetry) || {},
+                };
+              } else if (ent.licenseState === "FREE") {
+                cp = {
+                  license: { state: "active", tier: "FREE" },
+                  activation: { required: false },
                   entitlements: ent.entitlements || {},
                   trialEndsAt: ent.trialEndsAt || null,
                   telemetry: (cp && cp.telemetry) || {},
@@ -3249,7 +3372,39 @@ async function bootstrap() {
               account_email: result.data.account_email || null,
               display_name: result.data.display_name || null,
               entitlements: result.data.entitlements || null,
+              usage: result.data.usage || null,
             };
+            const paths = getActivationPaths();
+            if (paths) {
+              try {
+                if (result.data.license && typeof result.data.license === "object") {
+                  const lic = result.data.license;
+                  const toWrite = {
+                    state: lic.state || "active",
+                    tier: lic.tier,
+                    device_limit: lic.device_limit,
+                    expires_at: lic.expires_at,
+                    license_id: lic.license_id || lic.id,
+                    account_id: lic.account_id,
+                  };
+                  if (!fsSync.existsSync(paths.systemDir)) fsSync.mkdirSync(paths.systemDir, { recursive: true });
+                  fsSync.writeFileSync(paths.licensePath, JSON.stringify(toWrite, null, 2), "utf8");
+                }
+                if (result.data.entitlements && typeof result.data.entitlements === "object") {
+                  const entPath = path.join(paths.systemDir, "entitlements.json");
+                  const licenseState = (result.data.license && result.data.license.state)
+                    ? String(result.data.license.state).toUpperCase().replace(/-/g, "_")
+                    : "ACTIVE";
+                  fsSync.writeFileSync(entPath, JSON.stringify({
+                    licenseState,
+                    entitlements: result.data.entitlements,
+                    trialEndsAt: result.data.trialEndsAt || null,
+                  }, null, 2), "utf8");
+                }
+              } catch (e) {
+                if (logger) logger.warn("persist config to disk failed", { error: e && e.message });
+              }
+            }
             sendResponse(controlPlaneConfigCache);
             return;
           }

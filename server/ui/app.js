@@ -38,6 +38,10 @@ const state = {
   referralCode: null,
   referralCount: 0,
   daysRemaining: null,
+  devMode: false,
+  devExpiryWarningMinutes: 2,
+  usageSharesThisMonth: 0,
+  usageDevicesLinked: 0,
 };
 
 const els = {
@@ -468,6 +472,11 @@ function canUseApp() {
 
   // Trial/free devices can use app if trial is active
   if (ls === "trial_active" || ls === "trialing") {
+    return true;
+  }
+
+  // Free tier with state active: allow use (no activation gate)
+  if (tier === "free" && ls === "active") {
     return true;
   }
 
@@ -1146,6 +1155,11 @@ async function loadControlPlaneConfig() {
     state.licenseDeviceLimit = data.license?.device_limit ?? null;
     state.activationRequired = data.activation?.required === true;
     state.trialDays = typeof data.trial_days === "number" ? data.trial_days : 7;
+    state.devMode = data.dev_mode === true;
+    state.devExpiryWarningMinutes = typeof data.dev_expiry_warning_minutes === "number" ? data.dev_expiry_warning_minutes : 2;
+    state.usage = data.usage || null;
+    state.usageSharesThisMonth = typeof data.usage?.sharesThisMonth === "number" ? data.usage.sharesThisMonth : 0;
+    state.usageDevicesLinked = typeof data.usage?.devicesLinked === "number" ? data.usage.devicesLinked : 0;
     state.upgradeUrl = data.upgrade_url || "";
     state.subscription = data.subscription || null;
     state.entitlements = data.entitlements || null;
@@ -1169,7 +1183,83 @@ async function loadControlPlaneConfig() {
     try { updateAdminUi(); } catch (_) {}
     try { updateActivationGateTrialText(); } catch (_) {}
     try { updateButtonStates(); } catch (_) {}
+    try { scheduleExpiryRefresh(); } catch (_) {}
+    try { renderUsageBars().catch(function() {}); } catch (_) {}
   } catch (_) {}
+}
+
+// Module-level timer handle for exact-moment expiry refresh.
+var expiryRefreshTimer = null;
+// Live countdown in dev mode (updates every 1s).
+var devCountdownInterval = null;
+
+function stopDevCountdown() {
+  if (devCountdownInterval) {
+    clearInterval(devCountdownInterval);
+    devCountdownInterval = null;
+  }
+}
+
+function startDevCountdown() {
+  if (devCountdownInterval) return;
+  var warningMins = (typeof state.devExpiryWarningMinutes === "number" && state.devExpiryWarningMinutes >= 0) ? state.devExpiryWarningMinutes : 2;
+  function tick() {
+    if (!state.licenseExpiresAt || state.licenseState !== "trial_active" || !state.devMode) {
+      stopDevCountdown();
+      return;
+    }
+    var nowSec = Math.floor(Date.now() / 1000);
+    var remaining = state.licenseExpiresAt - nowSec;
+    var bannerText = document.getElementById("grace-banner-text");
+    var graceBanner = document.getElementById("grace-banner");
+    if (!bannerText || !graceBanner) return;
+    if (remaining <= 0) {
+      bannerText.textContent = "Dev mode: trial has expired. Upgrade to keep using JoinCloud.";
+      graceBanner.classList.add("grace-banner-warning");
+      stopDevCountdown();
+      loadControlPlaneConfig().catch(function() {});
+      return;
+    }
+    var mins = Math.floor(remaining / 60);
+    var secs = remaining % 60;
+    var mss = mins + ":" + (secs < 10 ? "0" : "") + secs;
+    bannerText.textContent = "Trial expires in " + mss + ". Upgrade to keep using JoinCloud.";
+    if (remaining <= warningMins * 60) {
+      graceBanner.classList.add("grace-banner-warning");
+    } else {
+      graceBanner.classList.remove("grace-banner-warning");
+    }
+  }
+  tick();
+  devCountdownInterval = setInterval(tick, 1000);
+}
+
+/**
+ * Schedules a one-shot timeout that fires at the exact moment the current license expires.
+ * When it fires, the full UI is refreshed (gate, banner, settings, teams overlay) without
+ * waiting for the next normal config poll cycle.
+ * In dev mode the threshold is widened to 2 minutes; in production to 24 hours.
+ */
+function scheduleExpiryRefresh() {
+  if (expiryRefreshTimer) { clearTimeout(expiryRefreshTimer); expiryRefreshTimer = null; }
+  var expiresAt = state.licenseExpiresAt;
+  if (!expiresAt) return;
+  var msLeft = expiresAt * 1000 - Date.now();
+  if (msLeft <= 0) return; // already expired — nothing to schedule
+  // Only arm the timer if expiry is within the look-ahead window.
+  var windowMs = state.devMode ? 2 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  if (msLeft > windowMs) return;
+  expiryRefreshTimer = setTimeout(async () => {
+    expiryRefreshTimer = null;
+    try {
+      await loadControlPlaneConfig();
+      updateAppGate();
+      updateGraceBanner();
+      updateSubscriptionSection();
+      updateTeamsLockedState();
+      renderUsageBars().catch(() => {});
+    } catch (_) {}
+  }, msLeft + 500); // 500 ms buffer so the server has registered the expiry
 }
 
 /** Update button states based on license status */
@@ -1284,6 +1374,10 @@ function updateGraceBanner() {
   if (state.accountId) params.set("accountId", state.accountId);
   if (state.hostUuidFromConfig || state.deviceId) params.set("deviceId", state.hostUuidFromConfig || state.deviceId);
 
+  if (!(state.devMode && state.licenseState === "trial_active" && state.licenseExpiresAt)) {
+    stopDevCountdown();
+  }
+
   // Suspended state - critical banner
   if (state.licenseState === "suspended") {
     els.graceBanner.style.display = "block";
@@ -1321,10 +1415,19 @@ function updateGraceBanner() {
 
   // Trial Active: show banner below header
   if (state.licenseState === "trial_active" && state.licenseExpiresAt) {
-    var now = Math.floor(Date.now() / 1000);
-    var remaining = state.licenseExpiresAt - now;
-    var daysLeft = Math.ceil(remaining / 86400);
     els.graceBanner.style.display = "block";
+    if (state.devMode) {
+      startDevCountdown();
+      if (bannerUpgrade) {
+        bannerUpgrade.style.display = "inline";
+        bannerUpgrade.textContent = "Upgrade now";
+        bannerUpgrade.href = webUrl + "/billing?" + params.toString();
+      }
+      return;
+    }
+    var nowSec = Math.floor(Date.now() / 1000);
+    var remaining = state.licenseExpiresAt - nowSec;
+    var daysLeft = Math.ceil(remaining / 86400);
     if (daysLeft <= 3 && daysLeft > 0) {
       if (bannerText) bannerText.textContent = "Your free trial expires in " + daysLeft + " day" + (daysLeft !== 1 ? "s" : "") + ". Upgrade to keep using JoinCloud.";
     } else {
@@ -1349,14 +1452,34 @@ function updateGraceBanner() {
     return;
   }
 
-  // Trial End
+  // Expired state — distinguish paid plan expiry vs trial expiry
   if (state.licenseState === "expired" || state.licenseState === "EXPIRED") {
+    var expiredTier = String(state.licenseTier || "").toLowerCase();
+    var isPaidExpired = ["pro", "teams", "custom"].includes(expiredTier);
     els.graceBanner.style.display = "block";
-    if (bannerText) bannerText.textContent = "Your trial is expired. Upgrade to a paid plan or move to Free tier.";
-    if (bannerUpgrade) {
-      bannerUpgrade.style.display = "inline";
-      bannerUpgrade.textContent = "Upgrade now";
-      bannerUpgrade.href = webUrl + "/billing?" + params.toString();
+    els.graceBanner.className = isPaidExpired ? "grace-banner banner-critical" : "grace-banner";
+    if (isPaidExpired) {
+      var expiredPlanName = expiredTier.charAt(0).toUpperCase() + expiredTier.slice(1);
+      if (bannerText) bannerText.innerHTML = "Your <strong>" + expiredPlanName + "</strong> plan has expired. Renew to restore full access.";
+      if (bannerUpgrade) {
+        bannerUpgrade.style.display = "inline";
+        bannerUpgrade.textContent = "Renew";
+        bannerUpgrade.href = webUrl + "/billing?" + params.toString();
+      }
+    } else {
+      var webUrl3 = webUrl;
+      var deviceId3 = state.hostUuidFromConfig || state.deviceId || "";
+      var params3 = new URLSearchParams();
+      if (state.accountId) params3.set("accountId", state.accountId);
+      if (deviceId3) params3.set("deviceId", deviceId3);
+      var pricingHref = webUrl3 + "/billing" + (params3.toString() ? "?" + params3.toString() : "");
+      var extendHref = deviceId3
+        ? webUrl3 + "/auth/desktop?deviceId=" + encodeURIComponent(deviceId3) + "&mode=extendTrial"
+        : webUrl3 + "/auth/desktop?mode=extendTrial";
+      if (bannerText) {
+        bannerText.innerHTML = "Your trial is expired. Upgrade to a paid plan or move to Free tier. <a href=\"" + pricingHref + "\" target=\"_blank\" rel=\"noopener noreferrer\" style=\"text-decoration:underline;color:inherit\">Upgrade / Purchase</a> \u00b7 <a href=\"" + extendHref + "\" target=\"_blank\" rel=\"noopener noreferrer\" style=\"text-decoration:underline;color:inherit\">Extend Trial</a>.";
+      }
+      if (bannerUpgrade) bannerUpgrade.style.display = "none";
     }
     return;
   }
@@ -1379,8 +1502,225 @@ function updateGraceBanner() {
     return;
   }
 
+  // Free tier active: show non-blocking banner encouraging upgrade
+  if (state.licenseState === "active" && (String(state.licenseTier || "").toLowerCase() === "free")) {
+    els.graceBanner.style.display = "block";
+    if (bannerText) bannerText.textContent = "You are on the free plan with low limits monthly. Upgrade for more.";
+    if (bannerUpgrade) {
+      bannerUpgrade.style.display = "inline";
+      bannerUpgrade.textContent = "Upgrade plan";
+      bannerUpgrade.href = webUrl + "/billing?" + params.toString();
+    }
+    return;
+  }
+
+  // Paid active: check if near/at share limit and show banner
+  if (state.licenseState === "active") {
+    fetch("/api/license/usage").then(function(r) { return r.ok ? r.json() : null; }).then(function(usage) {
+      if (!usage || !els.graceBanner) return;
+      var sl = usage.shares_limit;
+      var su = usage.shares_used != null ? usage.shares_used : 0;
+      var nearLimit = sl != null && sl < 999999 &&
+        (su >= sl || Math.max(0, sl - su) <= Math.max(1, Math.ceil(sl * 0.1)));
+      if (nearLimit) {
+        els.graceBanner.style.display = "block";
+        if (bannerText) bannerText.textContent = su >= sl
+          ? "Share limit reached (" + su + "/" + sl + "). Upgrade your plan for more shares."
+          : "Approaching share limit (" + su + "/" + sl + "). Consider upgrading.";
+        if (bannerUpgrade) {
+          bannerUpgrade.style.display = "inline";
+          bannerUpgrade.textContent = "Upgrade plan";
+          bannerUpgrade.href = webUrl + "/billing?" + params.toString();
+        }
+      }
+    }).catch(function() {});
+    return;
+  }
+
   els.graceBanner.style.display = "none";
 }
+
+function setUsageBar(id, used, limit) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  var fill = el.querySelector(".usage-bar-fill");
+  var label = el.querySelector(".usage-bar-label");
+  if (!fill || !label) return;
+  var pct = (limit != null && limit > 0) ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+  fill.style.width = pct + "%";
+  fill.classList.toggle("usage-bar-warning", pct >= 80 && pct < 100);
+  fill.classList.toggle("usage-bar-critical", pct >= 100);
+  label.textContent = (limit == null || limit >= 999999) ? (used + " (unlimited)") : (used + " / " + limit);
+}
+
+async function renderUsageBars() {
+  var section = document.getElementById("usage-bars-section");
+  var loader = document.getElementById("usage-bars-loader");
+  var errorEl = document.getElementById("usage-bars-error");
+  var content = document.getElementById("usage-bars-content");
+  if (section) section.style.display = "block";
+  if (loader) loader.style.display = "flex";
+  if (errorEl) errorEl.style.display = "none";
+  if (content) content.style.display = "none";
+
+  try {
+    const res = await fetch("/api/license/usage");
+    if (!res.ok) {
+      if (loader) loader.style.display = "none";
+      if (errorEl) errorEl.style.display = "block";
+      if (content) content.style.display = "none";
+      return;
+    }
+    const usage = await res.json();
+    var shareLimit  = (usage.shares_limit != null) ? usage.shares_limit : null;
+    var deviceLimit = (usage.devices_limit != null) ? usage.devices_limit : null;
+    var shareUsed   = usage.shares_used ?? 0;
+    var deviceUsed  = usage.devices_used ?? 0;
+
+    if (loader) loader.style.display = "none";
+    if (errorEl) errorEl.style.display = "none";
+    if (content) content.style.display = "block";
+
+    if (section) {
+      var tier = (state.licenseTier || "").toLowerCase();
+      var isFree = tier === "free";
+      var hasLimit = isFree ||
+        (shareLimit != null && shareLimit < 999999) ||
+        (deviceLimit != null && deviceLimit < 999999);
+      section.style.display = hasLimit ? "block" : "none";
+    }
+    setUsageBar("shares-usage-bar", shareUsed, shareLimit);
+    setUsageBar("devices-usage-bar", deviceUsed, deviceLimit);
+    var nearLimitEl = document.getElementById("usage-near-limit-msg");
+    if (nearLimitEl && section) {
+      var shareRemaining = (shareLimit != null && shareLimit < 999999) ? Math.max(0, shareLimit - shareUsed) : null;
+      var threshold10 = shareLimit != null && shareLimit < 999999 ? Math.max(1, Math.ceil(shareLimit * 0.1)) : 1;
+      var nearOrAtShareLimit = shareLimit != null && shareLimit < 999999 && (shareRemaining <= 1 || shareRemaining <= threshold10 || shareUsed >= shareLimit);
+      if (nearOrAtShareLimit) {
+        nearLimitEl.style.display = "block";
+        nearLimitEl.textContent = "Share limit is reached. Contact support to upgrade your share limit or device limit.";
+      } else {
+        nearLimitEl.style.display = "none";
+        nearLimitEl.textContent = "";
+      }
+    }
+    try { updateGraceBanner(); } catch (_) {}
+    try { checkDeviceLimitExceeded(deviceUsed, deviceLimit); } catch (_) {}
+  } catch (_) {
+    if (loader) loader.style.display = "none";
+    if (errorEl) errorEl.style.display = "block";
+    if (content) content.style.display = "none";
+    if (section) section.style.display = "block";
+  }
+}
+
+// ── Device Limit Exceeded Modal ──────────────────────────────────────────────
+// Shown when the number of approved devices exceeds the plan limit (e.g. after
+// a plan downgrade). The user must remove devices until within limits; the modal
+// closes automatically once compliant.
+
+var _deviceLimitExceededVisible = false;
+
+async function checkDeviceLimitExceeded(devicesUsed, devicesLimit) {
+  if (!state.isAdmin) return;
+  if (devicesLimit == null || devicesLimit <= 0) return;
+  if (devicesUsed <= devicesLimit) {
+    // Within limit — close modal if it was open
+    if (_deviceLimitExceededVisible) closeDeviceLimitExceededModal();
+    return;
+  }
+  // Over limit — show modal
+  await openDeviceLimitExceededModal(devicesUsed, devicesLimit);
+}
+
+async function openDeviceLimitExceededModal(devicesUsed, devicesLimit) {
+  const modal = document.getElementById("device-limit-exceeded-modal");
+  const desc  = document.getElementById("device-limit-exceeded-desc");
+  const list  = document.getElementById("device-limit-exceeded-list");
+  if (!modal) return;
+
+  // Fetch current approved devices
+  let devices = [];
+  try {
+    const res = await apiFetch("/api/v1/access/devices");
+    if (res && res.ok) devices = await res.json();
+  } catch (_) {}
+
+  // Build device rows
+  list.innerHTML = "";
+  if (!devices.length) {
+    list.innerHTML = '<div class="value value-muted">No approved devices found.</div>';
+  } else {
+    devices.forEach(function(device) {
+      const row = document.createElement("div");
+      row.className = "pending-item";
+      row.style.cssText = "display:flex;align-items:center;justify-content:space-between;gap:8px;";
+      row.dataset.fingerprint = device.fingerprint || "";
+
+      const meta = document.createElement("div");
+      meta.innerHTML =
+        '<div class="item-title">' + (device.device_name || "Unknown Device") + '</div>' +
+        '<div class="item-sub mono">' + shortenFingerprint(device.fingerprint) + '</div>';
+
+      const removeBtn = document.createElement("button");
+      removeBtn.className = "button danger";
+      removeBtn.style.cssText = "flex-shrink:0;min-width:80px;";
+      removeBtn.textContent = "Remove";
+      removeBtn.onclick = async function() {
+        removeBtn.disabled = true;
+        removeBtn.textContent = "Removing…";
+        try {
+          await apiFetch("/api/v1/access/devices/remove", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ fingerprint: device.fingerprint }),
+          });
+          row.remove();
+        } catch (_) {
+          removeBtn.disabled = false;
+          removeBtn.textContent = "Remove";
+          return;
+        }
+        // Re-fetch usage to get updated counts and auto-close if within limit
+        try {
+          const usageRes = await fetch("/api/license/usage");
+          if (usageRes.ok) {
+            const usage = await usageRes.json();
+            const newUsed  = usage.devices_used  ?? 0;
+            const newLimit = usage.devices_limit ?? devicesLimit;
+            desc.textContent = "Your plan allows " + newLimit + " device" + (newLimit !== 1 ? "s" : "") +
+              ". You currently have " + newUsed + " approved.";
+            if (newUsed <= newLimit) {
+              closeDeviceLimitExceededModal();
+              // Refresh usage bars and device list after modal closes
+              renderUsageBars().catch(function() {});
+              if (typeof loadApprovedDevices === "function") loadApprovedDevices().catch ? loadApprovedDevices().catch(function(){}) : loadApprovedDevices();
+            }
+          }
+        } catch (_) {}
+      };
+
+      row.appendChild(meta);
+      row.appendChild(removeBtn);
+      list.appendChild(row);
+    });
+  }
+
+  if (desc) {
+    desc.textContent = "Your plan allows " + devicesLimit + " device" + (devicesLimit !== 1 ? "s" : "") +
+      ". You currently have " + devicesUsed + " approved.";
+  }
+
+  modal.classList.add("active");
+  _deviceLimitExceededVisible = true;
+}
+
+function closeDeviceLimitExceededModal() {
+  const modal = document.getElementById("device-limit-exceeded-modal");
+  if (modal) modal.classList.remove("active");
+  _deviceLimitExceededVisible = false;
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 function updateSubscriptionSection() {
   const hasLicense = state.licenseState && state.licenseState !== "UNREGISTERED";
@@ -1442,11 +1782,14 @@ function updateSubscriptionSection() {
     }
 
     let expiryDisplay = "-";
-    if (state.licenseExpiresAt) {
+    var isFreeNoExpiry = (String(state.licenseTier || "").toLowerCase() === "free" && state.licenseExpiresAt >= 2147483647);
+    if (state.licenseExpiresAt && !isFreeNoExpiry) {
       try {
         const d = new Date(state.licenseExpiresAt * 1000);
         expiryDisplay = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
       } catch (_) {}
+    } else if (isFreeNoExpiry) {
+      expiryDisplay = "Never";
     }
     if (els.settingsProfileExpiry) els.settingsProfileExpiry.textContent = expiryDisplay;
   }
@@ -1500,10 +1843,15 @@ function updateSubscriptionSection() {
       renewalText = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
     } catch (_) {}
   } else if (state.licenseExpiresAt) {
-    try {
-      const d = new Date(state.licenseExpiresAt * 1000);
-      renewalText = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) + " (expires)";
-    } catch (_) {}
+    var isFreeNoExpiryRenewal = (String(state.licenseTier || "").toLowerCase() === "free" && state.licenseExpiresAt >= 2147483647);
+    if (isFreeNoExpiryRenewal) {
+      renewalText = "Never";
+    } else {
+      try {
+        const d = new Date(state.licenseExpiresAt * 1000);
+        renewalText = d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) + " (expires)";
+      } catch (_) {}
+    }
   }
   if (els.subscriptionRenewal) els.subscriptionRenewal.textContent = renewalText;
   const showManage = !!(state.subscription && (state.subscription.status === "active" || state.subscription.status === "trialing" || state.subscription.status === "past_due"));
@@ -1524,6 +1872,7 @@ function updateSubscriptionSection() {
     els.subscriptionUpgradeLink.href = state.upgradeUrl || pricingUrl;
     els.subscriptionUpgradeLink.target = "_blank";
     els.subscriptionUpgradeLink.rel = "noopener noreferrer";
+    els.subscriptionUpgradeLink.textContent = isPaidPlanSub ? "Upgrade limit" : "Upgrade plan";
   }
   const showExtendTrial = state.licenseState === "UNREGISTERED" && state.canExtendTrial;
   if (els.subscriptionExtendTrialLink) {
@@ -1574,6 +1923,8 @@ function updateSubscriptionSection() {
       els.subscriptionHelperText.textContent = "Log in and purchase a plan to start.";
     }
   }
+  // Render usage progress bars
+  try { renderUsageBars().catch(() => {}); } catch (_) {}
 }
 
 async function openBillingPortal() {
@@ -1613,15 +1964,17 @@ function canAddDeviceOrCreateShare() {
 
 function isTeamsEnabledByEntitlement() {
   const ls = String(state.licenseState || "").toUpperCase().replace(/-/g, "_");
-  if (ls === "TRIAL" || ls === "TRIAL_ACTIVE" || ls === "FREE") return true;
+  if (ls === "TRIAL" || ls === "TRIAL_ACTIVE") return true;
   if (state.entitlements && typeof state.entitlements.teamEnabled === "boolean") {
     if (state.entitlements.teamEnabled) return true;
   }
   const tier = String(state.licenseTier || "").toLowerCase();
-  return tier === "free" || tier === "team" || tier === "teams";
+  return tier === "team" || tier === "teams";
 }
 
 function shouldShowTeamsMenu() {
+  // Always show Teams entry so users can discover it,
+  // but behavior for locked plans is handled by updateTeamsLockedState/showUploadBanner.
   return true;
 }
 
@@ -1640,12 +1993,19 @@ function updateTeamsLockedState() {
     els.teamsLockedOverlay.style.display = teamsEnabled ? "none" : "flex";
   }
   if (els.teamsLockedTitle) {
-    els.teamsLockedTitle.textContent = teamsEnabled ? "" : "This plan does not include the Teams features";
+    els.teamsLockedTitle.textContent = teamsEnabled ? "" : "Teams not included in your plan";
   }
   if (els.teamsLockedText) {
-    els.teamsLockedText.textContent = teamsEnabled
-      ? ""
-      : "Upgrade to Teams or contact support for a Custom plan to unlock shared team spaces, team chat, and collaboration.";
+    var tier = String(state.licenseTier || "").toLowerCase();
+    var lockedText;
+    if (teamsEnabled) {
+      lockedText = "";
+    } else if (tier === "pro") {
+      lockedText = "Teams is not included in your Pro plan. Upgrade to Teams or Custom to unlock shared team spaces.";
+    } else {
+      lockedText = "Upgrade to a paid plan to access Teams.";
+    }
+    els.teamsLockedText.textContent = lockedText;
   }
   if (els.teamsLockedUpgrade) {
     els.teamsLockedUpgrade.href = upgradeHref;
@@ -1928,6 +2288,7 @@ async function loadConnectedUsers() {
         await loadConnectedUsers();
         await loadApprovedDevices();
         await loadNetwork();
+        await renderUsageBars();
       };
       row.appendChild(removeBtn);
       els.connectedUsersList.appendChild(row);
@@ -2188,7 +2549,7 @@ async function renderAddMembersList(teamId) {
 
 async function createTeam() {
   if (!isTeamsEnabledByEntitlement()) {
-    showUploadBanner("Upgrade to Teams to create up to 2 teams.", "error");
+    showUploadBanner("Upgrade to Teams or Custom to create team spaces.", "error");
     setTimeout(hideUploadBanner, 2400);
     return;
   }
@@ -2197,7 +2558,7 @@ async function createTeam() {
 
 async function submitCreateTeam() {
   if (!isTeamsEnabledByEntitlement()) {
-    showUploadBanner("Upgrade to Teams to create up to 2 teams.", "error");
+    showUploadBanner("Upgrade to Teams or Custom to create team spaces.", "error");
     setTimeout(hideUploadBanner, 2400);
     return;
   }
@@ -2417,7 +2778,20 @@ async function createShare() {
   });
   const data = await res.json();
   if (!res.ok) {
-    els.shareResult.textContent = data.error || "Failed to create share";
+    if (data.error === "share_limit_reached" || res.status === 403) {
+      const inferredUsed = (typeof data.limit === "number" && typeof data.remaining === "number")
+        ? Math.max(0, data.limit - data.remaining)
+        : (typeof data.limit === "number" ? data.limit : state.usageSharesThisMonth);
+      state.usageSharesThisMonth = inferredUsed;
+      try { renderUsageBars().catch(() => {}); } catch (_) {}
+      const limitMsg = "Share limit is reached. Contact support to upgrade your share limit or device limit.";
+      els.shareResult.textContent = limitMsg;
+      // Also show a persistent grace-style banner for visibility
+      showUploadBanner(limitMsg, "error");
+      setTimeout(hideUploadBanner, 5000);
+    } else {
+      els.shareResult.textContent = data.error || data.message || "Failed to create share";
+    }
     return;
   }
   const shareUrl = data.urlIp || data.url || `${stateMeta.lanBaseUrl}/share/${data.shareId}`;
@@ -2441,6 +2815,9 @@ async function createShare() {
       }
     };
   }
+  // Keep usage bars fresh without waiting for next poll.
+  state.usageSharesThisMonth = Number(state.usageSharesThisMonth || 0) + 1;
+  try { renderUsageBars().catch(() => {}); } catch (_) {}
   await loadShares();
   await loadLogs();
 }
@@ -2731,12 +3108,32 @@ async function loadPendingAccessRequests() {
     approveBtn.textContent = canApprove ? "Approve" : (state.licenseState === "expired" ? "License expired" : "Activate required");
     approveBtn.onclick = async () => {
       if (!canAddDeviceOrCreateShare()) return;
-      await apiFetch("/api/v1/access/approve", {
+      const approveRes = await apiFetch("/api/v1/access/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ request_id: item.request_id }),
       });
+      if (approveRes && !approveRes.ok) {
+        let errData = null;
+        try { errData = await approveRes.json(); } catch (_) {}
+        if (errData && errData.code === "DEVICE_LIMIT_REACHED") {
+          // Show inline error in the row
+          var errMsg = row.querySelector(".device-limit-error");
+          if (!errMsg) {
+            errMsg = document.createElement("div");
+            errMsg.className = "device-limit-error";
+            errMsg.style.cssText = "color:var(--warning,#f59e0b);font-size:12px;margin-top:4px;width:100%;";
+            row.appendChild(errMsg);
+          }
+          errMsg.textContent = "\u26a0\ufe0f " + (errData.message || "Device limit reached. Remove a device first.");
+          return;
+        }
+      }
       await loadPendingAccessRequests();
+      if (approveRes && approveRes.ok) {
+        await loadControlPlaneConfig();
+        renderUsageBars().catch(function() {});
+      }
     };
     const denyBtn = document.createElement("button");
     denyBtn.className = "button secondary";
@@ -2802,6 +3199,7 @@ async function loadApprovedDevices() {
       });
       await loadApprovedDevices();
       await loadPendingAccessRequests();
+      await renderUsageBars();
     };
     row.appendChild(removeBtn);
     els.approvedDevicesList.appendChild(row);
@@ -3062,7 +3460,10 @@ async function bootstrapApp() {
   if (!isRemoteRole()) {
     var needsActivation = state.activationRequired || state.licenseState === "UNREGISTERED";
     if (needsActivation) {
-      for (let attempt = 0; attempt <= 2; attempt++) {
+      const MAX_BOOTSTRAP_ATTEMPTS = 5;
+      const BOOTSTRAP_RETRY_DELAY_MS = 5000;
+      var bootstrapSucceeded = false;
+      for (let attempt = 0; attempt < MAX_BOOTSTRAP_ATTEMPTS; attempt++) {
         try {
           await fetchStatus();
           const deviceId = state.hostUuidFromConfig || state.deviceId || "";
@@ -3074,29 +3475,34 @@ async function bootstrapApp() {
           if (bootstrapRes.ok) {
             // Refresh control-plane config so licenseState/activationRequired reflect the new trial
             await loadControlPlaneConfig();
+            bootstrapSucceeded = true;
             break;
           } else if (bootstrapRes.status === 502 || bootstrapRes.status === 503 || bootstrapRes.status === 500) {
             if (els.activationGateMessage) {
               els.activationGateMessage.textContent =
-                "Cannot reach JoinCloud Control Plane. Check your internet connection or ask your admin to start JoinCloudAdmin, then click Retry activation.";
+                `Attempt ${attempt + 1}/${MAX_BOOTSTRAP_ATTEMPTS}: Cannot reach JoinCloud Control Plane. Retrying…`;
               els.activationGateMessage.style.color = "#f97316";
-            }
-            if (els.activationGateRetry) {
-              els.activationGateRetry.style.display = "block";
             }
           }
         } catch (_) {
-          // Network/offline error – show offline activation helper with retry.
           if (els.activationGateMessage) {
             els.activationGateMessage.textContent =
-              "Cannot reach JoinCloud Control Plane. Please check your internet connection or ask your admin to complete registration, then click Retry activation.";
+              `Attempt ${attempt + 1}/${MAX_BOOTSTRAP_ATTEMPTS}: Network error. Retrying…`;
             els.activationGateMessage.style.color = "#f97316";
           }
-          if (els.activationGateRetry) {
-            els.activationGateRetry.style.display = "block";
-          }
         }
-        if (attempt < 2) await new Promise((r) => setTimeout(r, 1500));
+        if (attempt < MAX_BOOTSTRAP_ATTEMPTS - 1) await new Promise((r) => setTimeout(r, BOOTSTRAP_RETRY_DELAY_MS));
+      }
+      // All attempts exhausted without success — show contact support prominently.
+      if (!bootstrapSucceeded) {
+        if (els.activationGateMessage) {
+          els.activationGateMessage.textContent = "Could not activate after 5 attempts. Please contact support.";
+          els.activationGateMessage.style.color = "#ef4444";
+        }
+        // Hide retry button; the static support link is always visible.
+        if (els.activationGateRetry) els.activationGateRetry.style.display = "none";
+        var supportEl = document.getElementById("activation-gate-support");
+        if (supportEl) supportEl.style.fontWeight = "600";
       }
       needsActivation = state.activationRequired || state.licenseState === "UNREGISTERED";
     }
@@ -3228,6 +3634,7 @@ function setActiveSection(sectionId) {
   if (safeSection === "support") loadSupportMessages();
   if (safeSection === "network") loadNetwork();
   if (safeSection === "teams") loadTeams();
+  if (safeSection === "settings") renderUsageBars().catch(() => {});
 }
 
 function updateAdminUi() {
@@ -3876,19 +4283,23 @@ if (els.accessDeviceNameInput) {
 els.accessFingerprint.textContent = stateMeta.fingerprint;
 bootstrapApp();
 
-setInterval(async () => {
-  if (els.appLayout.style.display === "none") return;
-  try {
-    var prevTier = state.licenseTier;
-    var prevState = state.licenseState;
-    await loadControlPlaneConfig();
-    if (state.licenseTier !== prevTier || state.licenseState !== prevState) {
-      updateGraceBanner();
-      updateSubscriptionSection();
-      updateHeaderProfile();
+// Dynamic config poll: 10 s in dev mode, 60 s in production.
+// Self-reschedules so the interval can adapt after the first config load sets state.devMode.
+(function scheduleConfigPoll() {
+  var delay = state.devMode ? 10 * 1000 : 60 * 1000;
+  setTimeout(async () => {
+    if (els.appLayout.style.display !== "none") {
+      try {
+        await loadControlPlaneConfig();
+        updateGraceBanner();
+        updateSubscriptionSection();
+        updateHeaderProfile();
+        renderUsageBars().catch(() => {});
+      } catch (_) {}
     }
-  } catch (_) {}
-}, 60 * 1000);
+    scheduleConfigPoll();
+  }, delay);
+})();
 
 setInterval(async () => {
   if (els.appLayout.style.display !== "none") {

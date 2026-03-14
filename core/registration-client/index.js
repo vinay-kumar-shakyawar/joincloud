@@ -133,7 +133,11 @@ async function registerHost(identity, options) {
     return { success: true };
   }
 
-  const serverMessage = result.parsedBody?.message || result.parsedBody?.error || null;
+  const serverMessage =
+    result.parsedBody?.message ||
+    result.parsedBody?.error ||
+    result.error ||
+    null;
   log("registration failed", {
     url: `${controlPlaneHost}/api/v1/hosts/register`,
     statusCode: result.statusCode ?? null,
@@ -174,7 +178,11 @@ async function sendHeartbeat(identity, options) {
     log("heartbeat ok", { host_uuid_truncated: (identity.host_uuid || "").slice(0, 8) + "…" });
     return { success: true };
   }
-  const serverMessage = result.parsedBody?.message || result.parsedBody?.error || null;
+  const serverMessage =
+    result.parsedBody?.message ||
+    result.parsedBody?.error ||
+    result.error ||
+    null;
   log("heartbeat failed", {
     url: `${controlPlaneHost}/api/v1/hosts/heartbeat`,
     statusCode: result.statusCode ?? null,

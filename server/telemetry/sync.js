@@ -39,6 +39,9 @@ function postTelemetry(adminHost, payload) {
   });
 }
 
+const SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours (normal cadence)
+const RETRY_INTERVAL_MS = 5 * 60 * 1000;       // 5 minutes (retry after failure)
+
 function createTelemetrySync({
   telemetryStore,
   userConfig,
@@ -49,6 +52,21 @@ function createTelemetrySync({
   getHostUuid,
 }) {
   let timer = null;
+  let retryTimer = null;
+
+  function clearRetryTimer() {
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+  }
+
+  function scheduleRetry() {
+    // Only queue one retry at a time; runs 5 minutes after failure.
+    if (retryTimer) return;
+    retryTimer = setTimeout(async () => {
+      retryTimer = null;
+      await runSync().catch(() => {});
+    }, RETRY_INTERVAL_MS);
+    if (logger) logger.warn("telemetry sync scheduled retry in 5 minutes");
+  }
 
   async function runSync() {
     if (!adminHost) return;
@@ -57,7 +75,7 @@ function createTelemetrySync({
       ? userConfig.telemetry_last_sync.slice(0, 10)
       : null;
     const rows = await telemetryStore.listDailyMetrics(sinceDate);
-    if (!rows.length) return;
+    if (!rows.length) { clearRetryTimer(); return; }
 
     const effectiveUserId = (typeof getHostUuid === "function" ? getHostUuid() : null) || userConfig.user_id;
     if (!effectiveUserId) return;
@@ -83,9 +101,12 @@ function createTelemetrySync({
       const ok = await postTelemetry(adminHost, payload);
       if (!ok) {
         if (logger) logger.error("telemetry sync failed", { date: row.date });
+        scheduleRetry(); // retry in 5 minutes instead of waiting 24 hours
         return;
       }
     }
+    // Success: clear any pending retry and advance the sync cursor.
+    clearRetryTimer();
     userConfig.telemetry_last_sync = new Date().toISOString();
     await updateUserConfig(userConfig);
     if (logger) logger.info("telemetry sync completed");
@@ -93,7 +114,7 @@ function createTelemetrySync({
 
   function start() {
     if (timer) return;
-    timer = setInterval(runSync, 24 * 60 * 60 * 1000);
+    timer = setInterval(runSync, SYNC_INTERVAL_MS);
     runSync().catch(() => {});
   }
 
@@ -102,10 +123,8 @@ function createTelemetrySync({
   }
 
   function stop() {
-    if (timer) {
-      clearInterval(timer);
-      timer = null;
-    }
+    if (timer) { clearInterval(timer); timer = null; }
+    clearRetryTimer();
   }
 
   return {
