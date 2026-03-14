@@ -1538,14 +1538,19 @@ async function bootstrap() {
       return;
     }
 
-    // Enforce device limit before approving
+    // Enforce device limit using local approved-device count (same as Devices section).
+    // CP's devicesLinked includes the current host in license_hosts, so would block the first approval on a 1-device plan.
     const cp = getControlPlaneConfig();
     const deviceLimit = (cp && cp.license && typeof cp.license.device_limit === "number") ? cp.license.device_limit : null;
-    const devicesLinked = (cp && cp.usage && typeof cp.usage.devicesLinked === "number") ? cp.usage.devicesLinked : 0;
-    if (deviceLimit !== null && devicesLinked >= deviceLimit) {
+    let currentApprovedCount = 0;
+    try {
+      const list = await accessControl.listApprovedDevices();
+      currentApprovedCount = list.length;
+    } catch (_) {}
+    if (deviceLimit !== null && currentApprovedCount >= deviceLimit) {
       res.status(403).json({
         code: "DEVICE_LIMIT_REACHED",
-        message: `Device limit reached (${devicesLinked}/${deviceLimit}). Remove a device to approve this one.`,
+        message: `Device limit reached (${currentApprovedCount}/${deviceLimit}). Remove a device to approve this one.`,
       });
       return;
     }
