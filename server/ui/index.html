@@ -467,6 +467,62 @@
           </div>
         </div>
 
+        <!-- SECTION: Remote Access -->
+        <div class="settings-section" id="remote-access-section">
+          <h3 class="settings-section-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4l2 2"/></svg>
+            Remote Access
+          </h3>
+          <div id="remote-access-not-configured" style="display:none;">
+            <div id="remote-access-setup-wrap">
+              <div class="value value-muted" style="margin-top:4px;">Set up a personal cloud URL to access your files from anywhere.</div>
+              <button type="button" class="button primary" id="remote-access-setup-btn" style="margin-top:12px;">Set Up Remote Access</button>
+              <div id="remote-access-setup-spinner" style="display:none;margin-top:12px;">
+                <span class="usage-section-spinner" style="margin-right:8px;"></span>
+                <span class="value value-muted">Setting up your personal cloud URL…</span>
+              </div>
+              <div id="remote-access-setup-error" style="display:none;margin-top:12px;">
+                <span class="value value-muted" style="color:var(--danger);" id="remote-access-setup-error-text"></span>
+                <button type="button" class="button secondary" id="remote-access-setup-retry" style="margin-left:8px;">Retry</button>
+              </div>
+            </div>
+          </div>
+          <div id="remote-access-configured-wrap" style="display:none;">
+            <div class="row space-between" style="margin-top:8px">
+              <div>
+                <div class="label">Enable Remote Access</div>
+                <div class="value value-muted" style="margin-top:2px">Access your cloud from the internet via a public URL</div>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="remote-access-toggle" />
+                <span>On</span>
+              </label>
+            </div>
+            <div id="remote-access-starting" style="display:none;margin-top:12px;">
+              <span class="usage-section-spinner" style="margin-right:8px;"></span>
+              <span class="value value-muted">Starting…</span>
+            </div>
+            <div id="remote-access-active" style="display:none;margin-top:12px;">
+              <div class="value value-muted" style="margin-bottom:6px;">Your cloud is live at</div>
+              <div class="row" style="flex-wrap:wrap;gap:8px;align-items:center;">
+                <a id="remote-access-url" href="#" target="_blank" rel="noopener noreferrer" class="value mono" style="word-break:break-all;"></a>
+                <button type="button" class="button secondary" id="remote-access-copy">Copy</button>
+                <button type="button" class="button secondary" id="remote-access-open">Open</button>
+              </div>
+              <div class="qr-wrap" style="margin-top:12px;">
+                <canvas id="remote-access-qr" width="180" height="180"></canvas>
+              </div>
+            </div>
+            <div class="row" style="margin-top:16px;">
+              <div style="flex:1">
+                <div class="label">Set PIN for remote access</div>
+                <input class="input" id="remote-access-pin" type="password" placeholder="Optional PIN" maxlength="32" autocomplete="off" style="max-width:200px;margin-top:4px;" />
+              </div>
+              <button type="button" class="button secondary" id="remote-access-pin-save" style="align-self:flex-end;">Save</button>
+            </div>
+          </div>
+        </div>
+
         <!-- SECTION: Network -->
         <div class="settings-section">
           <h3 class="settings-section-title">
@@ -687,8 +743,9 @@
           <label class="label">Share Scope</label>
           <div class="radio-group">
             <label><input type="radio" name="share-scope" value="local" checked /> Local</label>
-            <label><input type="radio" name="share-scope" value="public" disabled /> Public (Coming Soon)</label>
+            <label><input type="radio" name="share-scope" value="public" id="share-scope-public" /> Public</label>
           </div>
+          <div id="share-scope-public-hint" class="value value-muted" style="display:none; margin-top:6px; font-size:12px;">Enable Remote Access in Settings to create public shares.</div>
 
           <label class="label">Permission</label>
           <select class="input" id="share-permission">

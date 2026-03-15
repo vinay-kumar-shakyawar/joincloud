@@ -268,6 +268,8 @@ function startBackend() {
     SHARE_PORT,
     JOINCLOUD_STORAGE_ROOT: getStoragePath(),
     JOINCLOUD_USER_DATA: userDataPath,
+    JOINCLOUD_ADMIN_HOST: process.env.JOINCLOUD_ADMIN_HOST || "https://plane.joincloud.in",
+    JOINCLOUD_CONTROL_PLANE_URL: process.env.JOINCLOUD_CONTROL_PLANE_URL || "https://plane.joincloud.in",
     PATH: process.env.PATH || "",
     NODE_PATH: mergedNodePath || inheritedNodePath,
   };

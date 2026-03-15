@@ -363,6 +363,37 @@ function controlPlaneGet(adminHost, apiPath, callback) {
   req.end();
 }
 
+function controlPlaneGetWithToken(adminHost, apiPath, bearerToken, callback) {
+  const parsed = parseAdminHost(adminHost);
+  if (!parsed) {
+    callback(new Error("Control Plane not configured"), null);
+    return;
+  }
+  const lib = parsed.isHttps ? https : http;
+  const opts = {
+    hostname: parsed.hostname,
+    port: parsed.port,
+    path: apiPath,
+    method: "GET",
+    timeout: 10000,
+  };
+  if (bearerToken) opts.headers = { Authorization: `Bearer ${bearerToken}` };
+  const req = lib.request(opts, (res) => {
+    let data = "";
+    res.on("data", (chunk) => { data += chunk; });
+    res.on("end", () => {
+      let json = null;
+      try {
+        json = data ? JSON.parse(data) : {};
+      } catch (_) {}
+      callback(null, { statusCode: res.statusCode, data: json });
+    });
+  });
+  req.on("error", (err) => callback(err, null));
+  req.setTimeout(10000, () => req.destroy());
+  req.end();
+}
+
 function parseAdminHost(adminHost) {
   if (!adminHost || typeof adminHost !== "string") return null;
   const withProtocol = adminHost.indexOf("://") === -1 ? `https://${adminHost}` : adminHost;
@@ -865,9 +896,32 @@ async function bootstrap() {
 
   expiryManager.start();
 
+  const tunnelDir = path.join(config.storage.ownerRoot, ".tunnel");
+  const tunnelCredentialsPath = path.join(tunnelDir, "credentials.json");
+  const tunnelConfigPath = path.join(tunnelDir, "config.json");
+  let tunnelCredentialsFile = null;
+  let tunnelName = null;
+  let tunnelPublicUrl = null;
+  if (fsSync.existsSync(tunnelCredentialsPath)) {
+    try {
+      const configRaw = fsSync.readFileSync(tunnelConfigPath, "utf8");
+      const tunnelConfig = JSON.parse(configRaw);
+      if (tunnelConfig.tunnelName) {
+        tunnelCredentialsFile = tunnelCredentialsPath;
+        tunnelName = tunnelConfig.tunnelName;
+        if (tunnelConfig.publicUrl) tunnelPublicUrl = tunnelConfig.publicUrl;
+      }
+    } catch (_) {
+      // ignore invalid config
+    }
+  }
+  logger.info("tunnel url", { url: `http://127.0.0.1:${config.server.port}` });
   const tunnelManager = new TunnelManager({
-    url: `http://127.0.0.1:${config.server.sharePort}`,
+    url: `http://127.0.0.1:${config.server.port}`,
     logger,
+    credentialsFile: tunnelCredentialsFile,
+    tunnelName,
+    publicUrl: tunnelPublicUrl,
   });
 
   const runtimeTelemetry = new RuntimeTelemetryStore({
@@ -914,6 +968,66 @@ async function bootstrap() {
     next();
   });
   app.use(express.json());
+
+  app.use((req, res, next) => {
+    req.cookies = {};
+    const cookieHeader = req.headers.cookie;
+    if (cookieHeader) {
+      cookieHeader.split(";").forEach((part) => {
+        const [key, ...vParts] = part.trim().split("=");
+        const val = vParts.join("=").trim();
+        if (key) req.cookies[key] = val ? decodeURIComponent(val) : "";
+      });
+    }
+    next();
+  });
+
+  function loadUserConfig() {
+    try {
+      const raw = fsSync.readFileSync(config.storage.userConfigPath, "utf8");
+      return JSON.parse(raw);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  app.use((req, res, next) => {
+    const isTunnelRequest = req.headers["x-tunnel-source"] === "cloudflare";
+    if (isTunnelRequest) {
+      if (req.path.startsWith("/share/") || req.path === "/api/public-access/status") {
+        return next();
+      }
+      const remotePin = loadUserConfig()?.remoteAccessPin;
+      if (remotePin) {
+        const authHeader = req.headers["x-remote-pin"];
+        const cookiePin = req.cookies?.["remote-pin"];
+        if (authHeader !== remotePin && cookiePin !== remotePin) {
+          if (req.path.startsWith("/api/")) {
+            return res.status(401).json({ error: "remote_pin_required" });
+          }
+          return res.redirect("/remote-login");
+        }
+      }
+    }
+    next();
+  });
+
+  app.get("/remote-login", (_req, res) => {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(
+      `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Remote Access</title><style>body{font-family:system-ui,-apple-system,sans-serif;max-width:320px;margin:40px auto;padding:20px;background:#0a0e12;color:#fff;} input,button{padding:10px 12px;width:100%;margin:8px 0;box-sizing:border-box;border:1px solid #2a3540;border-radius:6px;background:#0f1419;color:#fff;} button{background:#2FB7FF;color:#000;border:none;cursor:pointer;font-weight:600;} h2{margin:0 0 16px;font-size:18px;}</style></head><body><h2>Remote Access</h2><form method="post" action="/remote-login"><input type="password" name="pin" placeholder="Enter PIN" required autocomplete="off"/><button type="submit">Continue</button></form></body></html>`
+    );
+  });
+
+  app.post("/remote-login", express.urlencoded({ extended: true }), (req, res) => {
+    const pin = req.body?.pin;
+    if (pin) {
+      const val = encodeURIComponent(String(pin).trim());
+      res.setHeader("Set-Cookie", `remote-pin=${val}; Path=/; HttpOnly; Max-Age=${7 * 24 * 60 * 60}`);
+    }
+    res.redirect("/");
+  });
+
   const accessControl = new AccessControlStore({
     storagePath: config.storage.accessControlPath,
     logger,
@@ -2360,10 +2474,16 @@ async function bootstrap() {
           if (err) logger.warn("control plane share increment failed", { error: err.message });
         });
       }
+      const tunnelStatus = tunnelManager.getStatus();
+      const publicUrl =
+        tunnelStatus.status === "active" && tunnelStatus.publicUrl
+          ? tunnelStatus.publicUrl + "/share/" + share.shareId
+          : null;
       res.json({
         shareId: share.shareId,
         url: `${endpoints.ipUrl}/${share.shareId}`,
         urlIp: `${endpoints.ipUrl}/${share.shareId}`,
+        publicUrl,
         expiresAt: share.expiryTime,
       });
     } catch (error) {
@@ -2750,6 +2870,158 @@ async function bootstrap() {
   app.post("/api/public-access/stop", ensureAdmin, (_req, res) => {
     const status = tunnelManager.stop();
     res.json(status);
+  });
+
+  app.post("/api/user/remote-pin", ensureAdmin, async (req, res) => {
+    try {
+      const pin = req.body?.pin != null ? String(req.body.pin).trim() : null;
+      userConfig.remoteAccessPin = pin || null;
+      await updateUserConfig(config.storage.userConfigPath, userConfig);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(400).json({ error: error.message || "save_failed" });
+    }
+  });
+
+  app.post("/api/public-access/configure", ensureAdmin, async (req, res) => {
+    try {
+      logger.info("public-access/configure: ownerRoot", { ownerRoot: config.storage.ownerRoot });
+
+      const { tunnelId, tunnelSecret, accountTag, tunnelName: name, publicUrl: bodyPublicUrl } = req.body || {};
+      if (!tunnelId || !tunnelSecret || !accountTag || !name) {
+        res.status(400).json({ error: "tunnelId, tunnelSecret, accountTag, and tunnelName are required" });
+        return;
+      }
+      const publicUrl = (bodyPublicUrl && String(bodyPublicUrl).trim()) || `https://${String(name)}.share.joincloud.cloud`;
+      const tunnelDir = path.join(config.storage.ownerRoot, ".tunnel");
+      const credentialsFile = path.join(tunnelDir, "credentials.json");
+      const configFile = path.join(tunnelDir, "config.json");
+
+      logger.info("public-access/configure: paths", { tunnelDir, credentialsFile, configFile });
+
+      fsSync.mkdirSync(tunnelDir, { recursive: true });
+
+      const credentialsJson = {
+        AccountTag: String(accountTag),
+        TunnelSecret: String(tunnelSecret),
+        TunnelID: String(tunnelId),
+      };
+
+      try {
+        await fs.writeFile(credentialsFile, JSON.stringify(credentialsJson), "utf8");
+        logger.info("public-access/configure: credentials written successfully", { credentialsFile });
+      } catch (writeErr) {
+        logger.error("public-access/configure: credentials write failed", { credentialsFile, error: writeErr.message, stack: writeErr.stack });
+        throw writeErr;
+      }
+
+      try {
+        await fs.writeFile(
+          configFile,
+          JSON.stringify({ tunnelName: String(name), tunnelId: String(tunnelId), publicUrl, configuredAt: new Date().toISOString() }, null, 2),
+          "utf8"
+        );
+        logger.info("public-access/configure: config written successfully", { configFile });
+      } catch (writeErr) {
+        logger.error("public-access/configure: config write failed", { configFile, error: writeErr.message, stack: writeErr.stack });
+        throw writeErr;
+      }
+
+      tunnelManager.setCredentials(credentialsFile, String(name));
+      res.json({
+        success: true,
+        tunnelName: String(name),
+        publicUrl,
+      });
+    } catch (error) {
+      logger.error("public-access/configure: failed", { error: error.message, stack: error.stack });
+      res.status(400).json({ error: error.message || "configure_failed" });
+    }
+  });
+
+  app.post("/api/public-access/provision", ensureAdmin, async (req, res) => {
+    const adminHost = config.telemetry.adminHost;
+    const hostUuid = getHostUuidForConfig();
+    logger.info("tunnel provision attempt", {
+      adminHost: config.telemetry.adminHost,
+      hasHostUuid: !!hostUuid,
+    });
+    if (adminHost == null || adminHost === undefined) {
+      res.status(503).json({
+        error: "control_plane_not_configured",
+        message: "Control Plane URL not set",
+      });
+      return;
+    }
+    if (!hostUuid || hostUuid.length < 8) {
+      res.status(400).json({ error: "Host UUID not available" });
+      return;
+    }
+    controlPlanePost(adminHost, "/api/v1/tunnel/provision", { hostId: hostUuid }, null, async (err, result) => {
+      if (err) {
+        logger.error("tunnel provision proxy error", {
+          error: err?.message || String(err) || "unknown",
+          code: err?.code,
+          adminHost: config.telemetry.adminHost,
+        });
+        res.status(502).json({ error: "Could not reach Control Plane" });
+        return;
+      }
+      if (result.statusCode !== 200 || !result.data) {
+        res.status(result.statusCode || 502).json(result.data || { error: "Provision failed" });
+        return;
+      }
+      const data = result.data;
+      let credentialsJson;
+      try {
+        credentialsJson = typeof data.credentialsJson === "string" ? JSON.parse(data.credentialsJson) : data.credentialsJson;
+      } catch (_) {
+        res.status(502).json({ error: "Invalid credentials from Control Plane" });
+        return;
+      }
+      const tunnelId = credentialsJson.TunnelID || data.tunnelId;
+      const tunnelName = data.tunnelName || `jc-${tunnelId}`;
+      const tunnelDir = path.join(config.storage.ownerRoot, ".tunnel");
+      const credentialsFile = path.join(tunnelDir, "credentials.json");
+      const configFile = path.join(tunnelDir, "config.json");
+      try {
+        fsSync.mkdirSync(tunnelDir, { recursive: true });
+        await fs.writeFile(credentialsFile, JSON.stringify(credentialsJson), "utf8");
+        const publicUrl = data.publicUrl || `https://${data.subdomain || ""}`;
+        await fs.writeFile(
+          configFile,
+          JSON.stringify({ tunnelName, tunnelId, publicUrl, configuredAt: new Date().toISOString() }, null, 2),
+          "utf8"
+        );
+        tunnelManager.setCredentials(credentialsFile, tunnelName);
+      } catch (e) {
+        logger.error("public-access/provision: write failed", { error: e.message });
+        res.status(500).json({ error: "Failed to save tunnel credentials" });
+        return;
+      }
+      const publicUrl = data.publicUrl || `https://${data.subdomain || ""}`;
+      res.json({ success: true, publicUrl });
+    });
+  });
+
+  app.get("/api/public-access/provision-status", ensureAdmin, async (_req, res) => {
+    const adminHost = config.telemetry.adminHost;
+    if (!adminHost) {
+      res.status(503).json({ provisioned: false, error: "Control Plane not configured" });
+      return;
+    }
+    const hostUuid = getHostUuidForConfig();
+    if (!hostUuid || hostUuid.length < 8) {
+      res.json({ provisioned: false });
+      return;
+    }
+    controlPlaneGet(adminHost, `/api/v1/tunnel/status?hostId=${encodeURIComponent(hostUuid)}`, (err, result) => {
+      if (err || !result || result.statusCode !== 200) {
+        res.json(result && result.data ? result.data : { provisioned: false });
+        return;
+      }
+      res.json(result.data);
+    });
   });
 
   app.get("/api/logs", async (_req, res) => {

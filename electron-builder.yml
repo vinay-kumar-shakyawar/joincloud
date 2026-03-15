@@ -2,12 +2,6 @@ appId: app.joincloud.desktop
 productName: JoinCloud
 npmRebuild: true
 asar: true
-asarUnpack:
-  - "**/*.node"
-  - "**/node_modules/sqlite3/**"
-  - "server/ui/**"
-  - "server/bin/**"
-
 files:
   - "**/*"
   - "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
@@ -15,10 +9,6 @@ files:
   - "!**/node_modules/.bin"
   - "!**/*.{iml,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}"
   - "!**/._*"
-  # Exclude sqlite3 native binaries so telemetry uses JSON fallback (no SIGSEGV).
-  - "!**/node_modules/sqlite3/build/**"
-  - "!**/node_modules/sqlite3/deps/**"
-  - "!**/node_modules/sqlite3/bin/**"
 
 directories:
   buildResources: build

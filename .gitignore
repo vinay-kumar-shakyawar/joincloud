@@ -13,4 +13,6 @@ build/*
 !build/icon.icns
 !build/icon.ico
 release-artifacts/
-win/
+win/dist-mac2/
+dist-win/
+dist-mac/
