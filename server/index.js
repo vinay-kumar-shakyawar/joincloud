@@ -2593,16 +2593,35 @@ async function bootstrap() {
               expiresAt: share.expiryTime,
             },
             null,
-            (err, result) => {
-              const publicUrl =
-                !err && result?.data?.publicUrl ? result.data.publicUrl : tunnelPublicUrl;
-              res.json({
-                shareId: share.shareId,
-                url: `${endpoints.ipUrl}/${share.shareId}`,
-                urlIp: `${endpoints.ipUrl}/${share.shareId}`,
-                publicUrl,
-                expiresAt: share.expiryTime,
-              });
+            async (err, result) => {
+              try {
+                const publicUrl =
+                  !err && result?.data?.publicUrl ? result.data.publicUrl : tunnelPublicUrl;
+                if (publicUrl) {
+                  await shareService.setPublicUrl(share.shareId, publicUrl);
+                }
+                res.json({
+                  shareId: share.shareId,
+                  url: `${endpoints.ipUrl}/${share.shareId}`,
+                  urlIp: `${endpoints.ipUrl}/${share.shareId}`,
+                  publicUrl,
+                  expiresAt: share.expiryTime,
+                });
+              } catch (e) {
+                logger.warn("failed to persist publicUrl for share", {
+                  shareId: share.shareId,
+                  error: e?.message,
+                });
+                const publicUrl =
+                  !err && result?.data?.publicUrl ? result.data.publicUrl : tunnelPublicUrl;
+                res.json({
+                  shareId: share.shareId,
+                  url: `${endpoints.ipUrl}/${share.shareId}`,
+                  urlIp: `${endpoints.ipUrl}/${share.shareId}`,
+                  publicUrl,
+                  expiresAt: share.shareTime,
+                });
+              }
             }
           );
           return;
@@ -2646,6 +2665,7 @@ async function bootstrap() {
         scope: share.scope || "local",
         url,
         urlIp,
+        publicUrl: share.publicUrl || null,
         tunnelUrl: url,
         downloadCount: 0,
         maxDownloads: null,

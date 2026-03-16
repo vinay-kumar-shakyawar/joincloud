@@ -82,6 +82,7 @@ class ShareService {
       expiryTime: expiresAt.toISOString(),
       createdAt: createdAt.toISOString(),
       revoked: false,
+      publicUrl: null,
     };
 
     this.shares.set(shareId, share);
@@ -118,6 +119,14 @@ class ShareService {
       this.telemetry.trackEvent("share_revoked", { share_id: shareId });
     }
     return true;
+  }
+
+  async setPublicUrl(shareId, publicUrl) {
+    const share = this.shares.get(shareId);
+    if (!share) return;
+    share.publicUrl = publicUrl || null;
+    this.shares.set(shareId, share);
+    await this.saveToDisk();
   }
 
   getShare(shareId) {
