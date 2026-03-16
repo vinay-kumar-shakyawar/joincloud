@@ -1,6 +1,7 @@
 (function () {
-  const parts = window.location.pathname.split("/").filter(Boolean);
-  const shareId = parts.length >= 2 ? parts[1] : "";
+  const shareId =
+    window.__SHARE_ID__ ||
+    (window.location.pathname.split("/").filter(Boolean)[1] || "");
   const SHARE_BASE = window.__SHARE_BASE__ || "";
   const SHARE_TOKEN = window.__SHARE_TOKEN__ || "";
   const SHARE_EXP = window.__SHARE_EXP__ || "";
