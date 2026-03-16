@@ -224,7 +224,9 @@
       return;
     }
     if (/\.pdf$/i.test(lower)) {
-      previewEl.innerHTML = `<object class="preview-frame" data="${url}" type="application/pdf"><iframe class="preview-frame" src="${url}" title="${name}"></iframe></object>`;
+      previewEl.innerHTML = `<object class="preview-frame" data="${url}" type="application/pdf">
+      <iframe class="preview-frame" src="${url}" title="${name}"></iframe>
+    </object>`;
       return;
     }
     if (/\.(mp4|webm|mov|m4v)$/i.test(lower)) {
@@ -361,9 +363,11 @@
           previewBtn.textContent = "Preview";
           previewBtn.onclick = () =>
             renderPreview(
-              buildShareUrl(`/share/${encodeURIComponent(shareId)}/download`, {
-                path: item.relativePath,
-              }),
+              buildShareUrl(
+                `/share/${encodeURIComponent(
+                  shareId
+                )}/preview?path=${encodeURIComponent(item.relativePath)}`
+              ),
               item.name
             );
           row.appendChild(previewBtn);
@@ -441,9 +445,15 @@
           previewBtn.className = "button secondary";
           previewBtn.textContent = "Preview";
           previewBtn.onclick = () =>
-            renderPreview(buildShareUrl(`/share/${encodeURIComponent(shareId)}/preview`), meta.name);
+            renderPreview(
+              buildShareUrl(`/share/${encodeURIComponent(shareId)}/preview`),
+              meta.name
+            );
           actionsEl.appendChild(previewBtn);
-          renderPreview(meta.previewUrl, meta.name);
+          renderPreview(
+            buildShareUrl(`/share/${encodeURIComponent(shareId)}/preview`),
+            meta.name
+          );
         }
         listEl.innerHTML = '<div class="muted">Sharing is caring ❤️</div>';
         renderGrowthCta(meta.marketingUrl);
