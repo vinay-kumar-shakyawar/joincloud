@@ -1825,12 +1825,54 @@ async function bootstrap() {
           );
         return;
       }
-      res.status(404).send(renderMessagePage({ title: "Share Not Found", message: "This share link is invalid or expired." }));
+      res
+        .status(404)
+        .send(
+          renderMessagePage({
+            title: "Share Not Found",
+            message: "This share link is invalid or expired.",
+          })
+        );
       return;
     }
     runtimeTelemetry.increment("share_page_visits");
     logger.info("share page visited");
-    res.sendFile(path.join(uiRoot, "share.html"));
+    try {
+      const publicDir = uiRoot;
+      const css = fsSync.readFileSync(path.join(publicDir, "share-view.css"), "utf8");
+      const js = fsSync.readFileSync(path.join(publicDir, "share-view.js"), "utf8");
+
+      const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>JoinCloud Share</title>
+    <style>${css}</style>
+    <script>window.__SHARE_BASE__ = '';</script>
+  </head>
+  <body>
+    <main class="share-layout">
+      <section class="share-card">
+        <div class="brand">JoinCloud</div>
+        <h1 id="share-title">Shared Item</h1>
+        <div class="meta" id="share-meta">Loading share...</div>
+        <div class="actions" id="share-actions"></div>
+        <div class="share-drop-zone" id="share-drop-zone">Drag & drop files here</div>
+        <div class="preview" id="share-preview"></div>
+        <div class="list" id="share-list"></div>
+      </section>
+    </main>
+    <script>${js}</script>
+  </body>
+</html>`;
+
+      res.setHeader("Content-Type", "text/html; charset=UTF-8");
+      res.send(html);
+    } catch (err) {
+      logger.error("Failed to serve share page", { error: err.message });
+      res.status(500).send("Internal Server Error");
+    }
   });
 
   app.get("/share/:shareId/meta", (req, res) => {

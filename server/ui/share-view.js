@@ -1,6 +1,26 @@
 (function () {
   const parts = window.location.pathname.split("/").filter(Boolean);
   const shareId = parts.length >= 2 ? parts[1] : "";
+  const SHARE_BASE = window.__SHARE_BASE__ || "";
+  const SHARE_TOKEN = window.__SHARE_TOKEN__ || "";
+  const SHARE_EXP = window.__SHARE_EXP__ || "";
+
+  function buildShareUrl(path, extraParams) {
+    const base = SHARE_BASE || "";
+    const url = new URL(base + path, window.location.origin);
+    if (SHARE_TOKEN) {
+      url.searchParams.set("token", SHARE_TOKEN);
+      if (SHARE_EXP) url.searchParams.set("exp", SHARE_EXP);
+    }
+    if (extraParams && typeof extraParams === "object") {
+      Object.entries(extraParams).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== "") {
+          url.searchParams.set(key, String(value));
+        }
+      });
+    }
+    return url.toString();
+  }
 
   const titleEl = document.getElementById("share-title");
   const metaEl = document.getElementById("share-meta");
@@ -39,7 +59,8 @@
       for (let i = 0; i < files.length; i++) formData.append("files", files[i]);
       try {
         showToast("Uploading...", "info");
-        const res = await fetch(`/share/${encodeURIComponent(shareId)}/upload`, {
+        const uploadUrl = buildShareUrl(`/share/${encodeURIComponent(shareId)}/upload`);
+        const res = await fetch(uploadUrl, {
           method: "POST",
           body: formData,
         });
@@ -236,7 +257,7 @@
 
     const allLink = document.createElement("a");
     allLink.className = "button";
-    allLink.href = `/share/${encodeURIComponent(shareId)}/download.zip`;
+    allLink.href = buildShareUrl(`/share/${encodeURIComponent(shareId)}/download.zip`);
     allLink.textContent = "Download All (ZIP)";
     allLink.title = "Streams ZIP directly. Large folders may take minutes. If download fails, click again to retry.";
     controls.appendChild(allLink);
@@ -244,7 +265,9 @@
     if (folderPath && folderPath !== "/") {
       const folderZipLink = document.createElement("a");
       folderZipLink.className = "button secondary";
-      folderZipLink.href = `/share/${encodeURIComponent(shareId)}/download.zip?paths=${encodeURIComponent(folderPath.replace(/^\//, ""))}`;
+      folderZipLink.href = buildShareUrl(`/share/${encodeURIComponent(shareId)}/download.zip`, {
+        paths: folderPath.replace(/^\//, ""),
+      });
       folderZipLink.textContent = "Download Folder (ZIP)";
       folderZipLink.title = "Streams ZIP directly. If download fails, click again to retry.";
       controls.appendChild(folderZipLink);
@@ -265,7 +288,9 @@
       event.preventDefault();
       if (!selectedPaths.size) return;
       const joined = Array.from(selectedPaths).join(",");
-      window.location.href = `/share/${encodeURIComponent(shareId)}/download.zip?paths=${encodeURIComponent(joined)}`;
+      window.location.href = buildShareUrl(`/share/${encodeURIComponent(shareId)}/download.zip`, {
+        paths: joined,
+      });
     };
     controls.appendChild(selectedLink);
     listEl.appendChild(controls);
@@ -346,8 +371,10 @@
     currentFolderPath = folderPath || "/";
     selectedPaths = new Set();
     const pathParam = currentFolderPath === "/" ? "" : currentFolderPath.replace(/^\//, "");
-    const url = `/share/${encodeURIComponent(shareId)}/files` + (pathParam ? `?path=${encodeURIComponent(pathParam)}` : "");
-    const files = await fetchJson(url);
+    const filesUrl = buildShareUrl(`/share/${encodeURIComponent(shareId)}/files`, {
+      path: pathParam ? pathParam.replace(/^\//, "") : undefined,
+    });
+    const files = await fetchJson(filesUrl);
     renderFolderList(files, currentFolderPath);
   }
 
@@ -357,7 +384,8 @@
       return;
     }
     try {
-      const meta = await fetchJson(`/share/${encodeURIComponent(shareId)}/meta`);
+      const metaUrl = buildShareUrl(`/share/${encodeURIComponent(shareId)}/meta`);
+      const meta = await fetchJson(metaUrl);
       titleEl.textContent = meta.name || "Shared Item";
       const sizeText = meta.targetType === "file" && Number.isFinite(meta.size) ? ` | Size: ${formatBytes(meta.size)}` : "";
       metaEl.textContent = `Type: ${meta.targetType === "folder" ? "Folder" : "File"}${sizeText} | Expires: ${new Date(meta.expiresAt).toLocaleString()}`;
@@ -372,7 +400,9 @@
       if (meta.targetType === "file") {
         const direct = document.createElement("a");
         direct.className = "button";
-        direct.href = meta.downloadUrl || `/share/${encodeURIComponent(shareId)}/download`;
+        direct.href =
+          meta.downloadUrl ||
+          buildShareUrl(`/share/${encodeURIComponent(shareId)}/download`);
         direct.textContent = "Download File";
         actionsEl.appendChild(direct);
         const copyWrap = document.createElement("div");
