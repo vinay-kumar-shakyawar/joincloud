@@ -787,6 +787,56 @@ function isPathWithin(rootPath, candidatePath) {
   return candidate.startsWith(normalizedRoot);
 }
 
+/**
+ * Validates signed token for tunnel requests (x-tunnel-source: cloudflare).
+ * If validation fails, sends 403 HTML and returns true (caller should return).
+ * If not a tunnel request or validation passes, returns false.
+ */
+function validateTunnelToken(req, res, shareId) {
+  const isTunnelRequest = req.headers["x-tunnel-source"] === "cloudflare";
+  if (!isTunnelRequest) return false;
+
+  const token = req.query.token;
+  const exp = req.query.exp;
+
+  if (!token || !exp) {
+    res.status(403).send(
+      renderMessagePage({
+        title: "Access Denied",
+        message: "This link has expired or is invalid. Please request a new share link.",
+      })
+    );
+    return true;
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  if (parseInt(exp, 10) < now) {
+    res.status(403).send(
+      renderMessagePage({
+        title: "Link Expired",
+        message: "This share link has expired. Please request a new link.",
+      })
+    );
+    return true;
+  }
+
+  const signingSecret = process.env.JOINCLOUD_SIGNING_SECRET;
+  if (signingSecret) {
+    const payload = `${shareId}:${exp}`;
+    const expected = crypto.createHmac("sha256", signingSecret).update(payload).digest("base64url");
+    if (token !== expected) {
+      res.status(403).send(
+        renderMessagePage({
+          title: "Invalid Link",
+          message: "This share link is invalid.",
+        })
+      );
+      return true;
+    }
+  }
+  return false;
+}
+
 function renderMessagePage({ title, message }) {
   const safeTitle = String(title || "JoinCloud");
   const safeMessage = String(message || "");
@@ -1749,6 +1799,7 @@ async function bootstrap() {
   });
 
   app.get("/share/:shareId", (req, res) => {
+    if (validateTunnelToken(req, res, req.params.shareId)) return;
     if (!sharingEnabled) {
       res
         .status(423)
@@ -1783,6 +1834,7 @@ async function bootstrap() {
   });
 
   app.get("/share/:shareId/meta", (req, res) => {
+    if (validateTunnelToken(req, res, req.params.shareId)) return;
     if (!sharingEnabled) {
       res.status(423).json({ error: "sharing_stopped", message: "Sharing is currently stopped by the admin." });
       return;
@@ -1822,6 +1874,7 @@ async function bootstrap() {
   });
 
   app.get("/share/:shareId/files", async (req, res) => {
+    if (validateTunnelToken(req, res, req.params.shareId)) return;
     if (!sharingEnabled) {
       res.status(423).json({ error: "sharing_stopped", message: "Sharing is currently stopped by the admin." });
       return;
@@ -1859,6 +1912,7 @@ async function bootstrap() {
   });
 
   app.get("/share/:shareId/preview", async (req, res) => {
+    if (validateTunnelToken(req, res, req.params.shareId)) return;
     if (!sharingEnabled) {
       res.status(423).send("sharing_stopped");
       return;
@@ -1914,6 +1968,7 @@ async function bootstrap() {
   });
 
   app.get("/share/:shareId/download.zip", async (req, res) => {
+    if (validateTunnelToken(req, res, req.params.shareId)) return;
     if (!sharingEnabled) {
       res.status(423).send("sharing_stopped");
       return;
@@ -2020,6 +2075,7 @@ async function bootstrap() {
   });
 
   app.get("/share/:shareId/download", async (req, res) => {
+    if (validateTunnelToken(req, res, req.params.shareId)) return;
     if (!sharingEnabled) {
       res
         .status(423)
@@ -2475,15 +2531,47 @@ async function bootstrap() {
         });
       }
       const tunnelStatus = tunnelManager.getStatus();
-      const publicUrl =
+      const tunnelPublicUrl =
         tunnelStatus.status === "active" && tunnelStatus.publicUrl
           ? tunnelStatus.publicUrl + "/share/" + share.shareId
           : null;
+
+      if (share.scope === "public" && tunnelStatus.status === "active" && tunnelStatus.publicUrl) {
+        const hostUuid = getHostUuidForConfig();
+        const tunnelUrl = tunnelStatus.publicUrl;
+        const adminHost = config.telemetry?.adminHost;
+        if (adminHost && hostUuid && hostUuid.length >= 8) {
+          controlPlanePost(
+            adminHost,
+            "/api/v1/share/register",
+            {
+              hostId: hostUuid,
+              tunnelUrl,
+              shareId: share.shareId,
+              expiresAt: share.expiryTime,
+            },
+            null,
+            (err, result) => {
+              const publicUrl =
+                !err && result?.data?.publicUrl ? result.data.publicUrl : tunnelPublicUrl;
+              res.json({
+                shareId: share.shareId,
+                url: `${endpoints.ipUrl}/${share.shareId}`,
+                urlIp: `${endpoints.ipUrl}/${share.shareId}`,
+                publicUrl,
+                expiresAt: share.expiryTime,
+              });
+            }
+          );
+          return;
+        }
+      }
+
       res.json({
         shareId: share.shareId,
         url: `${endpoints.ipUrl}/${share.shareId}`,
         urlIp: `${endpoints.ipUrl}/${share.shareId}`,
-        publicUrl,
+        publicUrl: tunnelPublicUrl,
         expiresAt: share.expiryTime,
       });
     } catch (error) {

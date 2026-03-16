@@ -236,7 +236,7 @@ function getStoragePath() {
 function startBackend() {
   if (backendProcess) return;
 
-  // Native modules used by backend that require Electron rebuilds: sqlite3.
+  // Backend runs as Node subprocess; no native modules requiring Electron rebuild.
   const backendPath = resolveBackendPaths();
   const backendScript = backendPath.script;
   const backendCwd = backendPath.cwd;
@@ -270,6 +270,7 @@ function startBackend() {
     JOINCLOUD_USER_DATA: userDataPath,
     JOINCLOUD_ADMIN_HOST: process.env.JOINCLOUD_ADMIN_HOST || "https://plane.joincloud.in",
     JOINCLOUD_CONTROL_PLANE_URL: process.env.JOINCLOUD_CONTROL_PLANE_URL || "https://plane.joincloud.in",
+    JOINCLOUD_SIGNING_SECRET: process.env.JOINCLOUD_SIGNING_SECRET || "eec5b45b191de344600ffe878afa67e7a02545fec81c49413b600f1db9d662d7",
     PATH: process.env.PATH || "",
     NODE_PATH: mergedNodePath || inheritedNodePath,
   };
