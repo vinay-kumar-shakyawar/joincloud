@@ -1849,7 +1849,7 @@ async function bootstrap() {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>JoinCloud Share</title>
     <style>${css}</style>
-    <script>window.__SHARE_BASE__ = '';</script>
+    <script>window.__SHARE_BASE__ = ''; window.__SHARE_ID__ = '${req.params.shareId}';</script>
   </head>
   <body>
     <main class="share-layout">

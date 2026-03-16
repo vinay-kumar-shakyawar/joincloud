@@ -7,11 +7,28 @@
 
   function buildShareUrl(path, extraParams) {
     const base = SHARE_BASE || "";
-    const url = new URL(base + path, window.location.origin);
-    if (SHARE_TOKEN) {
+    let finalPath;
+    if (base && base.startsWith("/s/")) {
+      // Worker proxy mode — extract only the subpath after /share/SHAREID
+      // e.g. /share/abc123/meta → /meta
+      // e.g. /share/abc123/download.zip → /download.zip
+      // e.g. /share/abc123 → "" (share page itself)
+      const subPathMatch = path.match(/\/share\/[^/]+(\/.*)?$/);
+      const subPath = (subPathMatch && subPathMatch[1]) || "";
+      finalPath = base + subPath; // e.g. /s/1Ba5xI6e/meta
+    } else {
+      // Direct tunnel access — use full path as-is
+      finalPath = path;
+    }
+
+    const url = new URL(finalPath, window.location.origin);
+
+    // Only add token/exp for direct tunnel access (Worker adds them server-side)
+    if (SHARE_TOKEN && !base.startsWith("/s/")) {
       url.searchParams.set("token", SHARE_TOKEN);
       if (SHARE_EXP) url.searchParams.set("exp", SHARE_EXP);
     }
+
     if (extraParams && typeof extraParams === "object") {
       Object.entries(extraParams).forEach(([key, value]) => {
         if (value !== undefined && value !== null && value !== "") {
@@ -190,7 +207,7 @@
   function renderFileDownloadButton(pathValue) {
     const link = document.createElement("a");
     link.className = "button";
-    link.href = `/share/${encodeURIComponent(shareId)}/download?path=${encodeURIComponent(pathValue)}`;
+    link.href = buildShareUrl(`/share/${encodeURIComponent(shareId)}/download`, { path: pathValue });
     link.textContent = "Download";
     return link;
   }
@@ -341,7 +358,13 @@
           const previewBtn = document.createElement("button");
           previewBtn.className = "button secondary";
           previewBtn.textContent = "Preview";
-          previewBtn.onclick = () => renderPreview(item.previewUrl, item.name);
+          previewBtn.onclick = () =>
+            renderPreview(
+              buildShareUrl(`/share/${encodeURIComponent(shareId)}/download`, {
+                path: item.relativePath,
+              }),
+              item.name
+            );
           row.appendChild(previewBtn);
         }
       }
@@ -400,9 +423,7 @@
       if (meta.targetType === "file") {
         const direct = document.createElement("a");
         direct.className = "button";
-        direct.href =
-          meta.downloadUrl ||
-          buildShareUrl(`/share/${encodeURIComponent(shareId)}/download`);
+        direct.href = buildShareUrl(`/share/${encodeURIComponent(shareId)}/download`);
         direct.textContent = "Download File";
         actionsEl.appendChild(direct);
         const copyWrap = document.createElement("div");
@@ -418,7 +439,8 @@
           const previewBtn = document.createElement("button");
           previewBtn.className = "button secondary";
           previewBtn.textContent = "Preview";
-          previewBtn.onclick = () => renderPreview(meta.previewUrl, meta.name);
+          previewBtn.onclick = () =>
+            renderPreview(buildShareUrl(`/share/${encodeURIComponent(shareId)}/preview`), meta.name);
           actionsEl.appendChild(previewBtn);
           renderPreview(meta.previewUrl, meta.name);
         }
