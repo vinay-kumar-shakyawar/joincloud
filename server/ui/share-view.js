@@ -1,6 +1,44 @@
 (function () {
-  const parts = window.location.pathname.split("/").filter(Boolean);
-  const shareId = parts.length >= 2 ? parts[1] : "";
+  const shareId =
+    window.__SHARE_ID__ ||
+    (window.location.pathname.split("/").filter(Boolean)[1] || "");
+  const SHARE_BASE = window.__SHARE_BASE__ || "";
+  const SHARE_TOKEN = window.__SHARE_TOKEN__ || "";
+  const SHARE_EXP = window.__SHARE_EXP__ || "";
+
+  function buildShareUrl(path, extraParams) {
+    const base = SHARE_BASE || "";
+    let finalPath;
+    if (base && base.startsWith("/s/")) {
+      // Worker proxy mode — extract only the subpath after /share/SHAREID
+      // e.g. /share/abc123/meta → /meta
+      // e.g. /share/abc123/download.zip → /download.zip
+      // e.g. /share/abc123 → "" (share page itself)
+      const subPathMatch = path.match(/\/share\/[^/]+(\/.*)?$/);
+      const subPath = (subPathMatch && subPathMatch[1]) || "";
+      finalPath = base + subPath; // e.g. /s/1Ba5xI6e/meta
+    } else {
+      // Direct tunnel access — use full path as-is
+      finalPath = path;
+    }
+
+    const url = new URL(finalPath, window.location.origin);
+
+    // Only add token/exp for direct tunnel access (Worker adds them server-side)
+    if (SHARE_TOKEN && !base.startsWith("/s/")) {
+      url.searchParams.set("token", SHARE_TOKEN);
+      if (SHARE_EXP) url.searchParams.set("exp", SHARE_EXP);
+    }
+
+    if (extraParams && typeof extraParams === "object") {
+      Object.entries(extraParams).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== "") {
+          url.searchParams.set(key, String(value));
+        }
+      });
+    }
+    return url.toString();
+  }
 
   const titleEl = document.getElementById("share-title");
   const metaEl = document.getElementById("share-meta");
@@ -39,7 +77,8 @@
       for (let i = 0; i < files.length; i++) formData.append("files", files[i]);
       try {
         showToast("Uploading...", "info");
-        const res = await fetch(`/share/${encodeURIComponent(shareId)}/upload`, {
+        const uploadUrl = buildShareUrl(`/share/${encodeURIComponent(shareId)}/upload`);
+        const res = await fetch(uploadUrl, {
           method: "POST",
           body: formData,
         });
@@ -169,7 +208,7 @@
   function renderFileDownloadButton(pathValue) {
     const link = document.createElement("a");
     link.className = "button";
-    link.href = `/share/${encodeURIComponent(shareId)}/download?path=${encodeURIComponent(pathValue)}`;
+    link.href = buildShareUrl(`/share/${encodeURIComponent(shareId)}/download`, { path: pathValue });
     link.textContent = "Download";
     return link;
   }
@@ -185,7 +224,9 @@
       return;
     }
     if (/\.pdf$/i.test(lower)) {
-      previewEl.innerHTML = `<object class="preview-frame" data="${url}" type="application/pdf"><iframe class="preview-frame" src="${url}" title="${name}"></iframe></object>`;
+      previewEl.innerHTML = `<object class="preview-frame" data="${url}" type="application/pdf">
+      <iframe class="preview-frame" src="${url}" title="${name}"></iframe>
+    </object>`;
       return;
     }
     if (/\.(mp4|webm|mov|m4v)$/i.test(lower)) {
@@ -236,7 +277,7 @@
 
     const allLink = document.createElement("a");
     allLink.className = "button";
-    allLink.href = `/share/${encodeURIComponent(shareId)}/download.zip`;
+    allLink.href = buildShareUrl(`/share/${encodeURIComponent(shareId)}/download.zip`);
     allLink.textContent = "Download All (ZIP)";
     allLink.title = "Streams ZIP directly. Large folders may take minutes. If download fails, click again to retry.";
     controls.appendChild(allLink);
@@ -244,7 +285,9 @@
     if (folderPath && folderPath !== "/") {
       const folderZipLink = document.createElement("a");
       folderZipLink.className = "button secondary";
-      folderZipLink.href = `/share/${encodeURIComponent(shareId)}/download.zip?paths=${encodeURIComponent(folderPath.replace(/^\//, ""))}`;
+      folderZipLink.href = buildShareUrl(`/share/${encodeURIComponent(shareId)}/download.zip`, {
+        paths: folderPath.replace(/^\//, ""),
+      });
       folderZipLink.textContent = "Download Folder (ZIP)";
       folderZipLink.title = "Streams ZIP directly. If download fails, click again to retry.";
       controls.appendChild(folderZipLink);
@@ -265,7 +308,9 @@
       event.preventDefault();
       if (!selectedPaths.size) return;
       const joined = Array.from(selectedPaths).join(",");
-      window.location.href = `/share/${encodeURIComponent(shareId)}/download.zip?paths=${encodeURIComponent(joined)}`;
+      window.location.href = buildShareUrl(`/share/${encodeURIComponent(shareId)}/download.zip`, {
+        paths: joined,
+      });
     };
     controls.appendChild(selectedLink);
     listEl.appendChild(controls);
@@ -316,7 +361,15 @@
           const previewBtn = document.createElement("button");
           previewBtn.className = "button secondary";
           previewBtn.textContent = "Preview";
-          previewBtn.onclick = () => renderPreview(item.previewUrl, item.name);
+          previewBtn.onclick = () =>
+            renderPreview(
+              buildShareUrl(
+                `/share/${encodeURIComponent(
+                  shareId
+                )}/preview?path=${encodeURIComponent(item.relativePath)}`
+              ),
+              item.name
+            );
           row.appendChild(previewBtn);
         }
       }
@@ -346,8 +399,10 @@
     currentFolderPath = folderPath || "/";
     selectedPaths = new Set();
     const pathParam = currentFolderPath === "/" ? "" : currentFolderPath.replace(/^\//, "");
-    const url = `/share/${encodeURIComponent(shareId)}/files` + (pathParam ? `?path=${encodeURIComponent(pathParam)}` : "");
-    const files = await fetchJson(url);
+    const filesUrl = buildShareUrl(`/share/${encodeURIComponent(shareId)}/files`, {
+      path: pathParam ? pathParam.replace(/^\//, "") : undefined,
+    });
+    const files = await fetchJson(filesUrl);
     renderFolderList(files, currentFolderPath);
   }
 
@@ -357,7 +412,8 @@
       return;
     }
     try {
-      const meta = await fetchJson(`/share/${encodeURIComponent(shareId)}/meta`);
+      const metaUrl = buildShareUrl(`/share/${encodeURIComponent(shareId)}/meta`);
+      const meta = await fetchJson(metaUrl);
       titleEl.textContent = meta.name || "Shared Item";
       const sizeText = meta.targetType === "file" && Number.isFinite(meta.size) ? ` | Size: ${formatBytes(meta.size)}` : "";
       metaEl.textContent = `Type: ${meta.targetType === "folder" ? "Folder" : "File"}${sizeText} | Expires: ${new Date(meta.expiresAt).toLocaleString()}`;
@@ -372,7 +428,7 @@
       if (meta.targetType === "file") {
         const direct = document.createElement("a");
         direct.className = "button";
-        direct.href = meta.downloadUrl || `/share/${encodeURIComponent(shareId)}/download`;
+        direct.href = buildShareUrl(`/share/${encodeURIComponent(shareId)}/download`);
         direct.textContent = "Download File";
         actionsEl.appendChild(direct);
         const copyWrap = document.createElement("div");
@@ -388,9 +444,16 @@
           const previewBtn = document.createElement("button");
           previewBtn.className = "button secondary";
           previewBtn.textContent = "Preview";
-          previewBtn.onclick = () => renderPreview(meta.previewUrl, meta.name);
+          previewBtn.onclick = () =>
+            renderPreview(
+              buildShareUrl(`/share/${encodeURIComponent(shareId)}/preview`),
+              meta.name
+            );
           actionsEl.appendChild(previewBtn);
-          renderPreview(meta.previewUrl, meta.name);
+          renderPreview(
+            buildShareUrl(`/share/${encodeURIComponent(shareId)}/preview`),
+            meta.name
+          );
         }
         listEl.innerHTML = '<div class="muted">Sharing is caring ❤️</div>';
         renderGrowthCta(meta.marketingUrl);

@@ -18,6 +18,11 @@
       </div>
       <div class="header-actions">
         <button class="button ghost" id="mute-notifications-btn" title="Mute notifications"><span id="mute-icon">🔔</span></button>
+        <button class="header-status-btn" id="control-plane-status" title="Control Plane Status">
+          <svg class="heart-icon" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+          </svg>
+        </button>
         <button class="button" id="add-file-header"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></span> Add File</button>
         <button class="button secondary" id="toggle-sharing">Stop</button>
         <div class="value value-muted" id="upload-destination-label"></div>
@@ -102,13 +107,18 @@
         <p id="home-trial-notice" class="value value-muted" style="display:none; margin-bottom:16px;"></p>
         <div class="home-grid">
           <div class="home-section" id="home-storage-section">
-            <div class="label">Storage</div>
-            <div class="value" id="storage-label">Local storage</div>
-            <div class="value value-muted" style="font-size:12px" id="owner-mount">--</div>
-            <button class="button secondary" id="open-storage" style="margin-top:12px"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg></span>Open Storage</button>
+            <div class="label">Remote Cloud URL</div>
+            <input class="input mono" id="remote-cloud-url-input" readonly style="margin-top:8px" />
+            <div class="row" style="margin-top:10px">
+              <button class="button secondary" id="remote-cloud-copy"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></span>Copy</button>
+            </div>
+            <div class="qr-wrap">
+              <canvas id="remote-cloud-url-qr" width="220" height="220"></canvas>
+            </div>
+            <div class="value value-muted" id="public-status" style="margin-top:8px;">Inactive</div>
           </div>
           <div class="home-section">
-            <div class="label">Cloud URL</div>
+            <div class="label">Local Cloud URL</div>
             <input class="input mono" id="cloud-url-input" readonly style="margin-top:8px" />
             <div class="row" style="margin-top:10px">
               <button class="button secondary" id="copy-cloud-url"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></span>Copy</button>
@@ -119,15 +129,16 @@
           </div>
         </div>
         <div class="home-section-divider">
-          <div class="label">Network Discovery (Cloud UI access)</div>
+        <div class="label">Network Discovery</div>
           <div class="value mono" id="network-discovery-hostname" style="font-size:13px">--</div>
           <div class="value value-muted" id="network-discovery-ip" style="font-size:12px;margin-top:2px">--</div>
           <span class="badge" id="network-discovery-badge" style="margin-top:6px">--</span>
-          <a class="button secondary" id="network-discovery-open-btn" href="#" target="_blank" rel="noopener" style="margin-top:8px;display:inline-flex;text-decoration:none">Open Cloud UI</a>
         </div>
         <div class="home-section-divider">
-          <div class="label">Public File Sharing</div>
-          <div class="value value-muted" id="public-status">Coming soon</div>
+          <div class="label">Storage</div>
+          <div class="value" id="storage-label">Local storage</div>
+          <div class="value value-muted" style="font-size:12px" id="owner-mount">--</div>
+          <button class="button secondary" id="open-storage" style="margin-top:12px"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg></span>Open Storage</button>
         </div>
         <div class="home-section-divider">
           <div class="row space-between">
@@ -194,6 +205,12 @@
             <button class="button secondary" id="revoke-selected" disabled>Revoke Selected</button>
             <button class="button danger" id="revoke-all">Revoke All</button>
             <button class="button secondary" id="refresh-shares"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></span>Refresh</button>
+          </div>
+        </div>
+        <div class="row" style="margin-top:8px;gap:6px;">
+          <div class="view-toggle" role="tablist" aria-label="Share URL scope">
+            <button class="button secondary button-compact share-tab active" data-share-tab="local" type="button">Local</button>
+            <button class="button secondary button-compact share-tab" data-share-tab="public" type="button">Public</button>
           </div>
         </div>
         <div class="share-list" id="share-list"></div>
@@ -467,6 +484,62 @@
           </div>
         </div>
 
+        <!-- SECTION: Remote Access -->
+        <div class="settings-section" id="remote-access-section">
+          <h3 class="settings-section-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4l2 2"/></svg>
+            Remote Access
+          </h3>
+          <div id="remote-access-not-configured" style="display:none;">
+            <div id="remote-access-setup-wrap">
+              <div class="value value-muted" style="margin-top:4px;">Set up a personal cloud URL to access your files from anywhere.</div>
+              <button type="button" class="button primary" id="remote-access-setup-btn" style="margin-top:12px;">Set Up Remote Access</button>
+              <div id="remote-access-setup-spinner" style="display:none;margin-top:12px;">
+                <span class="usage-section-spinner" style="margin-right:8px;"></span>
+                <span class="value value-muted">Setting up your personal cloud URL…</span>
+              </div>
+              <div id="remote-access-setup-error" style="display:none;margin-top:12px;">
+                <span class="value value-muted" style="color:var(--danger);" id="remote-access-setup-error-text"></span>
+                <button type="button" class="button secondary" id="remote-access-setup-retry" style="margin-left:8px;">Retry</button>
+              </div>
+            </div>
+          </div>
+          <div id="remote-access-configured-wrap" style="display:none;">
+            <div class="row space-between" style="margin-top:8px">
+              <div>
+                <div class="label">Enable Remote Access</div>
+                <div class="value value-muted" style="margin-top:2px">Access your cloud from the internet via a public URL</div>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="remote-access-toggle" />
+                <span>On</span>
+              </label>
+            </div>
+            <div id="remote-access-starting" style="display:none;margin-top:12px;">
+              <span class="usage-section-spinner" style="margin-right:8px;"></span>
+              <span class="value value-muted">Starting…</span>
+            </div>
+            <div id="remote-access-active" style="display:none;margin-top:12px;">
+              <div class="value value-muted" style="margin-bottom:6px;">Your cloud is live at</div>
+              <div class="row" style="flex-wrap:wrap;gap:8px;align-items:center;">
+                <a id="remote-access-url" href="#" target="_blank" rel="noopener noreferrer" class="value mono" style="word-break:break-all;"></a>
+                <button type="button" class="button secondary" id="remote-access-copy">Copy</button>
+                <button type="button" class="button secondary" id="remote-access-open">Open</button>
+              </div>
+              <div class="qr-wrap" style="margin-top:12px;">
+                <canvas id="remote-access-qr" width="180" height="180"></canvas>
+              </div>
+            </div>
+            <div class="row" style="margin-top:16px;">
+              <div style="flex:1">
+                <div class="label">Set PIN for remote access</div>
+                <input class="input" id="remote-access-pin" type="password" placeholder="Optional PIN" maxlength="32" autocomplete="off" style="max-width:200px;margin-top:4px;" />
+              </div>
+              <button type="button" class="button secondary" id="remote-access-pin-save" style="align-self:flex-end;">Save</button>
+            </div>
+          </div>
+        </div>
+
         <!-- SECTION: Network -->
         <div class="settings-section">
           <h3 class="settings-section-title">
@@ -687,8 +760,9 @@
           <label class="label">Share Scope</label>
           <div class="radio-group">
             <label><input type="radio" name="share-scope" value="local" checked /> Local</label>
-            <label><input type="radio" name="share-scope" value="public" disabled /> Public (Coming Soon)</label>
+            <label><input type="radio" name="share-scope" value="public" id="share-scope-public" /> Public</label>
           </div>
+          <div id="share-scope-public-hint" class="value value-muted" style="display:none; margin-top:6px; font-size:12px;">Enable Remote Access in Settings to create public shares.</div>
 
           <label class="label">Permission</label>
           <select class="input" id="share-permission">

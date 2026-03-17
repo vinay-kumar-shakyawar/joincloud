@@ -1,12 +1,17 @@
 const { spawn } = require("child_process");
+const fs = require("fs");
+const path = require("path");
 const { resolveTunnelBinaryPath } = require("./resolveBinary");
 const https = require("https");
 
 class TunnelManager {
-  constructor({ url, onStatus, logger }) {
+  constructor({ url, onStatus, logger, credentialsFile = null, tunnelName = null, publicUrl = null }) {
     this.url = url;
     this.onStatus = onStatus;
     this.logger = logger;
+    this.credentialsFile = credentialsFile || null;
+    this.tunnelName = tunnelName || null;
+    this.configuredPublicUrl = publicUrl || null;
     this.process = null;
     this.publicUrl = null;
     this.status = "stopped";
@@ -18,6 +23,21 @@ class TunnelManager {
     this.desiredActive = false;
     this.restartWindowMs = 10 * 60 * 1000;
     this.maxRestartsInWindow = 3;
+  }
+
+  setCredentials(credentialsFile, tunnelName) {
+    this.credentialsFile = credentialsFile;
+    this.tunnelName = tunnelName;
+    if (credentialsFile) {
+      try {
+        const configPath = path.join(path.dirname(credentialsFile), "config.json");
+        if (fs.existsSync(configPath)) {
+          const raw = fs.readFileSync(configPath, "utf8");
+          const config = JSON.parse(raw);
+          if (config.publicUrl) this.configuredPublicUrl = config.publicUrl;
+        }
+      } catch (_) {}
+    }
   }
 
   parsePublicUrl(output) {
@@ -128,6 +148,26 @@ class TunnelManager {
       return this.getStatus();
     }
 
+    if (!this.credentialsFile || !this.tunnelName) {
+      this.status = "failed";
+      this.lastError = "Public sharing not set up yet";
+      this.lastReason = "not_configured";
+      this.message = "Public sharing not set up yet";
+      if (this.logger) this.logger.error("public access failed", { reason: this.lastReason });
+      this.emitStatus();
+      return this.getStatus();
+    }
+
+    if (!fs.existsSync(this.credentialsFile)) {
+      this.status = "failed";
+      this.lastError = "Public sharing not set up yet";
+      this.lastReason = "not_configured";
+      this.message = "Public sharing not set up yet";
+      if (this.logger) this.logger.error("public access failed", { reason: this.lastReason });
+      this.emitStatus();
+      return this.getStatus();
+    }
+
     this.desiredActive = true;
     this.lastError = null;
     this.lastReason = null;
@@ -147,43 +187,40 @@ class TunnelManager {
       return this.getStatus();
     }
 
-    this.process = spawn(binaryPath, ["tunnel", "--url", this.url, "--no-autoupdate"]);
+    const args = [
+      "tunnel",
+      "--credentials-file", this.credentialsFile,
+      "--url", this.url,
+      "run", this.tunnelName,
+    ];
+    this.process = spawn(binaryPath, args);
 
     this.startTimeoutWatch();
 
-    this.process.stdout.on("data", async (data) => {
-      const text = data.toString();
-      const found = this.parsePublicUrl(text);
-      if (!found || this.publicUrl) return;
-      if (!found.startsWith("https://")) return;
-      if (found.includes("cloudflare.com/")) return;
-      const ok = await this.verifyPublicUrl(found);
-      if (!ok) return;
-      this.publicUrl = found;
+    const onRegisteredTunnel = () => {
+      if (this.publicUrl) return;
+      this.publicUrl = this.configuredPublicUrl || 'https://share.joincloud.cloud';
       this.status = "active";
       this.clearTimeoutWatch();
       this.restartHistory = [];
       this.lastReason = null;
       if (this.logger) this.logger.info("public access active");
       this.emitStatus();
+    };
+
+    this.process.stdout.on("data", (data) => {
+      const text = data.toString();
+      if (text.includes("Registered tunnel connection")) {
+        onRegisteredTunnel();
+      }
     });
 
-    this.process.stderr.on("data", async (data) => {
+    this.process.stderr.on("data", (data) => {
       const text = data.toString();
-      const found = this.parsePublicUrl(text);
-      if (!found || this.publicUrl) return;
-      if (!found.startsWith("https://")) return;
-      if (found.includes("cloudflare.com/")) return;
-      const ok = await this.verifyPublicUrl(found);
-      if (!ok) return;
-      this.publicUrl = found;
-      this.status = "active";
-      this.clearTimeoutWatch();
-      this.restartHistory = [];
-      this.lastReason = null;
-      if (this.logger) this.logger.info("public access active");
-      this.emitStatus();
-      if (text.trim()) {
+      if (text.includes("Registered tunnel connection")) {
+        onRegisteredTunnel();
+      }
+      if (text.trim() && !this.publicUrl) {
         this.lastError = "Public sharing is unavailable on this system";
         this.lastReason = "Tunnel exited";
       }
@@ -243,9 +280,22 @@ class TunnelManager {
       reason: this.lastReason,
       message:
         this.status === "failed" || this.status === "error"
-          ? "Public sharing is unavailable on this system"
+          ? (this.lastReason === "not_configured" ? "Public sharing not set up yet" : "Public sharing is unavailable on this system")
           : null,
     };
+  }
+
+  static setupTunnel(options) {
+    const { credentialsJson, tunnelName, credentialsDir } = options;
+    const dir = path.resolve(credentialsDir);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const credentialsFile = path.join(dir, "credentials.json");
+    const configFile = path.join(dir, "config.json");
+    fs.writeFileSync(credentialsFile, typeof credentialsJson === "string" ? credentialsJson : JSON.stringify(credentialsJson), "utf8");
+    fs.writeFileSync(configFile, JSON.stringify({ tunnelName }, null, 2), "utf8");
+    return { credentialsFile, tunnelName };
   }
 }
 

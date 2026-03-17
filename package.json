@@ -10,24 +10,22 @@
     "electron:dev": "node scripts/run-electron.cjs .",
     "test:electron": "ELECTRON_RUN_AS_NODE= node electron/tests/smoke.test.js",
     "build:mac": "node -e \"require('fs').rmSync('dist-mac2', { recursive: true, force: true })\" && cross-env USE_HARD_LINKS=false electron-builder --mac --publish never -c.directories.output=dist-mac2",
-    "build:win": "npm run rebuild:server && npm run build:icon:win && node -e \"require('fs').rmSync('win', { recursive: true, force: true })\" && cross-env USE_HARD_LINKS=false electron-builder --win --x64 --publish never -c.directories.output=win",
+    "build:win": "npm run rebuild:server && npm run build:icon:win && node -e \"require('fs').rmSync('windows', { recursive: true, force: true })\" && cross-env USE_HARD_LINKS=false electron-builder --win --x64 --publish never -c.directories.output=windows",
     "build:icon:win": "node scripts/prepare-win-icon.cjs",
-    "rebuild:server": "electron-rebuild -w sqlite3",
-    "postinstall": "npm run rebuild:server",
+    "rebuild:server": "electron-rebuild",
     "prebuild:mac": "npm run rebuild:server",
     "prebuild:win": "npm run rebuild:server && npm run build:icon:win"
   },
   "dependencies": {
-    "dotenv": "^16.4.5",
     "archiver": "^7.0.1",
-    "busboy": "^1.6.0",
     "bonjour": "^3.5.1",
+    "busboy": "^1.6.0",
+    "dotenv": "^16.4.5",
     "express": "^5.2.1",
     "mime-types": "^3.0.2",
     "qrious": "^4.0.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "sqlite3": "^5.1.7",
     "webdav-server": "^2.6.2"
   },
   "devDependencies": {
