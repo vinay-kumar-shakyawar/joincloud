@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("joincloud", {
   quitApp: () => ipcRenderer.invoke("joincloud-quit-app"),
   openAuthModal: (url) => ipcRenderer.invoke("joincloud-open-auth-modal", url),
   closeAuthModal: () => ipcRenderer.invoke("joincloud-close-auth-modal"),
+  checkInternet: () => ipcRenderer.invoke("joincloud-check-internet"),
   onLicenseUpdated: (callback) => {
     console.log("[preload] onLicenseUpdated callback registered");
     ipcRenderer.on("license-updated", () => {

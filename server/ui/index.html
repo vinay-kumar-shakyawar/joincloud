@@ -23,6 +23,9 @@
             <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
           </svg>
         </button>
+        <span class="server-status-pill server-status-online" id="network-status-badge" style="margin-right:8px;" aria-live="polite">
+          <span class="server-status-text" id="network-status-text">Online</span>
+        </span>
         <button class="button" id="add-file-header"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></span> Add File</button>
         <button class="button secondary" id="toggle-sharing">Stop</button>
         <div class="value value-muted" id="upload-destination-label"></div>
@@ -96,7 +99,7 @@
         <nav class="nav-group nav-group-bottom">
           <button class="nav-button" data-section="settings" title="Settings"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg></span><span class="nav-label">Settings</span></button>
           <button class="nav-button" data-section="logs" title="Logs"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg></span><span class="nav-label">Logs</span></button>
-          <button class="nav-button" data-section="network" title="Network"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.7 2.06 7.3 2.06 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg></span><span class="nav-label">Network</span></button>
+          <!-- <button class="nav-button" data-section="network" title="Network"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.7 2.06 7.3 2.06 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg></span><span class="nav-label">Network</span></button> -->
           <button class="nav-button" data-section="support" title="Support"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/></svg></span><span class="nav-label">Support</span></button>
         </nav>
       </aside>
@@ -108,12 +111,26 @@
         <div class="home-grid">
           <div class="home-section" id="home-storage-section">
             <div class="label">Remote Cloud URL</div>
-            <input class="input mono" id="remote-cloud-url-input" readonly style="margin-top:8px" />
             <div class="row" style="margin-top:10px">
-              <button class="button secondary" id="remote-cloud-copy"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></span>Copy</button>
+              <label class="toggle">
+                <input type="checkbox" id="home-remote-access-toggle" />
+                <span>Remote Access</span>
+              </label>
+              <button type="button" class="button secondary button-compact" id="home-remote-access-settings">Settings</button>
             </div>
-            <div class="qr-wrap">
-              <canvas id="remote-cloud-url-qr" width="220" height="220"></canvas>
+            <div id="remote-cloud-active-wrap" style="display:none;">
+              <input class="input mono" id="remote-cloud-url-input" readonly style="margin-top:8px" />
+              <div class="row" style="margin-top:10px">
+                <button class="button secondary" id="remote-cloud-copy"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></span>Copy</button>
+              </div>
+              <div class="qr-wrap" id="remote-cloud-qr-wrap">
+                <canvas id="remote-cloud-url-qr" width="220" height="220"></canvas>
+              </div>
+            </div>
+            <div id="remote-cloud-setup-cta" class="remote-access-placeholder" style="display:none;margin-top:10px;">
+              <div class="remote-access-placeholder-title">Set up Remote Access</div>
+              <div class="remote-access-placeholder-sub">Create your personal cloud URL to enable public sharing and access files from anywhere.</div>
+              <button type="button" class="button primary" id="remote-cloud-setup-btn" style="margin-top:10px;">Set Up Remote Access</button>
             </div>
             <div class="value value-muted" id="public-status" style="margin-top:8px;">Inactive</div>
           </div>
@@ -415,7 +432,7 @@
               Connection error. Check your network and try again.
             </div>
             <div id="usage-bars-content" style="display:none;">
-              <h4 style="font-size:13px;font-weight:600;margin:0 0 10px;color:var(--fg,#fff);">Plan usage this month</h4>
+              <h4 id="usage-bars-heading" style="font-size:13px;font-weight:600;margin:0 0 10px;color:var(--fg,#fff);">Plan usage this month</h4>
               <div id="shares-usage-bar" class="usage-bar-wrap">
                 <div class="usage-bar-label-title">Shares created</div>
                 <div class="usage-bar-track"><div class="usage-bar-fill"></div></div>
@@ -440,7 +457,7 @@
             <div class="label" style="font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted, #8B9CA3);">Profile</div>
             <div class="value" id="settings-profile-value">-</div>
           </div>
-          <div class="subscription-card" id="subscription-card" style="display:none;">
+          <div class="subscription-card" id="subscription-card" style="display:none !important;">
             <h4 class="subscription-title" style="font-size:14px;font-weight:600;margin-bottom:12px;">Subscription &amp; Billing</h4>
             <div class="row" style="margin-top:8px">
               <div class="label">Plan</div>
@@ -519,6 +536,10 @@
               <span class="usage-section-spinner" style="margin-right:8px;"></span>
               <span class="value value-muted">Starting…</span>
             </div>
+            <div id="remote-access-unavailable" class="remote-access-placeholder" style="display:none;margin-top:12px;">
+              <div class="remote-access-placeholder-title">Public URL not available yet</div>
+              <div class="remote-access-placeholder-sub">Turn on Remote Access and wait a few seconds. Once active, your URL and QR code will appear here.</div>
+            </div>
             <div id="remote-access-active" style="display:none;margin-top:12px;">
               <div class="value value-muted" style="margin-bottom:6px;">Your cloud is live at</div>
               <div class="row" style="flex-wrap:wrap;gap:8px;align-items:center;">
@@ -540,28 +561,55 @@
           </div>
         </div>
 
-        <!-- SECTION: Network -->
-        <div class="settings-section">
-          <h3 class="settings-section-title">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-            Network
-          </h3>
-          <div class="row space-between" style="margin-top:8px">
-            <div>
-              <div class="label">Network Visibility</div>
-              <div class="value value-muted" style="margin-top:2px">Advertise this device for LAN discovery</div>
-            </div>
-            <label class="toggle">
-              <input type="checkbox" id="network-visibility" />
-              <span>On</span>
-            </label>
+       <!-- SECTION: Network -->
+       
+
+    <!-- <section class="card section" data-section="network">
+       <div class="row space-between">
+        <h2>Network</h2>
+        <button class="button secondary" id="network-search-btn"><span 
+        class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 
+        24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.
+        11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.11-.59 
+        4.27-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.
+        01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg></span><span 
+        id="network-search-btn-text">Search</span></button>
+      </div>
+      <p class="value value-muted" style="margin:0 0 12px">Network Discovery and 
+      Manual Connect.</p>
+      <div class="network-settings">
+        <div class="network-setting-row">
+          <div>
+            <div class="label">Network Visibility</div>
+            <div class="value value-muted" style="margin-top:2px">Advertise this 
+            device for LAN discovery</div>
           </div>
-          <div class="row" style="margin-top:8px">
-            <div class="value value-muted" style="font-size:12px;">
-              Only your display name and online status are visible to other JoinCloud users on the same network. No files or identifiers are shared automatically.
-            </div>
-          </div>
+          <label class="toggle">
+            <input type="checkbox" id="network-visibility-network" />
+            <span>On</span>
+          </label>
         </div>
+      </div>
+      <div class="manual-connect-wrap" style="margin-top:16px">
+        <div class="label">Manual Connect</div>
+        <div class="row" style="margin-top:6px;gap:8px;flex-wrap:wrap">
+          <input class="input" id="manual-connect-ip" placeholder="192.168.1.100" 
+          style="flex:1;min-width:140px" />
+          <input class="input" id="manual-connect-port" placeholder="8787" 
+          style="width:80px" type="number" />
+          <button class="button secondary" id="manual-connect-btn">Connect</button>
+        </div>
+        <div class="value value-muted" id="manual-connect-status" 
+        style="margin-top:6px;font-size:12px"></div>
+      </div>
+      <div class="label" style="margin-top:16px">Nearby Devices</div>
+      <div class="network-list" id="network-list"></div>
+      <div class="label" style="margin-top:20px">Connected Users</div>
+      <p class="value value-muted" style="margin:0 0 8px;font-size:12px">Devices 
+      that have been approved to access this JoinCloud.</p>
+      <div class="network-list" id="connected-users-list"></div>
+    </section> -->
+
 
         <!-- SECTION: Privacy & Data -->
         <div class="settings-section">
@@ -645,6 +693,142 @@
           </div>
         </div>
       </div>
+
+      <section class="card section" data-section="network">
+         <div class="row space-between">
+          <h2>Network</h2>
+          <button class="button secondary" id="network-search-btn"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.11-.59 4.27-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg></span><span id="network-search-btn-text">Search</span></button>
+        </div>
+        <p class="value value-muted" style="margin:0 0 12px">Network Discovery and Manual Connect.</p>
+        <div class="network-settings">
+          <div class="network-setting-row">
+            <div>
+              <div class="label">Network Visibility</div>
+              <div class="value value-muted" style="margin-top:2px">Advertise this device for LAN discovery</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="network-visibility-network" />
+              <span>On</span>
+            </label>
+          </div>
+        </div>
+        <div class="manual-connect-wrap" style="margin-top:16px">
+          <div class="label">Manual Connect</div>
+          <div class="row" style="margin-top:6px;gap:8px;flex-wrap:wrap">
+            <input class="input" id="manual-connect-ip" placeholder="192.168.1.100" style="flex:1;min-width:140px" />
+            <input class="input" id="manual-connect-port" placeholder="8787" style="width:80px" type="number" />
+            <button class="button secondary" id="manual-connect-btn">Connect</button>
+          </div>
+          <div class="value value-muted" id="manual-connect-status" style="margin-top:6px;font-size:12px"></div>
+        </div>
+        <div class="label" style="margin-top:16px">Nearby Devices</div>
+        <div class="network-list" id="network-list"></div>
+        <div class="label" style="margin-top:20px">Connected Users</div>
+        <p class="value value-muted" style="margin:0 0 8px;font-size:12px">Devices that have been approved to access this JoinCloud.</p>
+        <div class="network-list" id="connected-users-list"></div>
+      </section>
+
+      <section class="card section" data-section="network">
+         <div class="row space-between">
+          <h2>Network</h2>
+          <button class="button secondary" id="network-search-btn"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.11-.59 4.27-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg></span><span id="network-search-btn-text">Search</span></button>
+        </div>
+        <p class="value value-muted" style="margin:0 0 12px">Network Discovery and Manual Connect.</p>
+        <div class="network-settings">
+          <div class="network-setting-row">
+            <div>
+              <div class="label">Network Visibility</div>
+              <div class="value value-muted" style="margin-top:2px">Advertise this device for LAN discovery</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="network-visibility-network" />
+              <span>On</span>
+            </label>
+          </div>
+        </div>
+        <div class="manual-connect-wrap" style="margin-top:16px">
+          <div class="label">Manual Connect</div>
+          <div class="row" style="margin-top:6px;gap:8px;flex-wrap:wrap">
+            <input class="input" id="manual-connect-ip" placeholder="192.168.1.100" style="flex:1;min-width:140px" />
+            <input class="input" id="manual-connect-port" placeholder="8787" style="width:80px" type="number" />
+            <button class="button secondary" id="manual-connect-btn">Connect</button>
+          </div>
+          <div class="value value-muted" id="manual-connect-status" style="margin-top:6px;font-size:12px"></div>
+        </div>
+        <div class="label" style="margin-top:16px">Nearby Devices</div>
+        <div class="network-list" id="network-list"></div>
+        <div class="label" style="margin-top:20px">Connected Users</div>
+        <p class="value value-muted" style="margin:0 0 8px;font-size:12px">Devices that have been approved to access this JoinCloud.</p>
+        <div class="network-list" id="connected-users-list"></div>
+      </section>
+
+      <section class="card section" data-section="network">
+         <div class="row space-between">
+          <h2>Network</h2>
+          <button class="button secondary" id="network-search-btn"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.11-.59 4.27-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg></span><span id="network-search-btn-text">Search</span></button>
+        </div>
+        <p class="value value-muted" style="margin:0 0 12px">Network Discovery and Manual Connect.</p>
+        <div class="network-settings">
+          <div class="network-setting-row">
+            <div>
+              <div class="label">Network Visibility</div>
+              <div class="value value-muted" style="margin-top:2px">Advertise this device for LAN discovery</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="network-visibility-network" />
+              <span>On</span>
+            </label>
+          </div>
+        </div>
+        <div class="manual-connect-wrap" style="margin-top:16px">
+          <div class="label">Manual Connect</div>
+          <div class="row" style="margin-top:6px;gap:8px;flex-wrap:wrap">
+            <input class="input" id="manual-connect-ip" placeholder="192.168.1.100" style="flex:1;min-width:140px" />
+            <input class="input" id="manual-connect-port" placeholder="8787" style="width:80px" type="number" />
+            <button class="button secondary" id="manual-connect-btn">Connect</button>
+          </div>
+          <div class="value value-muted" id="manual-connect-status" style="margin-top:6px;font-size:12px"></div>
+        </div>
+        <div class="label" style="margin-top:16px">Nearby Devices</div>
+        <div class="network-list" id="network-list"></div>
+        <div class="label" style="margin-top:20px">Connected Users</div>
+        <p class="value value-muted" style="margin:0 0 8px;font-size:12px">Devices that have been approved to access this JoinCloud.</p>
+        <div class="network-list" id="connected-users-list"></div>
+      </section>
+
+      <section class="card section" data-section="network">
+         <div class="row space-between">
+          <h2>Network</h2>
+          <button class="button secondary" id="network-search-btn"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.11-.59 4.27-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg></span><span id="network-search-btn-text">Search</span></button>
+        </div>
+        <p class="value value-muted" style="margin:0 0 12px">Network Discovery and Manual Connect.</p>
+        <div class="network-settings">
+          <div class="network-setting-row">
+            <div>
+              <div class="label">Network Visibility</div>
+              <div class="value value-muted" style="margin-top:2px">Advertise this device for LAN discovery</div>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="network-visibility-network" />
+              <span>On</span>
+            </label>
+          </div>
+        </div>
+        <div class="manual-connect-wrap" style="margin-top:16px">
+          <div class="label">Manual Connect</div>
+          <div class="row" style="margin-top:6px;gap:8px;flex-wrap:wrap">
+            <input class="input" id="manual-connect-ip" placeholder="192.168.1.100" style="flex:1;min-width:140px" />
+            <input class="input" id="manual-connect-port" placeholder="8787" style="width:80px" type="number" />
+            <button class="button secondary" id="manual-connect-btn">Connect</button>
+          </div>
+          <div class="value value-muted" id="manual-connect-status" style="margin-top:6px;font-size:12px"></div>
+        </div>
+        <div class="label" style="margin-top:16px">Nearby Devices</div>
+        <div class="network-list" id="network-list"></div>
+        <div class="label" style="margin-top:20px">Connected Users</div>
+        <p class="value value-muted" style="margin:0 0 8px;font-size:12px">Devices that have been approved to access this JoinCloud.</p>
+        <div class="network-list" id="connected-users-list"></div>
+      </section>
 
       <section class="card section" data-section="network">
          <div class="row space-between">
@@ -871,6 +1055,27 @@
           <button class="button secondary" id="cancel-stop-modal">Cancel</button>
           <button class="button secondary" id="stop-sharing-only">Stop Sharing</button>
           <button class="button danger" id="close-application">Close Application</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal" id="delete-shared-item-modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Item is currently shared</h3>
+          <button class="button ghost" id="delete-shared-item-cancel-top">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="value" id="delete-shared-item-title">This file or folder has active shares.</div>
+          <div class="value value-muted" id="delete-shared-item-description" style="margin-top:6px;font-size:13px;">
+            You can stop sharing first, or stop sharing and delete in one step. Shares will stop working immediately after revocation.
+          </div>
+          <div class="value value-muted" id="delete-shared-item-path" style="margin-top:8px;font-size:12px;font-family:ui-monospace,monospace;word-break:break-all;"></div>
+        </div>
+        <div class="modal-actions">
+          <button class="button secondary" id="delete-shared-item-cancel">Cancel</button>
+          <button class="button secondary" id="delete-shared-item-stop-only">Stop sharing only</button>
+          <button class="button danger" id="delete-shared-item-stop-and-delete">Stop sharing and delete</button>
         </div>
       </div>
     </div>

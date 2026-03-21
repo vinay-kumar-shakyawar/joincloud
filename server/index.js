@@ -33,6 +33,72 @@ const { TeamsStore } = require("./teams/TeamsStore");
 const crypto = require("crypto");
 const dns = require("dns");
 
+// HMAC keys for signed local state. Prefer environment overrides so
+// operators can rotate keys without code changes.
+const ENTITLEMENTS_HMAC_KEY =
+  process.env.JOINCLOUD_ENTITLEMENTS_HMAC_KEY ||
+  process.env.JOINCLOUD_SIGNING_KEY ||
+  "joincloud_entitlements_v1";
+const USAGE_HMAC_KEY =
+  process.env.JOINCLOUD_USAGE_HMAC_KEY ||
+  process.env.JOINCLOUD_SIGNING_KEY ||
+  "joincloud_usage_v1";
+
+function computeHmacSignature(data, key) {
+  try {
+    const json = JSON.stringify(data);
+    return crypto.createHmac("sha256", String(key || "")).update(Buffer.from(json, "utf8")).digest("hex");
+  } catch (_) {
+    return null;
+  }
+}
+
+function writeSignedJsonFile(filePath, data, key) {
+  const dir = path.dirname(filePath);
+  try {
+    if (!fsSync.existsSync(dir)) fsSync.mkdirSync(dir, { recursive: true });
+    const sig = computeHmacSignature(data, key);
+    if (!sig) return;
+    const payload = { data, sig };
+    fsSync.writeFileSync(filePath, JSON.stringify(payload, null, 2), "utf8");
+  } catch (_) {
+    // Best-effort only; callers treat failures as non-fatal.
+  }
+}
+
+function readSignedJsonFile(filePath, key) {
+  if (!fsSync.existsSync(filePath)) return null;
+  try {
+    const raw = fsSync.readFileSync(filePath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && parsed.data && typeof parsed.sig === "string") {
+      const expected = computeHmacSignature(parsed.data, key);
+      if (expected && expected === parsed.sig) return parsed.data;
+      // Signature mismatch → treat as tampered.
+      return null;
+    }
+    // Legacy unsigned format: treat the whole object as data so older installs still work.
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function writeSignedEntitlements(data) {
+  const paths = getActivationPaths();
+  if (!paths) return;
+  const entPath = path.join(paths.systemDir, "entitlements.json");
+  writeSignedJsonFile(entPath, data, ENTITLEMENTS_HMAC_KEY);
+}
+
+function readLocalEntitlements() {
+  const paths = getActivationPaths();
+  if (!paths) return null;
+  const entPath = path.join(paths.systemDir, "entitlements.json");
+  const ent = readSignedJsonFile(entPath, ENTITLEMENTS_HMAC_KEY);
+  return ent && typeof ent === "object" ? ent : null;
+}
+
 async function ensureOwnerStorage(rootPath) {
   await fs.mkdir(rootPath, { recursive: true });
 }
@@ -125,16 +191,29 @@ function getYearMonthKey(date = new Date()) {
   return `${y}-${m}`;
 }
 
+/** True if current_period exists and now is within [periodStart, periodEnd] (periodEnd null = open). */
+function isNowInUsagePeriod(currentPeriod) {
+  if (!currentPeriod || typeof currentPeriod.periodStart !== "string") return false;
+  const now = Date.now();
+  const start = new Date(currentPeriod.periodStart).getTime();
+  if (Number.isNaN(start) || now < start) return false;
+  if (currentPeriod.periodEnd != null && currentPeriod.periodEnd !== "") {
+    const end = new Date(currentPeriod.periodEnd).getTime();
+    if (Number.isNaN(end) || now > end) return false;
+  }
+  return true;
+}
+
 function readLocalUsage() {
   const usagePath = getUsagePath();
   if (!usagePath || !fsSync.existsSync(usagePath)) return { monthly_shares: {} };
   try {
-    const raw = fsSync.readFileSync(usagePath, "utf8");
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return { monthly_shares: {} };
-    if (!parsed.monthly_shares || typeof parsed.monthly_shares !== "object") parsed.monthly_shares = {};
-    return parsed;
+    const parsed = readSignedJsonFile(usagePath, USAGE_HMAC_KEY);
+    const data = parsed && typeof parsed === "object" ? parsed : {};
+    if (!data.monthly_shares || typeof data.monthly_shares !== "object") data.monthly_shares = {};
+    return data;
   } catch (_) {
+    // If the usage file is missing or invalid/tampered, fall back to 0 local usage.
     return { monthly_shares: {} };
   }
 }
@@ -144,9 +223,103 @@ function writeLocalUsage(payload) {
   const paths = getActivationPaths();
   if (!usagePath || !paths) return;
   try {
-    if (!fsSync.existsSync(paths.systemDir)) fsSync.mkdirSync(paths.systemDir, { recursive: true });
-    fsSync.writeFileSync(usagePath, JSON.stringify(payload, null, 2), "utf8");
+    writeSignedJsonFile(usagePath, payload, USAGE_HMAC_KEY);
   } catch (_) {}
+}
+
+function getUsagePendingPath() {
+  const paths = getActivationPaths();
+  if (!paths) return null;
+  return path.join(paths.systemDir, "usage_pending.json");
+}
+
+function readUsagePending() {
+  const pendingPath = getUsagePendingPath();
+  if (!pendingPath || !fsSync.existsSync(pendingPath)) return { shares_increment: 0 };
+  try {
+    const raw = fsSync.readFileSync(pendingPath, "utf8");
+    const parsed = JSON.parse(raw);
+    const n = Number(parsed?.shares_increment || 0);
+    return { shares_increment: Number.isFinite(n) ? Math.max(0, n) : 0 };
+  } catch (_) {
+    return { shares_increment: 0 };
+  }
+}
+
+function writeUsagePending(payload) {
+  const pendingPath = getUsagePendingPath();
+  const paths = getActivationPaths();
+  if (!pendingPath || !paths) return;
+  try {
+    if (!fsSync.existsSync(paths.systemDir)) fsSync.mkdirSync(paths.systemDir, { recursive: true });
+    fsSync.writeFileSync(pendingPath, JSON.stringify(payload, null, 2), "utf8");
+  } catch (_) {}
+}
+
+function enqueueSharesUsageSync(delta = 1) {
+  const d = Number(delta || 0);
+  if (!Number.isFinite(d) || d <= 0) return;
+  const pending = readUsagePending();
+  pending.shares_increment = Number(pending.shares_increment || 0) + d;
+  writeUsagePending(pending);
+}
+
+async function flushSharesUsageSyncOnce({ maxToFlush = 10 } = {}) {
+  const adminHost = config.telemetry?.adminHost;
+  const deviceId = getHostUuidForConfig();
+  if (!adminHost || !deviceId || deviceId.length < 8) return;
+  const pending = readUsagePending();
+  const count = Number(pending.shares_increment || 0);
+  if (!Number.isFinite(count) || count <= 0) return;
+  const toFlush = Math.max(1, Math.min(maxToFlush, count));
+  let flushed = 0;
+  for (let i = 0; i < toFlush; i++) {
+    const ok = await controlPlanePostOk(adminHost, "/api/v1/devices/usage/shares/increment", { deviceId });
+    if (!ok) break;
+    flushed++;
+  }
+  if (flushed > 0) {
+    writeUsagePending({ shares_increment: Math.max(0, count - flushed) });
+  }
+}
+
+async function isInternetOnline() {
+  // Lightweight check: HTTPS HEAD to Google with short timeout.
+  // This is only used to enforce \"no sharing while offline\".
+  return await new Promise((resolve) => {
+    try {
+      const req = https.request(
+        {
+          method: "HEAD",
+          host: "www.google.com",
+          path: "/",
+          timeout: 2500,
+        },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode >= 200 && res.statusCode < 500);
+        }
+      );
+      req.on("error", () => resolve(false));
+      req.on("timeout", () => {
+        try { req.destroy(); } catch (_) {}
+        resolve(false);
+      });
+      req.end();
+    } catch (_) {
+      resolve(false);
+    }
+  });
+}
+
+function controlPlanePostOk(adminHost, apiPath, body) {
+  return new Promise((resolve) => {
+    controlPlanePost(adminHost, apiPath, body, null, (err, result) => {
+      if (err) return resolve(false);
+      const code = result?.statusCode || 0;
+      resolve(code >= 200 && code < 300);
+    });
+  });
 }
 
 function getCurrentShareUsageSummary() {
@@ -162,15 +335,31 @@ function getCurrentShareUsageSummary() {
   };
 }
 
+function getAdminUsageSnapshot() {
+  const local = getCurrentShareUsageSummary();
+  const used = Number(local.sharesUsed || 0);
+  const limit = local.sharesLimit;
+  if (limit != null && Number.isFinite(limit) && limit > 0) {
+    const capped = Math.min(used, Number(limit));
+    return {
+      sharesThisMonth: capped,
+      sharesLimit: Number(limit),
+    };
+  }
+  return {
+    sharesThisMonth: used,
+    sharesLimit: null,
+  };
+}
+
 /** Returns current license state from local entitlements or license file, or null if unreadable. */
 function getLicenseStateFromLocalState() {
   try {
     const paths = getActivationPaths();
     if (paths) {
-      const entPath = path.join(paths.systemDir, "entitlements.json");
-      if (fsSync.existsSync(entPath)) {
-        const ent = JSON.parse(fsSync.readFileSync(entPath, "utf8"));
-        return String(ent?.licenseState ?? "").toLowerCase();
+      const ent = readLocalEntitlements();
+      if (ent) {
+        return String(ent.licenseState ?? "").toLowerCase();
       }
       if (fsSync.existsSync(paths.licensePath)) {
         const lic = JSON.parse(fsSync.readFileSync(paths.licensePath, "utf8"));
@@ -185,10 +374,9 @@ function getShareLimitFromLocalState() {
   try {
     const paths = getActivationPaths();
     if (paths) {
-      const entPath = path.join(paths.systemDir, "entitlements.json");
-      if (fsSync.existsSync(entPath)) {
-        const ent = JSON.parse(fsSync.readFileSync(entPath, "utf8"));
-        const licenseState = String(ent?.licenseState || "").toUpperCase();
+      const ent = readLocalEntitlements();
+      if (ent) {
+        const licenseState = String(ent.licenseState || "").toUpperCase();
         const limit = ent?.entitlements?.shareLimitMonthly;
         if (limit === null || limit === undefined) return licenseState === "TRIAL" ? 50 : 10;
         const n = Number(limit);
@@ -913,6 +1101,10 @@ async function bootstrap() {
     getHostUuid: getHostUuidForConfig,
   });
   telemetrySync.start();
+  // Best-effort usage sync flush (local is source of truth).
+  setInterval(() => {
+    flushSharesUsageSyncOnce({ maxToFlush: 10 }).catch(() => {});
+  }, 15000);
 
   fetchControlPlaneConfigAndApplyTelemetry(
     config.telemetry.adminHost,
@@ -1298,14 +1490,16 @@ async function bootstrap() {
       }
       const data = result.data || {};
       if (result.statusCode === 200 && data.licenseState) {
-        const paths = getActivationPaths();
-        if (paths) {
-          try {
-            const entitlementsPath = path.join(paths.systemDir, "entitlements.json");
-            fsSync.writeFileSync(entitlementsPath, JSON.stringify(data, null, 2), "utf8");
-          } catch (e) {
-            logger.warn("bootstrap-trial persist error", { error: e.message });
-          }
+        try {
+          writeSignedEntitlements({
+            licenseState: data.licenseState,
+            entitlements: data.entitlements || data.entitlements_override || data.entitlements_default || {},
+            trialEndsAt: data.trialEndsAt || null,
+            resetUsageAt: data.resetUsageAt || data.reset_usage_at || null,
+            resetUsageNow: data.resetUsageNow === true || data.reset_usage_now === true,
+          });
+        } catch (e) {
+          logger.warn("bootstrap-trial persist error", { error: e.message });
         }
       }
       res.status(result.statusCode || 200).json(data);
@@ -1318,58 +1512,50 @@ async function bootstrap() {
     const refreshConfig = (adminHost && hostUuid && hostUuid.length >= 8) ? new Promise((resolve) => {
       controlPlaneGet(adminHost, `/api/v1/config?host_uuid=${encodeURIComponent(hostUuid)}`, (err, result) => {
         if (!err && result && result.statusCode === 200 && result.data) {
-          if (result.data.usage) {
-            if (!controlPlaneConfigCache) controlPlaneConfigCache = {};
-            controlPlaneConfigCache.usage = result.data.usage;
-          }
-          if (result.data.license && result.data.license.state && result.data.license.state !== "UNREGISTERED") {
-            if (!controlPlaneConfigCache) controlPlaneConfigCache = {};
-            controlPlaneConfigCache.license = result.data.license;
-            if (result.data.entitlements) controlPlaneConfigCache.entitlements = result.data.entitlements;
-          }
+          if (!controlPlaneConfigCache) controlPlaneConfigCache = {};
+          if (result.data.usage) controlPlaneConfigCache.usage = result.data.usage;
+          if (result.data.license) controlPlaneConfigCache.license = result.data.license;
+          if (result.data.entitlements) controlPlaneConfigCache.entitlements = result.data.entitlements;
         }
         resolve();
       });
     }) : Promise.resolve();
     refreshConfig.then(async () => {
       try {
-      const licenseState = getLicenseStateFromLocalState();
-      const cp = getControlPlaneConfig();
-      const local = getCurrentShareUsageSummary();
-      // CP is the authoritative cycle-based source; local is only a fallback when CP is unavailable.
-      // Do NOT Math.max — plan changes reset the CP cycle count to 0 and local (calendar-month) must not override that.
-      const cpShares = (cp && cp.usage && typeof cp.usage.sharesThisMonth === "number") ? cp.usage.sharesThisMonth : null;
-      let sharesUsed = cpShares != null ? cpShares : local.sharesUsed;
-      let sharesLimit = null;
-      if (cp && cp.entitlements && (cp.entitlements.shareLimitMonthly === null || typeof cp.entitlements.shareLimitMonthly === "number")) {
-        const n = cp.entitlements.shareLimitMonthly;
-        if (n !== null && Number.isFinite(n) && n >= 0) sharesLimit = n;
+        const licenseState = getLicenseStateFromLocalState();
+        const cp = getControlPlaneConfig();
+        const local = getCurrentShareUsageSummary();
+        const cpShares = (cp && cp.usage && typeof cp.usage.sharesThisMonth === "number") ? cp.usage.sharesThisMonth : null;
+        const sharesUsed = cpShares != null ? cpShares : local.sharesUsed;
+        let sharesLimit = null;
+        if (cp && cp.entitlements && (cp.entitlements.shareLimitMonthly === null || typeof cp.entitlements.shareLimitMonthly === "number")) {
+          const n = cp.entitlements.shareLimitMonthly;
+          if (n !== null && Number.isFinite(n) && n >= 0) sharesLimit = n;
+        }
+        if (sharesLimit === null) sharesLimit = local.sharesLimit;
+        const hasFiniteLimit = sharesLimit != null && Number.isFinite(sharesLimit) && sharesLimit > 0;
+        const sharesRemaining = hasFiniteLimit ? Math.max(0, sharesLimit - sharesUsed) : null;
+        let devicesUsed = 0;
+        let devicesLimit = null;
+        try {
+          const localApproved = await accessControl.listApprovedDevices();
+          devicesUsed = localApproved.length;
+        } catch (_) {}
+        if (cp && cp.license && typeof cp.license.device_limit === "number" && cp.license.device_limit >= 0) {
+          devicesLimit = cp.license.device_limit;
+        }
+        res.json({
+          license_state: licenseState || "unknown",
+          shares_used: sharesUsed,
+          shares_limit: sharesLimit,
+          shares_remaining: sharesRemaining,
+          devices_used: devicesUsed,
+          devices_limit: devicesLimit,
+        });
+      } catch (err) {
+        logger.warn("license usage summary error", { error: err?.message || String(err) });
+        res.status(500).json({ message: "Failed to compute license usage" });
       }
-      if (sharesLimit === null) sharesLimit = local.sharesLimit;
-      const hasFiniteLimit = sharesLimit != null && Number.isFinite(sharesLimit) && sharesLimit > 0;
-      const sharesRemaining = hasFiniteLimit ? Math.max(0, sharesLimit - sharesUsed) : null;
-      let devicesUsed = 0;
-      let devicesLimit = null;
-      // Local approved devices are the source of truth; allow 0 when all devices are removed.
-      try {
-        const localApproved = await accessControl.listApprovedDevices();
-        devicesUsed = localApproved.length;
-      } catch (_) {}
-      if (cp && cp.license && typeof cp.license.device_limit === "number" && cp.license.device_limit >= 0) {
-        devicesLimit = cp.license.device_limit;
-      }
-      res.json({
-        license_state: licenseState || "unknown",
-        shares_used: sharesUsed,
-        shares_limit: sharesLimit,
-        shares_remaining: sharesRemaining,
-        devices_used: devicesUsed,
-        devices_limit: devicesLimit,
-      });
-    } catch (err) {
-      logger.warn("license usage summary error", { error: err?.message || String(err) });
-      res.status(500).json({ message: "Failed to compute license usage" });
-    }
     });
   });
 
@@ -1517,7 +1703,44 @@ async function bootstrap() {
       port: config.server.port,
       share_port: config.server.sharePort,
       app_version: getAppVersion(),
-      license_state: null,
+      license_state: getLicenseStateFromLocalState() || null,
+    });
+  });
+
+  app.get("/api/v1/license/local-usage-debug", (req, res) => {
+    if (!isLocalhostRequest(req)) {
+      res.status(403).json({ error: "host_only" });
+      return;
+    }
+    const licenseState = getLicenseStateFromLocalState();
+    const localSummary = getCurrentShareUsageSummary();
+    const ent = readLocalEntitlements();
+    const usagePath = getUsagePath();
+    let usageSignatureValid = null;
+    try {
+      if (usagePath && fsSync.existsSync(usagePath)) {
+        const raw = fsSync.readFileSync(usagePath, "utf8");
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && parsed.data && typeof parsed.sig === "string") {
+          const expected = computeHmacSignature(parsed.data, USAGE_HMAC_KEY);
+          usageSignatureValid = !!expected && expected === parsed.sig;
+        } else {
+          usageSignatureValid = false;
+        }
+      }
+    } catch (_) {
+      usageSignatureValid = false;
+    }
+    const adminSnapshot = getAdminUsageSnapshot();
+    res.json({
+      license_state: licenseState || "unknown",
+      local_shares_used: localSummary.sharesUsed,
+      local_shares_limit: localSummary.sharesLimit,
+      local_shares_remaining: localSummary.sharesRemaining,
+      entitlements_present: !!ent,
+      usage_signature_valid: usageSignatureValid,
+      admin_capped_shares_this_month: adminSnapshot.sharesThisMonth,
+      admin_capped_shares_limit: adminSnapshot.sharesLimit,
     });
   });
 
@@ -2437,6 +2660,32 @@ async function bootstrap() {
       return;
     }
     try {
+      // Proactively revoke any active shares that point at this file/folder
+      // so links cannot outlive the underlying content.
+      try {
+        const allShares = shareService.listShares();
+        const activeShares = allShares.filter((s) => s.status === "active" && s.targetPath);
+        if (activeShares.length > 0) {
+          const normalizedTarget = path.resolve(fullPath);
+          const sep = path.sep;
+          const shareIdsToRevoke = [];
+          for (const s of activeShares) {
+            const shareTarget = path.resolve(s.targetPath);
+            if (
+              shareTarget === normalizedTarget ||
+              shareTarget.startsWith(normalizedTarget.endsWith(sep) ? normalizedTarget : normalizedTarget + sep)
+            ) {
+              shareIdsToRevoke.push(s.shareId);
+            }
+          }
+          if (shareIdsToRevoke.length > 0) {
+            await shareService.revokeMany(shareIdsToRevoke);
+          }
+        }
+      } catch (e) {
+        logger.warn("failed to revoke shares for deleted path", { path: requestedPath, error: e.message });
+      }
+
       const stats = await fs.stat(fullPath);
       if (stats.isDirectory()) {
         await fs.rm(fullPath, { recursive: true });
@@ -2516,6 +2765,15 @@ async function bootstrap() {
         res.status(403).json({ error: "remote_devices_are_read_only_for_sharing" });
         return;
       }
+      // Strict rule: block all sharing when internet is unavailable.
+      const online = await isInternetOnline();
+      if (!online) {
+        res.status(403).json({
+          error: "offline",
+          message: "Sharing is disabled while internet is unavailable. Please reconnect and try again.",
+        });
+        return;
+      }
       const licenseState = getLicenseStateFromLocalState();
       const isExpiredOrUnregistered = licenseState === "expired" || licenseState === "unregistered";
       if (isExpiredOrUnregistered) {
@@ -2530,54 +2788,78 @@ async function bootstrap() {
         res.status(400).json({ error: "path is required" });
         return;
       }
-      const limit = getShareLimitFromLocalState();
-      if (Number.isFinite(limit) && limit > 0) {
-        // Use CP cycle-based count when available (resets on plan change); fall back to local calendar-month count
-        const cpForCheck = getControlPlaneConfig();
-        const cpSharesUsed = (cpForCheck && cpForCheck.usage && typeof cpForCheck.usage.sharesThisMonth === "number") ? cpForCheck.usage.sharesThisMonth : null;
-        const localYm = getYearMonthKey();
-        const localUsed = Number(readLocalUsage().monthly_shares?.[localYm] || 0);
-        const usedForCheck = cpSharesUsed != null ? cpSharesUsed : localUsed;
-        if (usedForCheck >= limit) {
-          res.status(403).json({
-            error: "share_limit_reached",
-            message: `Share limit reached (${limit}). Upgrade to create more shares.`,
-            remaining: 0,
-            limit,
-          });
-          return;
-        }
+      const cp = getControlPlaneConfig();
+      const cpUsed = (cp && cp.usage && typeof cp.usage.sharesThisMonth === "number") ? cp.usage.sharesThisMonth : null;
+      let limit = null;
+      if (cp && cp.entitlements && (cp.entitlements.shareLimitMonthly === null || typeof cp.entitlements.shareLimitMonthly === "number")) {
+        const n = cp.entitlements.shareLimitMonthly;
+        if (n !== null && Number.isFinite(n) && n >= 0) limit = n;
+      }
+      if (limit === null) {
+        const localLimit = getShareLimitFromLocalState();
+        if (Number.isFinite(localLimit) && localLimit > 0) limit = localLimit;
+      }
+      const usedForEnforcement = cpUsed != null ? cpUsed : Number(readLocalUsage().monthly_shares?.[getYearMonthKey()] || 0);
+      if (limit != null && Number.isFinite(limit) && limit > 0 && usedForEnforcement >= limit) {
+        res.status(403).json({
+          error: "share_limit_reached",
+          message: `Share limit reached (${usedForEnforcement} of ${limit} shares used this month).`,
+          remaining: 0,
+          limit,
+          used: usedForEnforcement,
+        });
+        return;
       }
       const targetPath = resolveOwnerPath(config.storage.ownerRoot, toPosixPath(sharePath));
+      const requestedScope = scope || "local";
+      const existing = shareService
+        .listShares()
+        .find((s) => s.status === "active" && (s.scope || "local") === requestedScope && s.targetPath === targetPath);
+      if (existing) {
+        const displayName = userConfig?.display_name || "Join";
+        const endpoints = getNetworkEndpoints(displayName, config.server.port, config.server.shareBasePath);
+        const tunnelStatus = tunnelManager.getStatus();
+        const inferredTunnelPublicUrl =
+          tunnelStatus.status === "active" && tunnelStatus.publicUrl
+            ? tunnelStatus.publicUrl + "/share/" + existing.shareId
+            : null;
+        const relativePath = formatSharePath(config.storage.ownerRoot, existing.targetPath);
+        res.status(409).json({
+          error: "share_already_exists",
+          message: "An active share already exists for this item and scope.",
+          existingShare: {
+            shareId: existing.shareId,
+            path: relativePath,
+            scope: existing.scope || "local",
+            url: `${endpoints.ipUrl}/${existing.shareId}`,
+            urlIp: `${endpoints.ipUrl}/${existing.shareId}`,
+            publicUrl: existing.publicUrl || inferredTunnelPublicUrl,
+            expiresAt: existing.expiryTime,
+          },
+        });
+        return;
+      }
       const share = await shareService.createShare({ targetPath, permission, ttlMs, scope });
       const displayName = userConfig?.display_name || "Join";
       const endpoints = getNetworkEndpoints(displayName, config.server.port, config.server.shareBasePath);
       logger.info("share link generated", { scope: share.scope });
       runtimeTelemetry.increment("total_shares_created");
-      // Update offline-capable monthly share usage counter after successful creation.
+
+      // Best-effort local usage log (non-authoritative).
       const ym = getYearMonthKey();
       const usage = readLocalUsage();
       if (!usage.monthly_shares || typeof usage.monthly_shares !== "object") usage.monthly_shares = {};
       usage.monthly_shares[ym] = Number(usage.monthly_shares[ym] || 0) + 1;
       writeLocalUsage(usage);
-      // Immediately bump the in-memory CP cache so the next /api/license/usage call reflects
-      // the new share before the async CP increment completes
-      if (controlPlaneConfigCache && controlPlaneConfigCache.usage && typeof controlPlaneConfigCache.usage.sharesThisMonth === "number") {
-        controlPlaneConfigCache.usage.sharesThisMonth += 1;
-      }
-      const adminHost = config.telemetry?.adminHost;
-      const deviceId = getHostUuidForConfig();
-      if (adminHost && deviceId && deviceId.length >= 8) {
-        controlPlanePost(adminHost, "/api/v1/devices/usage/shares/increment", { deviceId }, null, (err) => {
-          if (err) logger.warn("control plane share increment failed", { error: err.message });
-        });
-      }
+      enqueueSharesUsageSync(1);
+      flushSharesUsageSyncOnce({ maxToFlush: 3 }).catch(() => {});
       const tunnelStatus = tunnelManager.getStatus();
       const tunnelPublicUrl =
         tunnelStatus.status === "active" && tunnelStatus.publicUrl
           ? tunnelStatus.publicUrl + "/share/" + share.shareId
           : null;
 
+      // Public share: return immediately with local link, then provision publicUrl asynchronously.
       if (share.scope === "public" && tunnelStatus.status === "active" && tunnelStatus.publicUrl) {
         const hostUuid = getHostUuidForConfig();
         const tunnelUrl = tunnelStatus.publicUrl;
@@ -2594,38 +2876,31 @@ async function bootstrap() {
             },
             null,
             async (err, result) => {
-              try {
-                const publicUrl =
-                  !err && result?.data?.publicUrl ? result.data.publicUrl : tunnelPublicUrl;
-                if (publicUrl) {
+              const publicUrl = !err && result?.data?.publicUrl ? result.data.publicUrl : null;
+              if (publicUrl) {
+                try {
                   await shareService.setPublicUrl(share.shareId, publicUrl);
+                } catch (e) {
+                  logger.warn("failed to persist publicUrl for share", {
+                    shareId: share.shareId,
+                    error: e?.message,
+                  });
                 }
-                res.json({
-                  shareId: share.shareId,
-                  url: `${endpoints.ipUrl}/${share.shareId}`,
-                  urlIp: `${endpoints.ipUrl}/${share.shareId}`,
-                  publicUrl,
-                  expiresAt: share.expiryTime,
-                });
-              } catch (e) {
-                logger.warn("failed to persist publicUrl for share", {
-                  shareId: share.shareId,
-                  error: e?.message,
-                });
-                const publicUrl =
-                  !err && result?.data?.publicUrl ? result.data.publicUrl : tunnelPublicUrl;
-                res.json({
-                  shareId: share.shareId,
-                  url: `${endpoints.ipUrl}/${share.shareId}`,
-                  urlIp: `${endpoints.ipUrl}/${share.shareId}`,
-                  publicUrl,
-                  expiresAt: share.shareTime,
-                });
               }
             }
           );
-          return;
         }
+
+        res.json({
+          shareId: share.shareId,
+          url: `${endpoints.ipUrl}/${share.shareId}`,
+          urlIp: `${endpoints.ipUrl}/${share.shareId}`,
+          publicUrl: null,
+          publicStatus: "provisioning",
+          expiresAt: share.expiryTime,
+          tunnelCandidateUrl: tunnelPublicUrl,
+        });
+        return;
       }
 
       res.json({
@@ -2638,6 +2913,40 @@ async function bootstrap() {
     } catch (error) {
       res.status(400).json({ error: error.message });
     }
+  });
+
+  app.get("/api/share/:shareId", (req, res) => {
+    const shareId = String(req.params.shareId || "").trim();
+    if (!shareId) {
+      res.status(400).json({ error: "shareId is required" });
+      return;
+    }
+    const displayName = userConfig?.display_name || "Join";
+    const endpoints = getNetworkEndpoints(displayName, config.server.port, config.server.shareBasePath);
+    const share = shareService.listShares().find((s) => s.shareId === shareId);
+    if (!share) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    const relativePath = formatSharePath(config.storage.ownerRoot, share.targetPath);
+    const tunnelStatus = tunnelManager.getStatus();
+    const tunnelCandidateUrl =
+      tunnelStatus.status === "active" && tunnelStatus.publicUrl
+        ? tunnelStatus.publicUrl + "/share/" + share.shareId
+        : null;
+    res.json({
+      shareId: share.shareId,
+      path: relativePath,
+      scope: share.scope || "local",
+      status: share.status,
+      isActive: share.status === "active",
+      url: `${endpoints.ipUrl}/${share.shareId}`,
+      urlIp: `${endpoints.ipUrl}/${share.shareId}`,
+      publicUrl: share.publicUrl || null,
+      tunnelCandidateUrl,
+      expiresAt: share.expiryTime,
+      createdAt: share.createdAt,
+    });
   });
 
   app.get("/api/shares", (req, res) => {
@@ -3734,37 +4043,31 @@ async function bootstrap() {
           } catch (_) {}
         }
         if ((!cp || !cp.license || !cp.license.state) && paths) {
-          const entitlementsPath = path.join(paths.systemDir, "entitlements.json");
-          if (fsSync.existsSync(entitlementsPath)) {
-            try {
-              const raw = fsSync.readFileSync(entitlementsPath, "utf8");
-              const ent = JSON.parse(raw);
-              if (ent.licenseState === "TRIAL") {
-                cp = {
-                  license: { state: "trial_active" },
-                  activation: { required: false },
-                  entitlements: ent.entitlements || {},
-                  trialEndsAt: ent.trialEndsAt || null,
-                  telemetry: (cp && cp.telemetry) || {},
-                };
-              } else if (ent.licenseState === "EXPIRED") {
-                cp = {
-                  license: { state: "UNREGISTERED" },
-                  activation: { required: true },
-                  entitlements: ent.entitlements || {},
-                  trialEndsAt: ent.trialEndsAt || null,
-                  telemetry: (cp && cp.telemetry) || {},
-                };
-              } else if (ent.licenseState === "FREE") {
-                cp = {
-                  license: { state: "active", tier: "FREE" },
-                  activation: { required: false },
-                  entitlements: ent.entitlements || {},
-                  trialEndsAt: ent.trialEndsAt || null,
-                  telemetry: (cp && cp.telemetry) || {},
-                };
-              }
-            } catch (_) {}
+          const ent = readLocalEntitlements();
+          if (ent && ent.licenseState === "TRIAL") {
+            cp = {
+              license: { state: "trial_active" },
+              activation: { required: false },
+              entitlements: ent.entitlements || {},
+              trialEndsAt: ent.trialEndsAt || null,
+              telemetry: (cp && cp.telemetry) || {},
+            };
+          } else if (ent && ent.licenseState === "EXPIRED") {
+            cp = {
+              license: { state: "UNREGISTERED" },
+              activation: { required: true },
+              entitlements: ent.entitlements || {},
+              trialEndsAt: ent.trialEndsAt || null,
+              telemetry: (cp && cp.telemetry) || {},
+            };
+          } else if (ent && ent.licenseState === "FREE") {
+            cp = {
+              license: { state: "active", tier: "FREE" },
+              activation: { required: false },
+              entitlements: ent.entitlements || {},
+              trialEndsAt: ent.trialEndsAt || null,
+              telemetry: (cp && cp.telemetry) || {},
+            };
           }
         }
       }
@@ -3818,15 +4121,31 @@ async function bootstrap() {
                   fsSync.writeFileSync(paths.licensePath, JSON.stringify(toWrite, null, 2), "utf8");
                 }
                 if (result.data.entitlements && typeof result.data.entitlements === "object") {
-                  const entPath = path.join(paths.systemDir, "entitlements.json");
                   const licenseState = (result.data.license && result.data.license.state)
                     ? String(result.data.license.state).toUpperCase().replace(/-/g, "_")
                     : "ACTIVE";
-                  fsSync.writeFileSync(entPath, JSON.stringify({
+                  const entPayload = {
                     licenseState,
                     entitlements: result.data.entitlements,
                     trialEndsAt: result.data.trialEndsAt || null,
-                  }, null, 2), "utf8");
+                    resetUsageAt: result.data.resetUsageAt || result.data.reset_usage_at || null,
+                    resetUsageNow: result.data.resetUsageNow === true || result.data.reset_usage_now === true,
+                  };
+                  writeSignedEntitlements(entPayload);
+                  try {
+                    const shouldResetNow =
+                      entPayload.resetUsageNow === true ||
+                      (entPayload.resetUsageAt &&
+                        new Date(entPayload.resetUsageAt).getTime() > 0 &&
+                        new Date(entPayload.resetUsageAt).getTime() <= Date.now());
+                    if (shouldResetNow) {
+                      const usage = readLocalUsage();
+                      usage.monthly_shares = {};
+                      delete usage.current_period;
+                      writeLocalUsage(usage);
+                      writeUsagePending({ shares_increment: 0 });
+                    }
+                  } catch (_) {}
                 }
               } catch (e) {
                 if (logger) logger.warn("persist config to disk failed", { error: e && e.message });

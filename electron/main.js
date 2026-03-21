@@ -12,6 +12,7 @@ const BrowserView = electron.BrowserView;
 const dialog = electron.dialog;
 const ipcMain = electron.ipcMain;
 const shell = electron.shell;
+const electronNet = electron.net;
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -841,6 +842,54 @@ ipcMain.handle("joincloud-open-auth-modal", async (_event, url) => {
 ipcMain.handle("joincloud-close-auth-modal", async () => {
   closeAuthView();
   return { ok: true };
+});
+
+/**
+ * Internet connectivity check using Electron's net module (Chromium stack).
+ * Returns { connected: boolean, latencyMs: number | null, strength: "strong" | "weak" | "offline" }
+ * Strength thresholds: strong < 150ms, weak 150-500ms, offline = no response.
+ */
+ipcMain.handle("joincloud-check-internet", () => {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const timeoutMs = 5000;
+    let settled = false;
+
+    function settle(result) {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    }
+
+    const timer = setTimeout(() => {
+      settle({ connected: false, latencyMs: null, strength: "offline" });
+    }, timeoutMs);
+
+    try {
+      const req = electronNet.request({
+        method: "HEAD",
+        url: "https://www.google.com",
+        redirect: "follow",
+      });
+
+      req.on("response", () => {
+        clearTimeout(timer);
+        const latencyMs = Date.now() - start;
+        const strength = latencyMs < 150 ? "strong" : latencyMs < 500 ? "weak" : "weak";
+        settle({ connected: true, latencyMs, strength });
+      });
+
+      req.on("error", () => {
+        clearTimeout(timer);
+        settle({ connected: false, latencyMs: null, strength: "offline" });
+      });
+
+      req.end();
+    } catch (err) {
+      clearTimeout(timer);
+      settle({ connected: false, latencyMs: null, strength: "offline" });
+    }
+  });
 });
 
 function closeAuthView() {

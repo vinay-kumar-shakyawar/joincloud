@@ -21,6 +21,7 @@ import { useToast } from "@/hooks/use-toast"
 import Shares from "@/pages/sharing";
 import ElectronDashboard from "./pages/electron"
 import { Badge } from "@/ui-kit"
+import { InternetStatus } from "@/components/internet-status"
 
 interface User {
   id: string
@@ -120,7 +121,8 @@ export default function App() {
           <div className="flex flex-col flex-1">
             <header className="flex items-center justify-between h-16 px-6 border-b gap-4 border-slate-700">
               <SidebarTrigger data-testid="button-sidebar-toggle" />
-              <div>
+              <div className="flex items-center gap-4">
+                <InternetStatus />
                 <Badge
                   variant={
                     statusQuery.isLoading

@@ -42,6 +42,9 @@ const state = {
   devExpiryWarningMinutes: 2,
   usageSharesThisMonth: 0,
   usageDevicesLinked: 0,
+  serverStatus: "online", // "online" | "offline"
+  lastServerSuccessAt: 0,
+  serverFailureStreak: 0,
 };
 
 // Current tab for Shares list: 'local' or 'public'
@@ -70,15 +73,22 @@ const els = {
   toggleSharing: document.getElementById("toggle-sharing"),
   statusDot: document.getElementById("status-dot"),
   status: document.getElementById("node-status"),
+  networkStatusBadge: document.getElementById("network-status-badge"),
   uploadDestinationLabel: document.getElementById("upload-destination-label"),
   headerDisplayName: document.getElementById("header-display-name"),
   homeStorageSection: document.getElementById("home-storage-section"),
   storageLabel: document.getElementById("storage-label"),
   ownerMount: document.getElementById("owner-mount"),
   openStorage: document.getElementById("open-storage"),
+  homeRemoteAccessToggle: document.getElementById("home-remote-access-toggle"),
+  homeRemoteAccessSettings: document.getElementById("home-remote-access-settings"),
   remoteCloudUrlInput: document.getElementById("remote-cloud-url-input"),
   remoteCloudCopy: document.getElementById("remote-cloud-copy"),
   remoteCloudUrlQr: document.getElementById("remote-cloud-url-qr"),
+  remoteCloudActiveWrap: document.getElementById("remote-cloud-active-wrap"),
+  remoteCloudQrWrap: document.getElementById("remote-cloud-qr-wrap"),
+  remoteCloudSetupCta: document.getElementById("remote-cloud-setup-cta"),
+  remoteCloudSetupBtn: document.getElementById("remote-cloud-setup-btn"),
   cloudUrlInput: document.getElementById("cloud-url-input"),
   copyCloudUrl: document.getElementById("copy-cloud-url"),
   cloudUrlQr: document.getElementById("cloud-url-qr"),
@@ -170,6 +180,7 @@ const els = {
   settingsProfileEmail: document.getElementById("settings-profile-email"),
   settingsProfilePlan: document.getElementById("settings-profile-plan"),
   settingsProfileStatus: document.getElementById("settings-profile-status"),
+  settingsServerStatus: document.getElementById("settings-server-status"),
   settingsProfileDeviceLimit: document.getElementById("settings-profile-device-limit"),
   settingsProfileExpiry: document.getElementById("settings-profile-expiry"),
   subscriptionCard: document.getElementById("subscription-card"),
@@ -205,6 +216,14 @@ const els = {
   uploadBannerDismiss: document.querySelector(".upload-banner-dismiss"),
   shareQrModal: document.getElementById("share-qr-modal"),
   closeShareQrModal: document.getElementById("close-share-qr-modal"),
+  deleteSharedItemModal: document.getElementById("delete-shared-item-modal"),
+  deleteSharedItemCancelTop: document.getElementById("delete-shared-item-cancel-top"),
+  deleteSharedItemCancel: document.getElementById("delete-shared-item-cancel"),
+  deleteSharedItemStopOnly: document.getElementById("delete-shared-item-stop-only"),
+  deleteSharedItemStopAndDelete: document.getElementById("delete-shared-item-stop-and-delete"),
+  deleteSharedItemTitle: document.getElementById("delete-shared-item-title"),
+  deleteSharedItemDescription: document.getElementById("delete-shared-item-description"),
+  deleteSharedItemPath: document.getElementById("delete-shared-item-path"),
   technicalConfigContent: document.getElementById("technical-config-content"),
   mdnsHostname: document.getElementById("mdns-hostname"),
   mdnsIpFallback: document.getElementById("mdns-ip-fallback"),
@@ -675,6 +694,12 @@ function updateFileViewButtons() {
   els.viewThumb.classList.toggle("active", state.fileView === "thumb");
 }
 
+function getActiveShareForPathAndScope(itemPath, scope) {
+  const normalizedPath = String(itemPath || "");
+  const normalizedScope = scope || "local";
+  return (state.shares || []).find((s) => s && s.status === "active" && String(s.path || "") === normalizedPath && (s.scope || "local") === normalizedScope) || null;
+}
+
 function renderFiles() {
   state.items = getVisibleItems();
   els.fileList.innerHTML = "";
@@ -689,21 +714,80 @@ function renderFiles() {
 
   state.items.forEach((item) => {
     const row = document.createElement("div");
-    row.className = "item file-item";
+    row.className = "file-card";
     const fileExt = getFileExtension(item.name);
-    const details = item.type === "folder" ? "Folder" : `${fileExt || "file"} · ${formatBytes(item.size)}`;
+    const typeLabel = item.type === "folder" ? "Folder" : (fileExt || "File").toUpperCase();
+    const sizeLabel = item.type === "folder" ? "" : formatBytes(item.size);
+    const modifiedLabel = item.modifiedAt ? new Date(item.modifiedAt).toLocaleString() : "";
 
     const topRow = document.createElement("div");
-    topRow.className = "file-item-top";
-    const titleEl = document.createElement("span");
-    titleEl.className = "item-title";
+    topRow.className = "file-card-top";
+
+    const icon = document.createElement("div");
+    icon.className = "file-card-icon";
+    icon.innerHTML = getFileIcon(item);
+
+    const main = document.createElement("div");
+    main.className = "file-card-main";
+
+    const titleRow = document.createElement("div");
+    titleRow.className = "file-card-title-row";
+    const titleEl = document.createElement("div");
+    titleEl.className = "file-card-name";
     titleEl.textContent = item.name;
     titleEl.title = item.name;
-    topRow.innerHTML = `<span class="file-icon">${getFileIcon(item)}</span>`;
-    topRow.appendChild(titleEl);
+    titleRow.appendChild(titleEl);
+
+    const badges = document.createElement("div");
+    badges.className = "file-card-badges";
+
+    const localShare = isHostRole() ? getActiveShareForPathAndScope(item.path, "local") : null;
+    const publicShare = isHostRole() ? getActiveShareForPathAndScope(item.path, "public") : null;
+    if (localShare || publicShare) {
+      const makeShareBadge = (kind, share) => {
+        const wrap = document.createElement("span");
+        wrap.className = "badge badge-pill " + (kind === "local" ? "badge-shared-local" : "badge-shared-public");
+        wrap.title = kind === "local" ? "Shared on local network" : "Shared publicly";
+        const label = document.createElement("span");
+        label.className = "badge-label";
+        label.textContent = kind === "local" ? "Local" : "Public";
+        wrap.appendChild(label);
+
+        const stop = document.createElement("button");
+        stop.type = "button";
+        stop.className = "badge-stop";
+        stop.textContent = "×";
+        stop.title = kind === "local" ? "Stop local share" : "Stop public share";
+        stop.setAttribute("aria-label", stop.title);
+        stop.onclick = async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          try {
+            await revokeShare(share.shareId);
+          } catch (_) {}
+          try { await loadShares(); } catch (_) {}
+          try { renderFiles(); } catch (_) {}
+        };
+        wrap.appendChild(stop);
+        return wrap;
+      };
+
+      if (localShare) badges.appendChild(makeShareBadge("local", localShare));
+      if (publicShare) badges.appendChild(makeShareBadge("public", publicShare));
+    }
+
+    titleRow.appendChild(badges);
+
+    const subEl = document.createElement("div");
+    subEl.className = "file-card-path mono";
+    subEl.textContent = item.path || "";
+    subEl.title = item.path || "";
+
+    main.appendChild(titleRow);
+    main.appendChild(subEl);
 
     const actions = document.createElement("div");
-    actions.className = "file-item-actions";
+    actions.className = "file-card-actions";
 
     if (item.type === "folder") {
       const openBtn = document.createElement("button");
@@ -723,6 +807,10 @@ function renderFiles() {
         const shareBtn = document.createElement("button");
         shareBtn.className = "button secondary";
         shareBtn.textContent = "Share";
+        if (localShare && publicShare) {
+          shareBtn.disabled = true;
+          shareBtn.title = "Already shared for both Local and Public scopes";
+        }
         shareBtn.onclick = () => openShareModal(item.path);
         actions.appendChild(shareBtn);
       }
@@ -735,55 +823,44 @@ function renderFiles() {
       }
     }
 
-    topRow.appendChild(actions);
-    row.appendChild(topRow);
-
-    const detailsRow = document.createElement("div");
-    detailsRow.className = "file-item-details";
-    detailsRow.innerHTML = `<span class="item-sub">${details}</span>`;
-    row.appendChild(detailsRow);
-
     if (isHostRole()) {
-      const bottomRow = document.createElement("div");
-      bottomRow.className = "file-item-bottom";
       const deleteBtn = document.createElement("button");
       deleteBtn.className = "button danger button-icon-only";
       deleteBtn.title = "Delete";
       deleteBtn.setAttribute("aria-label", "Delete");
       deleteBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
       deleteBtn.onclick = () => confirmDeleteItem(item);
-      bottomRow.appendChild(deleteBtn);
-      row.appendChild(bottomRow);
+      actions.appendChild(deleteBtn);
     }
 
-    if (item.type === "folder" && isHostRole()) {
-      const shareButton = document.createElement("button");
-      shareButton.className = "button";
-      shareButton.textContent = "Share";
-      shareButton.onclick = () => openShareModal(item.path);
-      row.appendChild(shareButton);
-    }
-    if (isHostRole()) {
-      const deleteButton = document.createElement("button");
-      deleteButton.className = "button secondary";
-      deleteButton.textContent = "Delete";
-      deleteButton.onclick = async () => {
-        const label = item.type === "folder" ? "folder" : "file";
-        if (!confirm(`Delete this ${label} "${item.name}"? This cannot be undone.`)) return;
-        try {
-          const res = await apiFetch(`/api/v1/file?path=${encodeURIComponent(item.path)}`, { method: "DELETE" });
-          if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            alert(data.error || "Delete failed.");
-            return;
-          }
-          await loadFiles(state.path);
-        } catch (_) {
-          alert("Delete failed.");
-        }
-      };
-      row.appendChild(deleteButton);
-    }
+    topRow.appendChild(icon);
+    topRow.appendChild(main);
+    topRow.appendChild(actions);
+    row.appendChild(topRow);
+
+    const meta = document.createElement("div");
+    meta.className = "file-card-meta";
+
+    const makeMetaItem = (label, value, extraClass) => {
+      const wrap = document.createElement("div");
+      wrap.className = "file-card-meta-item" + (extraClass ? " " + extraClass : "");
+      const l = document.createElement("div");
+      l.className = "file-card-meta-label";
+      l.textContent = label;
+      const v = document.createElement("div");
+      v.className = "file-card-meta-value";
+      v.textContent = value || "—";
+      v.title = value || "";
+      wrap.appendChild(l);
+      wrap.appendChild(v);
+      return wrap;
+    };
+
+    meta.appendChild(makeMetaItem("Type", String(typeLabel || ""), "file-card-meta-type"));
+    meta.appendChild(makeMetaItem("Size", String(sizeLabel || ""), "file-card-meta-size"));
+    meta.appendChild(makeMetaItem("Modified", String(modifiedLabel || ""), "file-card-meta-modified"));
+    row.appendChild(meta);
+
     els.fileList.appendChild(row);
   });
   refreshRemoteUploadUi();
@@ -923,15 +1000,24 @@ function closeShareQrModal() {
   if (els.shareQrModal) els.shareQrModal.classList.remove("active");
 }
 
-async function confirmDeleteItem(item) {
-  const name = item.name || item.path || "item";
-  const typeLabel = item.type === "folder" ? "folder" : "file";
-  const msg = item.type === "folder"
-    ? `Permanently delete the folder "${name}" and all its contents?`
-    : `Permanently delete "${name}"?`;
-  if (!confirm(msg)) return;
+async function stopSharesForPath(pathValue) {
+  const normalizedPath = String(pathValue || "");
+  const activeForPath = (state.shares || []).filter(
+    (s) => s && s.status === "active" && String(s.path || "") === normalizedPath
+  );
+  for (const share of activeForPath) {
+    try {
+      await revokeShare(share.shareId);
+    } catch (_) {}
+  }
   try {
-    const res = await apiFetch(`/api/v1/file?path=${encodeURIComponent(item.path)}`, { method: "DELETE" });
+    await loadShares();
+  } catch (_) {}
+}
+
+async function deletePathAfterStopSharing(pathValue) {
+  try {
+    const res = await apiFetch(`/api/v1/file?path=${encodeURIComponent(pathValue)}`, { method: "DELETE" });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.error || "Delete failed");
@@ -940,6 +1026,53 @@ async function confirmDeleteItem(item) {
     await loadLogs();
   } catch (err) {
     alert(err.message || "Delete failed");
+  }
+}
+
+async function confirmDeleteItem(item) {
+  const name = item.name || item.path || "item";
+  const typeLabel = item.type === "folder" ? "folder" : "file";
+  const msg = item.type === "folder"
+    ? `Permanently delete the folder "${name}" and all its contents?`
+    : `Permanently delete "${name}"?`;
+
+  const normalizedPath = String(item.path || "");
+  const activeSharesForItem = (state.shares || []).filter(
+    (s) => s && s.status === "active" && String(s.path || "") === normalizedPath
+  );
+
+  if (!activeSharesForItem.length || !els.deleteSharedItemModal) {
+    if (!confirm(msg)) return;
+    try {
+      const res = await apiFetch(`/api/v1/file?path=${encodeURIComponent(item.path)}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Delete failed");
+      }
+      await loadFiles(state.path);
+      await loadLogs();
+    } catch (err) {
+      alert(err.message || "Delete failed");
+    }
+    return;
+  }
+
+  els.deleteSharedItemModal.dataset.path = normalizedPath;
+  els.deleteSharedItemModal.dataset.type = typeLabel;
+  els.deleteSharedItemModal.dataset.name = name;
+  els.deleteSharedItemModal.classList.add("active");
+  if (els.deleteSharedItemTitle) {
+    els.deleteSharedItemTitle.textContent =
+      typeLabel === "folder"
+        ? "This folder is currently shared"
+        : "This file is currently shared";
+  }
+  if (els.deleteSharedItemDescription) {
+    els.deleteSharedItemDescription.textContent =
+      "Stop sharing first, or stop sharing and delete in one step. Shares will stop working immediately after revocation.";
+  }
+  if (els.deleteSharedItemPath) {
+    els.deleteSharedItemPath.textContent = normalizedPath;
   }
 }
 
@@ -1179,8 +1312,12 @@ async function loadBuildInfo() {
 async function loadControlPlaneConfig() {
   try {
     const res = await fetch("/api/v1/control-plane-config");
-    if (!res.ok) return;
+    if (!res.ok) {
+      markServerRequestResult(false);
+      return;
+    }
     const data = await res.json();
+    markServerRequestResult(true);
     console.log("[loadControlPlaneConfig] received:", JSON.stringify({ is_authenticated: data.is_authenticated, license: data.license }, null, 2));
     state.licenseState = data.license?.state || null;
     state.licenseGraceEndsAt = data.license?.grace_ends_at ?? null;
@@ -1587,6 +1724,38 @@ function setUsageBar(id, used, limit) {
   label.textContent = (limit == null || limit >= 999999) ? (used + " (unlimited)") : (used + " / " + limit);
 }
 
+function markServerRequestResult(ok) {
+  const now = Date.now();
+  if (ok) {
+    state.lastServerSuccessAt = now;
+    state.serverFailureStreak = 0;
+    state.serverStatus = "online";
+  } else {
+    state.serverFailureStreak = (state.serverFailureStreak || 0) + 1;
+    // If we haven't had a success in the last 30s or we have repeated failures, mark offline
+    const stale = !state.lastServerSuccessAt || (now - state.lastServerSuccessAt > 30000);
+    if (stale || state.serverFailureStreak >= 2) {
+      state.serverStatus = "offline";
+    }
+  }
+  updateServerStatusIndicator();
+}
+
+function updateServerStatusIndicator() {
+  const el = els.settingsServerStatus;
+  if (!el) return;
+  const status = state.serverStatus || "online";
+  if (status === "offline") {
+    el.textContent = "Server Inactive";
+    el.classList.remove("server-status-online");
+    el.classList.add("server-status-offline");
+  } else {
+    el.textContent = "Server Active";
+    el.classList.remove("server-status-offline");
+    el.classList.add("server-status-online");
+  }
+}
+
 async function renderUsageBars() {
   var section = document.getElementById("usage-bars-section");
   var loader = document.getElementById("usage-bars-loader");
@@ -1614,6 +1783,12 @@ async function renderUsageBars() {
     if (loader) loader.style.display = "none";
     if (errorEl) errorEl.style.display = "none";
     if (content) content.style.display = "block";
+
+    var headingEl = document.getElementById("usage-bars-heading");
+    if (headingEl) {
+      headingEl.textContent = "Plan usage this month";
+      headingEl.removeAttribute("title");
+    }
 
     if (section) {
       var tier = (state.licenseTier || "").toLowerCase();
@@ -1861,7 +2036,9 @@ function updateSubscriptionSection() {
   }
 
   if (!els.subscriptionCard) return;
-  els.subscriptionCard.style.display = "block";
+  // Subscription & Billing block is intentionally hidden in Settings UI.
+  els.subscriptionCard.style.display = "none";
+  return;
   const plan = (state.licenseTier || (state.licenseState === "UNREGISTERED" ? "free" : "trial")).replace(/^./, (c) => c.toUpperCase());
   if (els.subscriptionPlan) els.subscriptionPlan.textContent = plan;
   const rawSubStatus = state.licenseState === "UNREGISTERED" ? "Trial ended" : (state.subscription?.status || state.licenseState || "-");
@@ -2165,6 +2342,8 @@ async function loadShares() {
     const res = await apiFetch("/api/shares");
     state.shares = await res.json();
     renderShares();
+    // Keep file badges in sync with active shares.
+    try { renderFiles(); } catch (_) {}
   } finally {
     setRefreshLoading(els.refreshShares, false);
   }
@@ -2213,18 +2392,38 @@ async function updateTelemetrySettings(enabled) {
 async function loadTechnicalConfig() {
   if (!els.technicalConfigContent || !isHostRole()) return;
   try {
-    const res = await apiFetch("/api/v1/technical-config");
-    if (!res.ok) {
+    const [cfgRes, debugRes] = await Promise.all([
+      apiFetch("/api/v1/technical-config"),
+      apiFetch("/api/v1/license/local-usage-debug").catch(() => null),
+    ]);
+    if (!cfgRes.ok) {
       els.technicalConfigContent.textContent = "Available on host only.";
       return;
     }
-    const data = await res.json();
+    const cfg = await cfgRes.json();
     const lines = [
-      `Host ID: ${data.host_id || "-"}`,
-      `Local IPs: ${(data.local_ips || []).join(", ") || "-"}`,
-      `Port: ${data.port || "-"}`,
-      `App version: ${data.app_version || "-"}`,
+      `Host ID: ${cfg.host_id || "-"}`,
+      `Local IPs: ${(cfg.local_ips || []).join(", ") || "-"}`,
+      `Port: ${cfg.port || "-"}`,
+      `App version: ${cfg.app_version || "-"}`,
+      `License state: ${cfg.license_state || "-"}`,
     ];
+    if (debugRes && debugRes.ok) {
+      try {
+        const dbg = await debugRes.json();
+        lines.push(
+          "",
+          "[Local usage diagnostics]",
+          `Shares used (local): ${dbg.local_shares_used}`,
+          `Shares limit (local): ${dbg.local_shares_limit ?? "-"}`,
+          `Shares remaining (local): ${dbg.local_shares_remaining ?? "-"}`,
+          `Usage signature valid: ${dbg.usage_signature_valid === null ? "unknown" : String(dbg.usage_signature_valid)}`,
+          `Entitlements present: ${dbg.entitlements_present ? "yes" : "no"}`,
+          `Admin capped shares this month: ${dbg.admin_capped_shares_this_month}`,
+          `Admin capped shares limit: ${dbg.admin_capped_shares_limit ?? "-"}`,
+        );
+      } catch (_) {}
+    }
     els.technicalConfigContent.textContent = lines.join("\n");
   } catch (_err) {
     els.technicalConfigContent.textContent = "Failed to load.";
@@ -2253,19 +2452,61 @@ async function loadPublicAccessStatus() {
     }
     if (els.remoteAccessStarting) els.remoteAccessStarting.style.display = data.status === "starting" ? "flex" : "none";
     if (els.remoteAccessActive) {
-      els.remoteAccessActive.style.display = data.status === "active" && data.publicUrl ? "block" : "none";
-      if (data.status === "active" && data.publicUrl && els.remoteAccessUrl) {
+      const hasUrl = data.status === "active" && data.publicUrl;
+      const placeholder = document.getElementById("remote-access-unavailable");
+      if (placeholder) {
+        placeholder.style.display = hasUrl ? "none" : "block";
+        const titleEl = placeholder.querySelector(".remote-access-placeholder-title");
+        const subEl = placeholder.querySelector(".remote-access-placeholder-sub");
+        if (data.status === "starting") {
+          if (titleEl) titleEl.textContent = "Starting Remote Access…";
+          if (subEl) subEl.textContent = "We’re provisioning your public URL. This usually takes a few seconds.";
+        } else if (data.status === "failed") {
+          if (titleEl) titleEl.textContent = "Remote Access is inactive";
+          if (subEl) subEl.textContent = "Turn it on to generate a public URL. If it keeps failing, check your internet connection and try again.";
+        } else {
+          if (titleEl) titleEl.textContent = "Public URL not available yet";
+          if (subEl) subEl.textContent = "Turn on Remote Access and wait a few seconds. Once active, your URL and QR code will appear here.";
+        }
+      }
+
+      els.remoteAccessActive.style.display = hasUrl ? "block" : "none";
+      if (els.remoteAccessCopy) els.remoteAccessCopy.disabled = !hasUrl;
+      if (els.remoteAccessOpen) els.remoteAccessOpen.disabled = !hasUrl;
+
+      if (hasUrl && els.remoteAccessUrl) {
         els.remoteAccessUrl.href = data.publicUrl;
         els.remoteAccessUrl.textContent = data.publicUrl;
         if (window.QRious && els.remoteAccessQr) {
-          const qr = new QRious({ element: els.remoteAccessQr, value: data.publicUrl, size: 180 });
+          new QRious({ element: els.remoteAccessQr, value: data.publicUrl, size: 180 });
+        }
+      } else if (els.remoteAccessUrl) {
+        els.remoteAccessUrl.href = "#";
+        els.remoteAccessUrl.textContent = "";
+        if (els.remoteAccessQr) {
+          const ctx = els.remoteAccessQr.getContext("2d");
+          if (ctx) ctx.clearRect(0, 0, els.remoteAccessQr.width, els.remoteAccessQr.height);
         }
       }
     }
     // Home → Public File Sharing status
     const isActive = data.status === "active" && data.publicUrl;
+    const isEnabled = data.status === "active" || data.status === "starting";
+    if (els.homeRemoteAccessToggle) {
+      els.homeRemoteAccessToggle.checked = isEnabled;
+      els.homeRemoteAccessToggle.disabled = false;
+    }
     if (els.remoteCloudUrlInput) {
       els.remoteCloudUrlInput.value = isActive ? data.publicUrl : "";
+    }
+    if (els.remoteCloudCopy) {
+      els.remoteCloudCopy.disabled = !isActive;
+    }
+    if (els.remoteCloudActiveWrap) {
+      els.remoteCloudActiveWrap.style.display = isActive ? "block" : "none";
+    }
+    if (els.remoteCloudSetupCta) {
+      els.remoteCloudSetupCta.style.display = isActive ? "none" : "block";
     }
     if (els.remoteCloudUrlQr) {
       if (window.QRious && isActive) {
@@ -2280,6 +2521,9 @@ async function loadPublicAccessStatus() {
           ctx.clearRect(0, 0, els.remoteCloudUrlQr.width, els.remoteCloudUrlQr.height);
         }
       }
+    }
+    if (els.remoteCloudQrWrap) {
+      els.remoteCloudQrWrap.style.display = isActive ? "flex" : "none";
     }
     if (els.publicStatus) {
       if (data.status === "active" && data.publicUrl) {
@@ -2301,6 +2545,14 @@ async function loadPublicAccessStatus() {
   } catch (_) {
     els.remoteAccessNotConfigured.style.display = "block";
     els.remoteAccessConfiguredWrap.style.display = "none";
+    if (els.homeRemoteAccessToggle) {
+      els.homeRemoteAccessToggle.checked = false;
+      els.homeRemoteAccessToggle.disabled = true;
+    }
+    if (els.remoteCloudCopy) els.remoteCloudCopy.disabled = true;
+    if (els.remoteCloudSetupCta) els.remoteCloudSetupCta.style.display = "block";
+    if (els.remoteCloudActiveWrap) els.remoteCloudActiveWrap.style.display = "none";
+    if (els.remoteCloudQrWrap) els.remoteCloudQrWrap.style.display = "none";
     if (els.publicStatus) {
       els.publicStatus.className = "value value-muted";
       els.publicStatus.textContent = "Inactive";
@@ -2797,6 +3049,8 @@ async function openShareModal(pathValue) {
   els.shareResult.textContent = "";
   if (els.shareExtraActions) els.shareExtraActions.style.display = "none";
   if (els.copyShare) els.copyShare.style.display = "none";
+  // Ensure we have the latest active shares so badges/links are immediate.
+  try { await loadShares(); } catch (_) {}
   // Reset scope selection and enable radios for a fresh share
   document.querySelectorAll('input[name="share-scope"]').forEach((radio) => {
     radio.disabled = false;
@@ -2805,6 +3059,74 @@ async function openShareModal(pathValue) {
     }
   });
   els.sharePath.value = pathValue;
+  // If this path already has an active share for a scope, disable that scope option.
+  const existingLocal = getActiveShareForPathAndScope(pathValue, "local");
+  const existingPublic = getActiveShareForPathAndScope(pathValue, "public");
+  if (existingLocal || existingPublic) {
+    const radios = Array.from(document.querySelectorAll('input[name="share-scope"]'));
+    radios.forEach((radio) => {
+      if (radio.value === "local" && existingLocal) radio.disabled = true;
+      if (radio.value === "public" && existingPublic) radio.disabled = true;
+    });
+    // If local is disabled but public is available, default to public
+    const localRadio = radios.find((r) => r.value === "local");
+    const publicRadio = radios.find((r) => r.value === "public");
+    if (localRadio && localRadio.disabled && publicRadio && !publicRadio.disabled) {
+      publicRadio.checked = true;
+    }
+    const hints = [];
+    if (existingLocal) hints.push("Local");
+    if (existingPublic) hints.push("Public");
+    const localUrl = existingLocal ? (existingLocal.urlIp || existingLocal.url || `${stateMeta.lanBaseUrl}/share/${existingLocal.shareId}`) : null;
+    const publicUrl = existingPublic ? (existingPublic.publicUrl || null) : null;
+    const publicCandidate = existingPublic && !publicUrl ? (existingPublic.tunnelCandidateUrl || null) : null;
+    const publicLabel = publicUrl ? publicUrl : (publicCandidate ? publicCandidate : "Provisioning…");
+    els.shareResult.innerHTML = `<div>Already shared for: ${escapeHtml(hints.join(" & "))}.</div>
+<div style="margin-top:10px;display:flex;flex-direction:column;gap:10px;">
+  ${localUrl ? `<div>
+    <span class="value" style="font-size:12px; font-weight:600;">Local:</span>
+    <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(localUrl)}</span>
+    <button type="button" class="button secondary" id="share-copy-existing-local-btn" style="margin-top:4px;">Copy</button>
+    <button type="button" class="button secondary" id="share-open-existing-local-btn" style="margin-top:4px;margin-left:6px;">Open</button>
+  </div>` : ""}
+  ${existingPublic ? `<div>
+    <span class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Public:</span>
+    <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(publicLabel)}</span>
+    ${publicUrl ? `<button type="button" class="button secondary" id="share-copy-existing-public-btn" style="margin-top:4px;">Copy</button>
+    <button type="button" class="button secondary" id="share-open-existing-public-btn" style="margin-top:4px;margin-left:6px;">Open</button>` : `<div class="value value-muted" style="font-size:11px; margin-top:6px;">Public URL will appear once provisioning completes.</div>`}
+  </div>` : ""}
+</div>`;
+
+    const copyLocalBtn = document.getElementById("share-copy-existing-local-btn");
+    if (copyLocalBtn && localUrl) {
+      copyLocalBtn.onclick = async () => {
+        const ok = await copyToClipboard(localUrl);
+        if (ok) {
+          copyLocalBtn.textContent = "Copied!";
+          setTimeout(() => (copyLocalBtn.textContent = "Copy"), 2000);
+        } else {
+          showCopyFallback(localUrl, els.shareResult);
+        }
+      };
+    }
+    const openLocalBtn = document.getElementById("share-open-existing-local-btn");
+    if (openLocalBtn && localUrl) openLocalBtn.onclick = () => window.open(localUrl, "_blank");
+
+    const copyPublicBtn = document.getElementById("share-copy-existing-public-btn");
+    if (copyPublicBtn && publicUrl) {
+      copyPublicBtn.onclick = async () => {
+        const ok = await copyToClipboard(publicUrl);
+        if (ok) {
+          copyPublicBtn.textContent = "Copied!";
+          setTimeout(() => (copyPublicBtn.textContent = "Copy"), 2000);
+        } else {
+          showCopyFallback(publicUrl, els.shareResult);
+        }
+      };
+    }
+    const openPublicBtn = document.getElementById("share-open-existing-public-btn");
+    if (openPublicBtn && publicUrl) openPublicBtn.onclick = () => window.open(publicUrl, "_blank");
+  }
   const needActivation = !canAddDeviceOrCreateShare();
   if (els.activationBlock) {
     els.activationBlock.style.display = needActivation ? "block" : "none";
@@ -2944,15 +3266,61 @@ async function createShare() {
   });
   const data = await res.json();
   if (!res.ok) {
+    if (res.status === 409 && data && data.existingShare) {
+      const existing = data.existingShare;
+      const existingScope = existing.scope || scope;
+      const shareUrl = existing.urlIp || existing.url || `${stateMeta.lanBaseUrl}/share/${existing.shareId}`;
+      const publicUrl = existing.publicUrl || null;
+      const primaryUrl = existingScope === "public" && publicUrl ? publicUrl : shareUrl;
+      stateShare.lastShareUrl = primaryUrl;
+      stateShare.lastShareId = existing.shareId;
+      stateShare.lastPath = pathValue;
+
+      els.shareResult.innerHTML = `<div>Already shared (${escapeHtml(existingScope)}).</div>
+<div style="margin-top:10px;">
+  <span class="share-link-box share-url-secondary" style="display:block;">${escapeHtml(primaryUrl)}</span>
+  <button type="button" class="button secondary" id="share-copy-existing-btn" style="margin-top:6px;">Copy</button>
+  <button type="button" class="button secondary" id="share-open-existing-btn" style="margin-top:6px;margin-left:6px;">Open</button>
+</div>`;
+      const copyBtn = document.getElementById("share-copy-existing-btn");
+      if (copyBtn) {
+        copyBtn.onclick = async () => {
+          const ok = await copyToClipboard(primaryUrl);
+          if (ok) {
+            copyBtn.textContent = "Copied!";
+            setTimeout(() => (copyBtn.textContent = "Copy"), 1800);
+          } else {
+            showCopyFallback(primaryUrl, copyBtn);
+          }
+        };
+      }
+      const openBtn = document.getElementById("share-open-existing-btn");
+      if (openBtn) openBtn.onclick = () => window.open(primaryUrl, "_blank");
+
+      document.querySelectorAll('input[name="share-scope"]').forEach((radio) => {
+        radio.disabled = true;
+        radio.checked = radio.value === existingScope;
+      });
+      if (els.copyShare) els.copyShare.style.display = "none";
+      if (els.shareExtraActions) els.shareExtraActions.style.display = "none";
+      return;
+    }
     if (data.error === "share_limit_reached" || res.status === 403) {
-      const inferredUsed = (typeof data.limit === "number" && typeof data.remaining === "number")
-        ? Math.max(0, data.limit - data.remaining)
-        : (typeof data.limit === "number" ? data.limit : state.usageSharesThisMonth);
+      const limit = typeof data.limit === "number" ? data.limit : null;
+      const usedFromServer = typeof data.used === "number" ? data.used : null;
+      const inferredUsed = usedFromServer !== null && usedFromServer >= 0
+        ? usedFromServer
+        : (limit !== null && typeof data.remaining === "number"
+            ? Math.max(0, limit - data.remaining)
+            : (limit !== null ? limit : state.usageSharesThisMonth));
       state.usageSharesThisMonth = inferredUsed;
       try { renderUsageBars().catch(() => {}); } catch (_) {}
-      const limitMsg = "Share limit is reached. Contact support to upgrade your share limit or device limit.";
+      let limitMsg = "Share limit is reached. Contact support to upgrade your share limit or device limit.";
+      if (limit !== null && inferredUsed >= 0) {
+        limitMsg = `Share limit reached. You used ${inferredUsed} of ${limit} allowed shares this month.`;
+      }
       els.shareResult.textContent = limitMsg;
-      // Also show a persistent grace-style banner for visibility
+      // Also show a persistent banner for visibility
       showUploadBanner(limitMsg, "error");
       setTimeout(hideUploadBanner, 5000);
     } else {
@@ -2967,7 +3335,16 @@ async function createShare() {
   stateShare.lastShareId = data.shareId;
   stateShare.lastPath = pathValue;
   let resultHtml = "<div>Share created.</div>";
-  if (scope === "public" && publicUrl) {
+  const isProvisioningPublic = scope === "public" && !publicUrl && data.publicStatus === "provisioning";
+  if (isProvisioningPublic) {
+    resultHtml += `<div style="margin-top:10px;">
+  <span class="value" style="font-size:12px; font-weight:600;">Local (ready now):</span>
+  <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(shareUrl)}</span>
+  <button type="button" class="button secondary" id="share-copy-local-btn" style="margin-top:4px;">Copy</button>
+  <div class="value value-muted" style="font-size:11px; margin-top:6px;">Public link is provisioning…</div>
+  <div class="value value-muted" id="public-provisioning-status" style="font-size:11px; margin-top:4px;">Waiting for public URL…</div>
+</div>`;
+  } else if (scope === "public" && publicUrl) {
     resultHtml += `<div style="margin-top:10px;">
   <span class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Public:</span>
   <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(publicUrl)}</span>
@@ -2987,11 +3364,71 @@ async function createShare() {
   document.querySelectorAll('input[name="share-scope"]').forEach((radio) => {
     radio.disabled = true;
   });
-  if (scope === "public" && publicUrl) {
+  if (isProvisioningPublic) {
     const localBtn = document.getElementById("share-copy-local-btn");
+    if (localBtn) {
+      localBtn.onclick = async () => {
+        const ok = await copyToClipboard(shareUrl);
+        if (ok) {
+          localBtn.textContent = "Copied!";
+          setTimeout(() => (localBtn.textContent = "Copy"), 2000);
+        } else {
+          showCopyFallback(shareUrl, els.shareResult);
+        }
+      };
+    }
+
+    // Poll until the publicUrl is available, then update the modal contents.
+    (async () => {
+      const statusEl = document.getElementById("public-provisioning-status");
+      const shareId = data.shareId;
+      const deadlineMs = Date.now() + 45_000;
+      while (Date.now() < deadlineMs) {
+        try {
+          const r = await apiFetch(`/api/share/${encodeURIComponent(shareId)}`);
+          if (r.ok) {
+            const s = await r.json();
+            if (s && s.publicUrl) {
+              const publicUrlNow = s.publicUrl;
+              stateShare.lastShareUrl = publicUrlNow;
+
+              els.shareResult.innerHTML = `<div>Public link is ready.</div>
+<div style="margin-top:10px;">
+  <span class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Public:</span>
+  <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(publicUrlNow)}</span>
+  <button type="button" class="button secondary" id="share-copy-public-btn" style="margin-top:4px;">Copy</button>
+  <button type="button" class="button secondary" id="share-open-public-btn" style="margin-top:4px;margin-left:6px;">Open</button>
+  <div class="value value-muted" style="font-size:11px; margin-top:4px;">Accessible from anywhere.</div>
+</div>`;
+              const copyBtn = document.getElementById("share-copy-public-btn");
+              if (copyBtn) {
+                copyBtn.onclick = async () => {
+                  const ok = await copyToClipboard(publicUrlNow);
+                  if (ok) {
+                    copyBtn.textContent = "Copied!";
+                    setTimeout(() => (copyBtn.textContent = "Copy"), 2000);
+                  } else {
+                    showCopyFallback(publicUrlNow, els.shareResult);
+                  }
+                };
+              }
+              const openBtn = document.getElementById("share-open-public-btn");
+              if (openBtn) openBtn.onclick = () => window.open(publicUrlNow, "_blank");
+
+              try { await loadShares(); } catch (_) {}
+              try { renderFiles(); } catch (_) {}
+              return;
+            }
+          }
+        } catch (_) {}
+        if (statusEl) statusEl.textContent = "Provisioning…";
+        await new Promise((rr) => setTimeout(rr, 2000));
+      }
+      if (statusEl) statusEl.textContent = "Still provisioning. You can use the local link for now.";
+    })();
+  } else if (scope === "public" && publicUrl) {
     const publicBtn = document.getElementById("share-copy-public-btn");
-    // Only public URL is shown when scope=public.
-    if (publicBtn)
+    if (publicBtn) {
       publicBtn.onclick = async () => {
         const ok = await copyToClipboard(publicUrl);
         if (ok) {
@@ -3001,7 +3438,20 @@ async function createShare() {
           showCopyFallback(publicUrl, els.shareResult);
         }
       };
-    if (localBtn) localBtn.remove();
+    }
+  } else {
+    const localBtn = document.getElementById("share-copy-local-btn");
+    if (localBtn) {
+      localBtn.onclick = async () => {
+        const ok = await copyToClipboard(shareUrl);
+        if (ok) {
+          localBtn.textContent = "Copied!";
+          setTimeout(() => (localBtn.textContent = "Copy"), 2000);
+        } else {
+          showCopyFallback(shareUrl, els.shareResult);
+        }
+      };
+    }
   }
   if (els.shareExtraActions) els.shareExtraActions.style.display = "flex";
   if (els.copyShare) {
@@ -4010,6 +4460,95 @@ if (els.remoteCloudCopy) {
     }
   });
 }
+if (els.remoteCloudSetupBtn) {
+  els.remoteCloudSetupBtn.addEventListener("click", () => {
+    // Bring user to Settings → Remote Access and start setup.
+    setActiveSection("settings");
+    const section = document.getElementById("remote-access-section");
+    if (section && typeof section.scrollIntoView === "function") {
+      section.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    if (els.remoteAccessNotConfigured) els.remoteAccessNotConfigured.style.display = "block";
+    if (els.remoteAccessConfiguredWrap) els.remoteAccessConfiguredWrap.style.display = "none";
+    if (els.remoteAccessSetupBtn) els.remoteAccessSetupBtn.click();
+  });
+}
+
+function hideDeleteSharedItemModal() {
+  if (els.deleteSharedItemModal) {
+    els.deleteSharedItemModal.classList.remove("active");
+    delete els.deleteSharedItemModal.dataset.path;
+    delete els.deleteSharedItemModal.dataset.type;
+    delete els.deleteSharedItemModal.dataset.name;
+  }
+}
+
+if (els.deleteSharedItemCancelTop) {
+  els.deleteSharedItemCancelTop.addEventListener("click", hideDeleteSharedItemModal);
+}
+if (els.deleteSharedItemCancel) {
+  els.deleteSharedItemCancel.addEventListener("click", hideDeleteSharedItemModal);
+}
+if (els.deleteSharedItemStopOnly) {
+  els.deleteSharedItemStopOnly.addEventListener("click", async () => {
+    const pathValue = els.deleteSharedItemModal && els.deleteSharedItemModal.dataset.path;
+    hideDeleteSharedItemModal();
+    if (!pathValue) return;
+    await stopSharesForPath(pathValue);
+    try { await loadFiles(state.path); } catch (_) {}
+    try { await loadLogs(); } catch (_) {}
+  });
+}
+if (els.deleteSharedItemStopAndDelete) {
+  els.deleteSharedItemStopAndDelete.addEventListener("click", async () => {
+    const pathValue = els.deleteSharedItemModal && els.deleteSharedItemModal.dataset.path;
+    hideDeleteSharedItemModal();
+    if (!pathValue) return;
+    await stopSharesForPath(pathValue);
+    await deletePathAfterStopSharing(pathValue);
+  });
+}
+
+if (els.homeRemoteAccessSettings) {
+  els.homeRemoteAccessSettings.addEventListener("click", () => {
+    setActiveSection("settings");
+    const section = document.getElementById("remote-access-section");
+    if (section && typeof section.scrollIntoView === "function") {
+      section.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+}
+
+async function setHomeRemoteAccessEnabled(enabled) {
+  if (!els.homeRemoteAccessToggle) return;
+  els.homeRemoteAccessToggle.disabled = true;
+  try {
+    if (enabled) {
+      const statusRes = await apiFetch("/api/public-access/status");
+      const statusData = await statusRes.json();
+      if (statusData.status === "failed" && statusData.reason === "not_configured") {
+        els.homeRemoteAccessToggle.checked = false;
+        await loadPublicAccessStatus();
+        return;
+      }
+      await apiFetch("/api/public-access/start", { method: "POST" });
+      await pollUntilActive();
+    } else {
+      await apiFetch("/api/public-access/stop", { method: "POST" });
+      await loadPublicAccessStatus();
+    }
+  } catch (_) {
+    await loadPublicAccessStatus();
+  } finally {
+    els.homeRemoteAccessToggle.disabled = false;
+  }
+}
+
+if (els.homeRemoteAccessToggle) {
+  els.homeRemoteAccessToggle.addEventListener("change", async () => {
+    await setHomeRemoteAccessEnabled(!!els.homeRemoteAccessToggle.checked);
+  });
+}
 
 function navigateToSettings() {
   setActiveSection("settings");
@@ -4190,6 +4729,11 @@ if (els.previewModal) {
     if (event.target === els.previewModal) closePreviewModal();
   });
 }
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && els.previewModal && els.previewModal.classList.contains("active")) {
+    closePreviewModal();
+  }
+});
 if (els.closeShareQrModal) {
   els.closeShareQrModal.addEventListener("click", closeShareQrModal);
 }
@@ -4230,6 +4774,58 @@ document.querySelectorAll(".share-tab").forEach((btn) => {
     renderShares();
   });
 });
+function setNetworkStatusBadge(status) {
+  const badge = els.networkStatusBadge;
+  if (!badge) return;
+
+  const textEl = document.getElementById("network-status-text") || badge;
+
+  badge.classList.remove("server-status-strong", "server-status-weak", "server-status-inactive");
+
+  if (status === "strong") {
+    badge.classList.add("server-status-strong");
+    textEl.textContent = "Online";
+    return;
+  }
+  if (status === "weak") {
+    badge.classList.add("server-status-strong");
+    textEl.textContent = "Online";
+    return;
+  }
+  if (status === "inactive") {
+    badge.classList.add("server-status-inactive");
+    textEl.textContent = "Server Inactive";
+    return;
+  }
+  badge.classList.add("server-status-inactive");
+  textEl.textContent = "Offline";
+}
+
+async function measureInternet() {
+  // Prefer Electron IPC bridge if available (accurate even when CORS/network policies apply)
+  try {
+    if (window.joincloud && typeof window.joincloud.checkInternet === "function") {
+      const r = await window.joincloud.checkInternet();
+      const connected = !!r && r.connected === true;
+      const latencyMs = typeof r?.latencyMs === "number" ? r.latencyMs : null;
+      return { connected, latencyMs };
+    }
+  } catch (_) {}
+
+  // Fallback for non-Electron testing
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return { connected: false, latencyMs: null };
+  }
+  const start = Date.now();
+  try {
+    // no-cors gives us timing without needing to read body
+    await fetch("https://www.google.com/favicon.ico", { mode: "no-cors", cache: "no-store" });
+    return { connected: true, latencyMs: Date.now() - start };
+  } catch (_) {
+    return { connected: false, latencyMs: null };
+  }
+}
+
 // Control Plane connection status indicator (header heart icon)
 async function checkControlPlaneStatus() {
   const btn = document.getElementById("control-plane-status");
@@ -4241,7 +4837,20 @@ async function checkControlPlaneStatus() {
     // Use same-origin API that already talks to the Control Plane
     const res = await apiFetch("/api/public-access/status");
     const data = await res.json().catch(() => ({}));
-    if (res.ok && data && (data.status === "active" || data.status === "ready")) {
+    const controlPlaneReady = !!(res.ok && data && (data.status === "active" || data.status === "ready"));
+    const internet = await measureInternet();
+
+    // Navbar badge should reflect ONLY internet status (not control plane)
+    const ms = internet.latencyMs;
+    if (internet.connected && typeof ms === "number") {
+      setNetworkStatusBadge(ms < 150 ? "strong" : ms < 500 ? "weak" : "weak");
+    } else if (internet.connected) {
+      setNetworkStatusBadge("weak");
+    } else {
+      setNetworkStatusBadge("offline");
+    }
+
+    if (controlPlaneReady) {
       btn.style.color = "#22C55E"; // green - connected / public sharing works
       btn.title = "Control Plane: Connected — public sharing is active";
     } else {
@@ -4251,11 +4860,32 @@ async function checkControlPlaneStatus() {
   } catch (_) {
     btn.style.color = "#EF4444"; // red - not connected
     btn.title = "Control Plane: Unreachable — public sharing may not work";
+    const internet = await measureInternet();
+    const ms = internet.latencyMs;
+    if (internet.connected && typeof ms === "number") {
+      setNetworkStatusBadge(ms < 150 ? "strong" : ms < 500 ? "weak" : "weak");
+    } else if (internet.connected) {
+      setNetworkStatusBadge("weak");
+    } else {
+      setNetworkStatusBadge("offline");
+    }
   }
 }
 
 checkControlPlaneStatus();
 setInterval(checkControlPlaneStatus, 30000);
+
+if (typeof window !== "undefined") {
+  window.addEventListener("online", () => {
+    checkControlPlaneStatus().catch(() => {});
+  });
+  window.addEventListener("offline", () => {
+    setNetworkStatusBadge("offline");
+  });
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    setNetworkStatusBadge("offline");
+  }
+}
 if (els.shareWithUserBtn) els.shareWithUserBtn.onclick = shareWithUser;
 if (els.shareWithTeamBtn) els.shareWithTeamBtn.onclick = shareWithTeam;
 if (els.shareTeamPickerClose) els.shareTeamPickerClose.onclick = closeShareTeamPicker;

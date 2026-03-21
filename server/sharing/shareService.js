@@ -152,13 +152,17 @@ class ShareService {
 
   expireShares() {
     const now = Date.now();
+    let dirty = false;
     for (const share of this.shares.values()) {
       if (!share.revoked && new Date(share.expiryTime).getTime() <= now) {
         share.revoked = true;
         this.shares.set(share.shareId, share);
+        dirty = true;
       }
     }
-    this.saveToDisk().catch(() => {});
+    if (dirty) {
+      this.saveToDisk().catch(() => {});
+    }
   }
 
   listShares() {
