@@ -1,12 +1,14 @@
 import { useCallback, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Upload, X, FileText, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { Upload, FileText, Loader2, CheckCircle2, AlertCircle, Pause, Play } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { StorageAPI } from "@/lib/storage-api";
+import { ChunkUploadController } from "@/lib/chunk-upload";
+import { useTransferOptional } from "@/contexts/transfer-context";
+import { formatEta, formatSpeed as formatSpeedBps } from "@/lib/format-transfer";
 
 interface UploadZoneProps {
   open: boolean;
@@ -17,15 +19,24 @@ interface UploadZoneProps {
 interface UploadingFile {
   file: File;
   progress: number;
-  status: "uploading" | "complete" | "error";
+  status: "uploading" | "paused" | "complete" | "error";
   error?: string;
+  speedLabel?: string;
+  etaLabel?: string;
+  chunkLabel?: string;
 }
 
 export function UploadZone({ open, onOpenChange, parentPath = "/" }: UploadZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([]);
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const controllerRef = useRef<ChunkUploadController | null>(null);
+  const transferIdRef = useRef<string>("");
   const { toast } = useToast();
+  const transfer = useTransferOptional();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const targetPathForUpload = parentPath === "/" ? "/" : `/${parentPath.replace(/^\/+/, "")}`;
 
   const handleFiles = useCallback(
     async (files: FileList | null) => {
@@ -45,32 +56,97 @@ export function UploadZone({ open, onOpenChange, parentPath = "/" }: UploadZoneP
 
       for (let i = 0; i < fileArray.length; i++) {
         const file = fileArray[i];
+        const transferId = `upload-${Date.now()}-${i}-${file.name}`;
+        transferIdRef.current = transferId;
+        setActiveIndex(i);
+
+        const controller = new ChunkUploadController();
+        controllerRef.current = controller;
+
+        transfer?.upsertItem({
+          id: transferId,
+          direction: "uploading",
+          fileName: file.name,
+          fileSize: file.size,
+          percent: 0,
+          totalBytes: file.size,
+          status: "active",
+        });
+
         try {
-          await StorageAPI.uploadFiles([file], parentPath);
-          setUploadingFiles((prev) => {
-            const updated = [...prev];
-            if (updated[i]) {
-              updated[i] = { ...updated[i], progress: 100, status: "complete" };
-            }
-            return updated;
+          await controller.upload(file, targetPathForUpload, {
+            credentials: "include",
+            onProgress: (p) => {
+              setUploadingFiles((prev) => {
+                const next = [...prev];
+                if (next[i]) {
+                  next[i] = {
+                    ...next[i],
+                    progress: Math.round(p.percent),
+                    chunkLabel: `${p.chunkIndex + 1} / ${p.totalChunks} chunks`,
+                    speedLabel: formatSpeedBps(p.speedBps),
+                    etaLabel: formatEta(p.etaSeconds),
+                  };
+                }
+                return next;
+              });
+              transfer?.updateItem(transferId, {
+                percent: Math.round(p.percent),
+                bytesSent: p.bytesSent,
+                totalBytes: p.totalBytes,
+                chunkLabel: `${p.chunkIndex + 1} / ${p.totalChunks} chunks`,
+                speedLabel: formatSpeedBps(p.speedBps),
+                etaLabel: formatEta(p.etaSeconds),
+                status: p.percent >= 100 ? "complete" : "active",
+              });
+            },
           });
+
+          setUploadingFiles((prev) => {
+            const next = [...prev];
+            if (next[i]) {
+              next[i] = { ...next[i], progress: 100, status: "complete" };
+            }
+            return next;
+          });
+          transfer?.updateItem(transferId, {
+            percent: 100,
+            status: "complete",
+          });
+          setTimeout(() => transfer?.removeItem(transferId), 2000);
           successCount += 1;
-        } catch (error: any) {
+        } catch (error: unknown) {
+          const msg = error instanceof Error ? error.message : "Upload failed";
+          if (msg === "Upload cancelled" || msg.includes("cancelled")) {
+            setUploadingFiles((prev) => {
+              const next = [...prev];
+              if (next[i]) next[i] = { ...next[i], status: "error", error: "Cancelled" };
+              return next;
+            });
+            transfer?.removeItem(transferId);
+            hasError = true;
+            break;
+          }
           hasError = true;
           setUploadingFiles((prev) => {
-            const updated = [...prev];
-            if (updated[i]) {
-              updated[i] = {
-                ...updated[i],
+            const next = [...prev];
+            if (next[i]) {
+              next[i] = {
+                ...next[i],
                 progress: 0,
                 status: "error" as const,
-                error: error?.message || "Upload failed",
+                error: msg,
               };
             }
-            return updated;
+            return next;
           });
+          transfer?.updateItem(transferId, { status: "error", error: msg });
         }
+
+        controllerRef.current = null;
       }
+
+      setActiveIndex(null);
 
       queryClient.invalidateQueries({ queryKey: ["/api/files"] });
       queryClient.invalidateQueries({ queryKey: ["/api/storage"] });
@@ -96,8 +172,38 @@ export function UploadZone({ open, onOpenChange, parentPath = "/" }: UploadZoneP
         setUploadingFiles([]);
       }, 1500);
     },
-    [parentPath, queryClient, toast, onOpenChange]
+    [parentPath, queryClient, targetPathForUpload, toast, onOpenChange, transfer]
   );
+
+  const handlePause = () => {
+    controllerRef.current?.pause();
+    if (activeIndex !== null) {
+      setUploadingFiles((prev) => {
+        const next = [...prev];
+        if (next[activeIndex]) next[activeIndex] = { ...next[activeIndex], status: "paused" };
+        return next;
+      });
+      const id = transferIdRef.current;
+      if (id) transfer?.updateItem(id, { status: "paused" });
+    }
+  };
+
+  const handleResume = () => {
+    controllerRef.current?.resume();
+    if (activeIndex !== null) {
+      setUploadingFiles((prev) => {
+        const next = [...prev];
+        if (next[activeIndex]) next[activeIndex] = { ...next[activeIndex], status: "uploading" };
+        return next;
+      });
+      const id = transferIdRef.current;
+      if (id) transfer?.updateItem(id, { status: "active" });
+    }
+  };
+
+  const handleCancel = () => {
+    controllerRef.current?.cancel();
+  };
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -109,17 +215,32 @@ export function UploadZone({ open, onOpenChange, parentPath = "/" }: UploadZoneP
     setIsDragging(false);
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    handleFiles(e.dataTransfer.files);
-  }, [handleFiles]);
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      setIsDragging(false);
+      handleFiles(e.dataTransfer.files);
+    },
+    [handleFiles]
+  );
 
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    handleFiles(e.target.files);
-  }, [handleFiles]);
+  const handleFileSelect = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      handleFiles(e.target.files);
+    },
+    [handleFiles]
+  );
 
   const displayPath = parentPath === "/" ? "Home" : parentPath.split("/").pop() || "Home";
+
+  const showControls =
+    uploadingFiles.length > 0 &&
+    activeIndex !== null &&
+    uploadingFiles[activeIndex]?.status === "uploading";
+  const showPaused =
+    uploadingFiles.length > 0 &&
+    activeIndex !== null &&
+    uploadingFiles[activeIndex]?.status === "paused";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -188,22 +309,31 @@ export function UploadZone({ open, onOpenChange, parentPath = "/" }: UploadZoneP
                   data-testid={`upload-item-${index}`}
                 >
                   <div className="flex items-start gap-3">
-                    <FileText className="h-5 w-5 text-primary mt-1" />
+                    <FileText className="h-5 w-5 text-primary mt-1 shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="font-medium truncate" title={uploadFile.file.name}>
                         {uploadFile.file.name}
                       </p>
                       <p className="text-sm text-muted-foreground">
                         {(uploadFile.file.size / 1024).toFixed(1)} KB
+                        {uploadFile.chunkLabel ? ` · ${uploadFile.chunkLabel}` : ""}
                       </p>
+                      {(uploadFile.speedLabel || uploadFile.etaLabel) && uploadFile.status === "uploading" && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {uploadFile.speedLabel}
+                          {uploadFile.etaLabel ? ` · ETA ${uploadFile.etaLabel}` : ""}
+                        </p>
+                      )}
                       <div className="mt-2 space-y-1">
-                        <Progress 
-                          value={uploadFile.status === "complete" ? 100 : uploadFile.progress} 
+                        <Progress
+                          value={uploadFile.status === "complete" ? 100 : uploadFile.progress}
                           className="h-2"
                         />
                         <div className="flex items-center justify-between text-xs">
                           <span className="text-muted-foreground">
-                            {uploadFile.status === "complete" ? "100%" : `${uploadFile.progress}%`}
+                            {uploadFile.status === "complete"
+                              ? "100%"
+                              : `${uploadFile.progress}%`}
                           </span>
                           {uploadFile.status === "complete" ? (
                             <span className="text-chart-5 flex items-center gap-1">
@@ -214,6 +344,11 @@ export function UploadZone({ open, onOpenChange, parentPath = "/" }: UploadZoneP
                             <span className="text-destructive flex items-center gap-1">
                               <AlertCircle className="h-3 w-3" />
                               {uploadFile.error || "Failed"}
+                            </span>
+                          ) : uploadFile.status === "paused" ? (
+                            <span className="text-amber-600 flex items-center gap-1">
+                              <Pause className="h-3 w-3" />
+                              Paused
                             </span>
                           ) : (
                             <span className="text-primary flex items-center gap-1">
@@ -231,16 +366,21 @@ export function UploadZone({ open, onOpenChange, parentPath = "/" }: UploadZoneP
           </div>
         )}
 
-        {uploadingFiles.length > 0 && uploadingFiles.some((u) => u.status === "uploading") && (
-          <div className="flex justify-end gap-2 pt-4 border-t">
-            <Button
-              variant="outline"
-              onClick={() => {
-                onOpenChange(false);
-                setUploadingFiles([]);
-              }}
-              data-testid="button-cancel-upload"
-            >
+        {uploadingFiles.length > 0 && uploadingFiles.some((u) => u.status === "uploading" || u.status === "paused") && (
+          <div className="flex justify-end gap-2 pt-4 border-t flex-wrap">
+            {showControls && (
+              <Button variant="secondary" onClick={handlePause} data-testid="button-pause-upload">
+                <Pause className="h-4 w-4 mr-1" />
+                Pause
+              </Button>
+            )}
+            {showPaused && (
+              <Button variant="secondary" onClick={handleResume} data-testid="button-resume-upload">
+                <Play className="h-4 w-4 mr-1" />
+                Resume
+              </Button>
+            )}
+            <Button variant="outline" onClick={handleCancel} data-testid="button-cancel-upload">
               Cancel
             </Button>
           </div>

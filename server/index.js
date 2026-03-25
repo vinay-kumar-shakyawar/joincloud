@@ -12,6 +12,11 @@ const mime = require("mime-types");
 const bonjour = require("bonjour")();
 const archiver = require("archiver");
 const Busboy = require("busboy");
+const { registerChunkUploadRoutes } = require("./upload/chunkUploadManager");
+const { detectTransferMode } = require("./transfer/TransferRouter");
+const { KeyStore } = require("./transfer/KeyStore");
+const { decryptMetadata } = require("./transfer/metaDecrypt");
+const { createDirectStreamManager, streamFileWithRange } = require("./transfer/DirectStream");
 
 const config = require("./config/default");
 const { createOwnerServer } = require("./webdav/ownerServer");
@@ -155,6 +160,9 @@ async function updateUserConfig(configPath, payload) {
 }
 
 let controlPlaneConfigCache = null;
+const shareGroups = new Map();
+const fileSocialStore = new Map();
+const socialNotifications = [];
 
 function getHostUuidForConfig() {
   try {
@@ -660,6 +668,14 @@ function getControlPlaneConfig() {
 function toPosixPath(input) {
   const value = input ? input.replace(/\\/g, "/") : "/";
   return value.startsWith("/") ? value : `/${value}`;
+}
+
+function getSocialEntry(pathKey) {
+  const key = String(pathKey || "");
+  if (!fileSocialStore.has(key)) {
+    fileSocialStore.set(key, { likes: new Set(), dislikes: new Set(), comments: [] });
+  }
+  return fileSocialStore.get(key);
 }
 
 function getAppVersion() {
@@ -1182,6 +1198,20 @@ async function bootstrap() {
   });
   usageAggregation.start();
 
+  const keyStore = new KeyStore({
+    filePath: path.join(process.env.JOINCLOUD_USER_DATA || os.homedir(), "JoinCloud", "system", "paired_keys.enc.json"),
+  });
+  await keyStore.loadKeys().catch(() => {});
+
+  const directStream = createDirectStreamManager({
+    logger,
+    onProgress: ({ pct, bytesSent, total }) => {
+      if (global.mainWindow?.webContents && !global.mainWindow.webContents.isDestroyed()) {
+        global.mainWindow.webContents.send("share-progress", { pct, bytesSent, total });
+      }
+    },
+  });
+
   const handler = createMountManager({
     ownerServer,
     shareService,
@@ -1205,7 +1235,10 @@ async function bootstrap() {
     );
     if (isPrivateOrigin) res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-JoinCloud-Fingerprint, X-JoinCloud-Token");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type, Authorization, X-JoinCloud-Fingerprint, X-JoinCloud-Token, X-Upload-Id, X-Chunk-Index, X-Chunk-Hmac, X-Transfer-Origin, X-Paired-Device-Id, X-Host-Session-Token, Range"
+    );
     if (req.method === "OPTIONS") return res.sendStatus(204);
     next();
   });
@@ -1312,6 +1345,12 @@ async function bootstrap() {
 
   function canWritePathForContext(context, requestedPath) {
     return true;
+  }
+
+  function isValidHostSessionToken(token) {
+    const expected = process.env.JOINCLOUD_HOST_SESSION_TOKEN;
+    if (!expected) return false;
+    return String(token || "") === String(expected);
   }
   const uiResolution = resolveUiRoot();
   const uiRoot = uiResolution.uiRoot;
@@ -2021,6 +2060,32 @@ async function bootstrap() {
     });
   });
 
+  const activeShareTransfers = new Map();
+  const shareRateWindows = new Map();
+  const SHARE_RATE_LIMIT_MAX = Number(process.env.JOINCLOUD_SHARE_RATE_MAX || 60);
+  const SHARE_RATE_LIMIT_WINDOW_MS = Number(process.env.JOINCLOUD_SHARE_RATE_WINDOW_MS || 60_000);
+  const FREE_CONCURRENT_LIMIT = Number(process.env.JOINCLOUD_CONCURRENT_LIMIT_FREE || 3);
+
+  function getShareConcurrentCount(shareId) {
+    let count = 0;
+    for (const transfer of activeShareTransfers.values()) {
+      if (transfer.shareId === shareId) count += 1;
+    }
+    return count;
+  }
+
+  function checkShareRateLimit(shareId) {
+    const now = Date.now();
+    const state = shareRateWindows.get(shareId) || { count: 0, start: now };
+    if (now - state.start > SHARE_RATE_LIMIT_WINDOW_MS) {
+      state.count = 0;
+      state.start = now;
+    }
+    state.count += 1;
+    shareRateWindows.set(shareId, state);
+    return state.count <= SHARE_RATE_LIMIT_MAX;
+  }
+
   app.get("/share/:shareId", (req, res) => {
     if (validateTunnelToken(req, res, req.params.shareId)) return;
     if (!sharingEnabled) {
@@ -2208,24 +2273,14 @@ async function bootstrap() {
         return;
       }
       const contentType = mime.lookup(fileName) || "application/octet-stream";
-      res.setHeader("Content-Type", contentType);
-      res.setHeader(
-        "Content-Disposition",
-        `inline; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
-      );
-      res.setHeader("X-Content-Type-Options", "nosniff");
-      res.setHeader("Cache-Control", "no-store");
-      res.setHeader("Accept-Ranges", "bytes");
-      res.setHeader("Content-Length", String(stats.size));
-      res.flushHeaders();
-      const readStream = fsSync.createReadStream(filePath, { highWaterMark: 2 * 1024 * 1024 });
-      const passThrough = new stream.PassThrough({ highWaterMark: 8 * 1024 * 1024 });
-      pipeline(readStream, passThrough, res).catch((err) => {
-        if (err.code !== "ERR_STREAM_PREMATURE_CLOSE" && !err.message?.includes("aborted")) {
+      streamFileWithRange(req, res, {
+        filePath,
+        fileName,
+        mimeType: contentType,
+        download: false,
+        onError: (err) => {
           logger.error("share preview error", { error: err.message });
-        }
-        if (!res.headersSent) res.status(500).send("preview_failed");
-        else res.destroy();
+        },
       });
     } catch (error) {
       res.status(400).send(error.message || "preview_failed");
@@ -2342,31 +2397,35 @@ async function bootstrap() {
   app.get("/share/:shareId/download", async (req, res) => {
     if (validateTunnelToken(req, res, req.params.shareId)) return;
     if (!sharingEnabled) {
-      res
-        .status(423)
-        .send(
-          renderMessagePage({
-            title: "Sharing Stopped",
-            message: "Sharing is currently stopped by the admin. Please try again later.",
-          })
-        );
+      res.status(503).setHeader("Retry-After", "30").json({
+        error: "sharer_offline",
+        retryAfter: 30,
+        message: "Sharing is currently stopped by the admin. Please try again later.",
+      });
       return;
     }
     const share = shareService.getShare(req.params.shareId);
     if (!share) {
       const record = shareService.getShareRecord(req.params.shareId);
       if (record && record.revoked) {
-        res
-          .status(410)
-          .send(
-            renderMessagePage({
-              title: "Share Revoked",
-              message: "This share link has been revoked.",
-            })
-          );
+        res.status(410).json({
+          error: "share_revoked",
+          message: "This share link has been revoked.",
+        });
         return;
       }
-      res.status(404).send(renderMessagePage({ title: "Share Not Found", message: "This share link is invalid or expired." }));
+      res.status(404).json({
+        error: "share_not_found",
+        message: "This share link is invalid or expired.",
+      });
+      return;
+    }
+    if (!checkShareRateLimit(req.params.shareId)) {
+      res.status(429).json({ error: "too_many_requests_for_share_link" });
+      return;
+    }
+    if (getShareConcurrentCount(req.params.shareId) >= FREE_CONCURRENT_LIMIT) {
+      res.status(429).json({ error: "too_many_concurrent_downloads", upgrade: true });
       return;
     }
     try {
@@ -2374,73 +2433,77 @@ async function bootstrap() {
       if ((share.targetType || "file") === "folder") {
         const relativePath = toSafeRelative(req.query.path || "");
         if (!relativePath) {
-          res.status(400).send("file path is required");
+          res.status(400).json({ error: "file_path_required" });
           return;
         }
         filePath = ensureWithinShareRoot(share.targetPath, path.join(share.targetPath, relativePath));
       }
       const stats = await fs.stat(filePath);
       if (!stats.isFile()) {
-        res.status(400).send("not a file");
+        res.status(404).json({ error: "file_not_found" });
         return;
       }
       const fileName = sanitizeDownloadFileName(path.basename(filePath));
       const contentType = mime.lookup(fileName) || "application/octet-stream";
-      const fileSize = stats.size;
-      res.setHeader("Content-Type", contentType);
-      res.setHeader("Content-Length", String(fileSize));
-      res.setHeader("Accept-Ranges", "bytes");
-      res.setHeader(
-        "Content-Disposition",
-        `attachment; filename="${fileName}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
-      );
-      res.setHeader("X-Content-Type-Options", "nosniff");
-      res.setHeader("Cache-Control", "no-store");
-
-      res.flushHeaders();
+      const transferId = `${req.params.shareId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      activeShareTransfers.set(transferId, {
+        shareId: req.params.shareId,
+        startTime: Date.now(),
+        bytesSent: 0,
+        ip: getClientIp(req),
+      });
 
       const clientIp = getClientIp(req);
       const startTime = Date.now();
-      logger.info("share download start", { path: filePath, size: fileSize, client_ip: clientIp });
-
-      const READ_HWM = 2 * 1024 * 1024;
-      const PASS_HWM = 8 * 1024 * 1024;
-      const readStream = fsSync.createReadStream(filePath, { highWaterMark: READ_HWM });
-      const passThrough = new stream.PassThrough({ highWaterMark: PASS_HWM });
-
-      req.on("aborted", () => {
-        readStream.destroy();
-        passThrough.destroy();
-        if (!res.destroyed) res.destroy();
-        logger.info("share download aborted", { client_ip: clientIp });
-      });
-
+      logger.info("share download start", { path: filePath, size: stats.size, client_ip: clientIp, range: req.headers.range || null });
       runtimeTelemetry.increment("total_downloads");
-
-      pipeline(readStream, passThrough, res).then(() => {
+      streamFileWithRange(req, res, {
+        filePath,
+        fileName,
+        mimeType: contentType,
+        download: req.query.download !== "false",
+        onData: (bytesSent) => {
+          const state = activeShareTransfers.get(transferId);
+          if (state) state.bytesSent = bytesSent;
+        },
+        onDone: (bytesSent, _contentLength, totalBytes, aborted) => {
+          activeShareTransfers.delete(transferId);
+          if (aborted) {
+            logger.info("share download aborted", { client_ip: clientIp, bytes_sent: bytesSent });
+            return;
+          }
+          const fileSize = totalBytes || stats.size;
         const durationMs = Date.now() - startTime;
         const mbPerSec = durationMs > 0 ? (fileSize / (1024 * 1024)) / (durationMs / 1000) : 0;
         logger.info("share download end", {
-          bytes_sent: fileSize,
+            bytes_sent: bytesSent,
           duration_ms: durationMs,
           mb_per_sec: mbPerSec.toFixed(2),
         });
-      }).catch((err) => {
-        const isAbort = err.code === "ERR_STREAM_PREMATURE_CLOSE" || err.message?.includes("aborted");
-        if (isAbort) {
-          logger.info("share download aborted", { client_ip: clientIp });
-        } else {
+        },
+        onError: (err) => {
+          activeShareTransfers.delete(transferId);
           logger.error("share download error", { error: err.message });
-        }
-        if (!res.headersSent) {
-          res.status(500).send("download_failed");
-        } else {
-          res.destroy();
-        }
+        },
       });
     } catch (error) {
-      res.status(400).send(error.message || "download_failed");
+      if (error?.code === "ENOENT") {
+        res.status(404).json({ error: "file_not_found" });
+        return;
+      }
+      res.status(400).json({ error: error.message || "download_failed" });
     }
+  });
+
+  app.get("/share-token/:token", async (req, res) => {
+    if (!sharingEnabled) {
+      res.status(503).setHeader("Retry-After", "30").json({
+        error: "sharer_offline",
+        retryAfter: 30,
+      });
+      return;
+    }
+    await directStream.handleDownload(req, res);
   });
 
   app.post("/share/:shareId/upload", async (req, res) => {
@@ -2561,9 +2624,61 @@ async function bootstrap() {
       fingerprint,
       device_id: validation.session.device_id,
       device_name: validation.session.device_name,
-      device_folder_rel: null,
+      device_folder_rel: validation.session.device_folder_rel || null,
     };
     next();
+  });
+
+  /** Chunk uploads (/transfer/*, /api/v2/upload/*) are not under /api — require same session as /api. */
+  async function transferUploadAuth(req, res, next) {
+    try {
+      if (isLocalhostRequest(req)) {
+        req.joincloudAccess = {
+          role: "host",
+          can_upload: true,
+          is_admin: true,
+        };
+        return next();
+      }
+      if (!sharingEnabled) {
+        res.status(423).json({
+          error: "sharing_stopped",
+          message: "Sharing is currently stopped by the admin.",
+        });
+        return;
+      }
+      const fingerprint = getRequestFingerprint(req);
+      const token = getRequestToken(req);
+      const validation = await accessControl.validateSession({ token, fingerprint });
+      if (!validation.authorized) {
+        res.status(401).json({ error: "approval_required", reason: validation.reason });
+        return;
+      }
+      await ensureDeviceFolderForSession(validation.session);
+      req.joincloudAccess = {
+        role: "remote",
+        can_upload: true,
+        is_admin: false,
+        token,
+        fingerprint,
+        device_id: validation.session.device_id,
+        device_name: validation.session.device_name,
+        device_folder_rel: validation.session.device_folder_rel,
+      };
+      next();
+    } catch (err) {
+      logger.error("transfer upload auth failed", { error: err && err.message });
+      if (!res.headersSent) res.status(500).json({ error: "auth_failed" });
+    }
+  }
+  app.use("/transfer", transferUploadAuth);
+  app.use("/api/v2/upload", transferUploadAuth);
+  registerChunkUploadRoutes(app, config, {
+    keyStore,
+    decryptMetadata,
+    detectTransferMode,
+    isValidHostSessionToken,
+    getAccess: (req) => req.joincloudAccess || null,
   });
 
   app.get("/privacy", (_req, res) => {
@@ -2702,6 +2817,197 @@ async function bootstrap() {
       logger.error("delete failed", { path: requestedPath, error: err.message });
       res.status(500).json({ error: err.message || "delete_failed" });
     }
+  });
+
+  app.post("/api/v1/folder", async (req, res) => {
+    try {
+      const rawPath = String(req.body?.path || "").trim();
+      const folderName = String(req.body?.name || "").trim();
+      if (!folderName) {
+        res.status(400).json({ error: "folder name is required" });
+        return;
+      }
+      const requestedPath = toPosixPath(rawPath || "/");
+      const access = getRequestContext(req);
+      if (!canWritePathForContext(access, requestedPath)) {
+        res.status(403).json({ error: "write_outside_device_folder_denied" });
+        return;
+      }
+      const safeName = folderName.replace(/[\\/:*?"<>|]/g, "_");
+      const parentPath = resolveOwnerPath(config.storage.ownerRoot, requestedPath);
+      const targetPath = path.join(parentPath, safeName);
+      await fs.mkdir(targetPath, { recursive: true });
+      res.json({ success: true, path: toPosixPath(path.posix.join(requestedPath, safeName)) });
+    } catch (error) {
+      res.status(400).json({ error: error.message || "create_folder_failed" });
+    }
+  });
+
+  app.post("/api/v1/files/bulk-delete", async (req, res) => {
+    const paths = Array.isArray(req.body?.paths) ? req.body.paths.map((v) => toPosixPath(String(v || ""))).filter(Boolean) : [];
+    if (!paths.length) {
+      res.status(400).json({ error: "paths array is required" });
+      return;
+    }
+    const access = getRequestContext(req);
+    const deleted = [];
+    const failed = [];
+    for (const requestedPath of paths) {
+      try {
+        if (!canWritePathForContext(access, requestedPath)) throw new Error("write_outside_device_folder_denied");
+        const fullPath = resolveOwnerPath(config.storage.ownerRoot, requestedPath);
+        const stats = await fs.stat(fullPath);
+        if (stats.isDirectory()) await fs.rm(fullPath, { recursive: true });
+        else await fs.unlink(fullPath);
+        deleted.push(requestedPath);
+      } catch (err) {
+        failed.push({ path: requestedPath, error: err.message || "delete_failed" });
+      }
+    }
+    res.json({ success: failed.length === 0, deleted, failed });
+  });
+
+  app.post("/api/v1/share-groups", async (req, res) => {
+    const access = getRequestContext(req);
+    if (access.role !== "host") {
+      res.status(403).json({ error: "host_only" });
+      return;
+    }
+    const paths = Array.isArray(req.body?.paths) ? req.body.paths.map((v) => toPosixPath(String(v || ""))).filter(Boolean) : [];
+    if (!paths.length) {
+      res.status(400).json({ error: "paths are required" });
+      return;
+    }
+    const name = String(req.body?.name || "").trim() || `Group ${new Date().toLocaleString()}`;
+    const scope = String(req.body?.scope || "local") === "public" ? "public" : "local";
+    const permission = String(req.body?.permission || "read-only");
+    const ttlMs = Number(req.body?.ttlMs || 7 * 24 * 60 * 60 * 1000);
+    const capabilities = req.body?.capabilities && typeof req.body.capabilities === "object" ? req.body.capabilities : {};
+    const groupId = crypto.randomUUID();
+    const shareIds = [];
+    const displayName = userConfig?.display_name || "Join";
+    const endpoints = getNetworkEndpoints(displayName, config.server.port, config.server.shareBasePath);
+    const entries = [];
+    for (const p of paths) {
+      const targetPath = resolveOwnerPath(config.storage.ownerRoot, p);
+      const existing = shareService
+        .listShares()
+        .find((s) => s.status === "active" && (s.scope || "local") === scope && s.targetPath === targetPath);
+      const share = existing || (await shareService.createShare({ targetPath, permission, ttlMs, scope }));
+      shareIds.push(share.shareId);
+      entries.push({
+        path: p,
+        shareId: share.shareId,
+        url: `${endpoints.ipUrl}/${share.shareId}`,
+      });
+    }
+    shareGroups.set(groupId, {
+      groupId,
+      name,
+      scope,
+      paths,
+      shareIds,
+      entries,
+      capabilities: {
+        allowDownload: capabilities.allowDownload !== false,
+        allowPreview: capabilities.allowPreview !== false,
+        allowUpload: !!capabilities.allowUpload,
+        allowDelete: !!capabilities.allowDelete,
+      },
+      createdAt: new Date().toISOString(),
+    });
+    res.json({ groupId, name, scope, url: `/share-group/${groupId}`, entries });
+  });
+
+  app.get("/api/v1/share-groups", async (_req, res) => {
+    const groups = Array.from(shareGroups.values())
+      .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+    res.json({ groups });
+  });
+
+  app.get("/api/v1/share-groups/:groupId", async (req, res) => {
+    const group = shareGroups.get(String(req.params.groupId || ""));
+    if (!group) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    res.json(group);
+  });
+
+  app.delete("/api/v1/share-groups/:groupId", async (req, res) => {
+    const groupId = String(req.params.groupId || "");
+    const group = shareGroups.get(groupId);
+    if (!group) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    const revoked = await shareService.revokeMany(Array.isArray(group.shareIds) ? group.shareIds : []);
+    shareGroups.delete(groupId);
+    res.json({ success: true, revoked });
+  });
+
+  app.get("/share-group/:groupId", async (req, res) => {
+    const group = shareGroups.get(String(req.params.groupId || ""));
+    if (!group) {
+      res.status(404).send("Share group not found");
+      return;
+    }
+    const rows = (group.entries || [])
+      .map((entry) => `<li><a href="${entry.url}" target="_blank" rel="noopener noreferrer">${entry.path}</a></li>`)
+      .join("");
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${group.name}</title></head><body style="font-family:system-ui;background:#0b1114;color:#e7eef1;padding:20px"><h2>${group.name}</h2><div style="opacity:.8;margin-bottom:10px">Scope: ${group.scope}</div><ul>${rows}</ul></body></html>`);
+  });
+
+  app.get("/api/v1/files/social", async (req, res) => {
+    const entry = getSocialEntry(req.query.path);
+    res.json({
+      likes: entry.likes.size,
+      dislikes: entry.dislikes.size,
+      comments: entry.comments,
+    });
+  });
+
+  app.post("/api/v1/files/social/react", async (req, res) => {
+    const actor = String(req.body?.actor || "anonymous");
+    const action = String(req.body?.action || "");
+    const pathValue = String(req.body?.path || "");
+    if (!pathValue || !["like", "dislike", "clear"].includes(action)) {
+      res.status(400).json({ error: "invalid_payload" });
+      return;
+    }
+    const entry = getSocialEntry(pathValue);
+    if (action === "like") {
+      entry.dislikes.delete(actor);
+      entry.likes.add(actor);
+      socialNotifications.push({ type: "like", path: pathValue, actor, at: new Date().toISOString() });
+    } else if (action === "dislike") {
+      entry.likes.delete(actor);
+      entry.dislikes.add(actor);
+    } else {
+      entry.likes.delete(actor);
+      entry.dislikes.delete(actor);
+    }
+    res.json({ likes: entry.likes.size, dislikes: entry.dislikes.size });
+  });
+
+  app.post("/api/v1/files/social/comment", async (req, res) => {
+    const actor = String(req.body?.actor || "anonymous");
+    const message = String(req.body?.message || "").trim();
+    const pathValue = String(req.body?.path || "");
+    if (!pathValue || !message) {
+      res.status(400).json({ error: "path and message are required" });
+      return;
+    }
+    const entry = getSocialEntry(pathValue);
+    const comment = { id: crypto.randomUUID(), actor, message, createdAt: new Date().toISOString() };
+    entry.comments.push(comment);
+    socialNotifications.push({ type: "comment", path: pathValue, actor, at: new Date().toISOString() });
+    res.json({ comment, comments: entry.comments });
+  });
+
+  app.get("/api/v1/files/social/notifications", async (_req, res) => {
+    res.json({ notifications: socialNotifications.slice(-100).reverse() });
   });
 
   app.get("/api/v1/file/content", async (req, res) => {
@@ -2949,6 +3255,30 @@ async function bootstrap() {
     });
   });
 
+  app.post("/api/share/:shareId/token", ensureAdmin, async (req, res) => {
+    const shareId = String(req.params.shareId || "").trim();
+    const share = shareService.getShare(shareId);
+    if (!share) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    if ((share.targetType || "file") !== "file") {
+      res.status(400).json({ error: "share_is_not_file" });
+      return;
+    }
+    try {
+      const fileName = sanitizeDownloadFileName(path.basename(share.targetPath));
+      const mimeType = mime.lookup(fileName) || "application/octet-stream";
+      const token = directStream.registerShareToken(share.targetPath, fileName, mimeType, {
+        shareId,
+        plan: "free",
+      });
+      res.json({ token, url: `/share-token/${encodeURIComponent(token)}` });
+    } catch (error) {
+      res.status(500).json({ error: error.message || "token_create_failed" });
+    }
+  });
+
   app.get("/api/shares", (req, res) => {
     const displayName = userConfig?.display_name || "Join";
     const endpoints = getNetworkEndpoints(displayName, config.server.port, config.server.shareBasePath);
@@ -3193,6 +3523,25 @@ async function bootstrap() {
     });
 
     req.pipe(busboy);
+  });
+
+  app.post("/transfer/upload", async (req, res) => {
+    const mode = detectTransferMode(req, {
+      hasDevice: (deviceId) => keyStore.hasDevice(deviceId),
+      isValidHostToken: isValidHostSessionToken,
+    });
+    if (mode === "DIRECT") {
+      res.status(400).json({ error: "direct_mode_requires_share_token_download_route" });
+      return;
+    }
+    res.status(400).json({
+      error: "chunked_mode_use_transfer_init_and_transfer_chunk",
+      endpoints: {
+        init: "/transfer/init",
+        chunk: "/transfer/chunk",
+        complete: "/transfer/complete",
+      },
+    });
   });
 
   app.put("/api/v1/file/raw", (req, res) => {

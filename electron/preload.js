@@ -11,6 +11,30 @@ contextBridge.exposeInMainWorld("joincloud", {
   openAuthModal: (url) => ipcRenderer.invoke("joincloud-open-auth-modal", url),
   closeAuthModal: () => ipcRenderer.invoke("joincloud-close-auth-modal"),
   checkInternet: () => ipcRenderer.invoke("joincloud-check-internet"),
+  onShareProgress: (callback) => {
+    if (typeof callback !== "function") {
+      return () => {};
+    }
+    const handler = (_event, data) => {
+      callback(data);
+    };
+    ipcRenderer.on("share-progress", handler);
+    return () => {
+      ipcRenderer.removeListener("share-progress", handler);
+    };
+  },
+  onSystemResume: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const handler = () => callback();
+    ipcRenderer.on("system-resume", handler);
+    return () => ipcRenderer.removeListener("system-resume", handler);
+  },
+  onSystemSuspend: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const handler = () => callback();
+    ipcRenderer.on("system-suspend", handler);
+    return () => ipcRenderer.removeListener("system-suspend", handler);
+  },
   onLicenseUpdated: (callback) => {
     console.log("[preload] onLicenseUpdated callback registered");
     ipcRenderer.on("license-updated", () => {

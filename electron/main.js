@@ -13,6 +13,9 @@ const dialog = electron.dialog;
 const ipcMain = electron.ipcMain;
 const shell = electron.shell;
 const electronNet = electron.net;
+const Tray = electron.Tray;
+const Menu = electron.Menu;
+const powerMonitor = electron.powerMonitor;
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -45,6 +48,21 @@ let isHandlingClosePrompt = false;
 let deviceIdentity = null;
 let heartbeatTimer = null;
 let registrationSchedulerRef = null;
+let tray = null;
+let suppressMinimizeToTrayUntil = 0;
+
+function reopenMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  suppressMinimizeToTrayUntil = Date.now() + 700;
+  try {
+    mainWindow.show();
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.focus();
+  } catch (_) {}
+  return true;
+}
 
 const HEALTH_URL = "http://127.0.0.1:8787/api/v1/health";
 const BACKEND_URL = "http://127.0.0.1:8787";
@@ -649,12 +667,14 @@ async function createWindow() {
       width: 1200,
       height: 800,
       icon: path.join(__dirname, "..", "assets", "icons.png"),
+      show: false,
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
         preload: path.join(__dirname, "preload.js"),
       },
     });
+    global.mainWindow = mainWindow;
     mainWindow.webContents.on("did-fail-load", (_event, code, description, url) => {
       logLine(`Renderer failed to load code=${code} url=${url} reason=${description}`);
     });
@@ -671,6 +691,7 @@ async function createWindow() {
 
     try {
       await loadRenderer(mainWindow);
+      mainWindow.show();
     } catch (error) {
       logLine(`UI load failed: ${formatError(error)}`);
       showInitFailure("Renderer URL could not be loaded", error);
@@ -705,8 +726,13 @@ async function createWindow() {
       isHandlingClosePrompt = false;
       mainWindow.hide();
     });
+    mainWindow.on("minimize", () => {
+      // Keep classic desktop behavior: minimize stays on taskbar.
+      // Background mode is entered only through explicit close choice.
+    });
     mainWindow.on("closed", () => {
       mainWindow = null;
+      global.mainWindow = null;
     });
 
     // Handle deep link passed when app was launched via joincloud:// (e.g. from web redirect when app was closed)
@@ -734,10 +760,7 @@ app.on("second-instance", (_event, argv) => {
     return;
   }
   if (mainWindow && !mainWindow.isDestroyed()) {
-    if (mainWindow.isMinimized()) {
-      mainWindow.restore();
-    }
-    mainWindow.focus();
+    reopenMainWindow();
     return;
   }
   if (app.isReady()) {
@@ -755,13 +778,66 @@ app.on("open-url", (_event, url) => {
 });
 
 if (gotLock) {
-  app.whenReady().then(createWindow);
+  app.whenReady().then(async () => {
+    try {
+      const trayIcon = path.join(__dirname, "..", "assets", "icon.ico");
+      tray = new Tray(trayIcon);
+      tray.setToolTip("JoinCloud");
+      tray.setContextMenu(
+        Menu.buildFromTemplate([
+          {
+            label: "Open JoinCloud",
+            click: () => {
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                reopenMainWindow();
+              } else if (app.isReady()) {
+                createWindow().catch(() => {});
+              }
+            },
+          },
+          {
+            label: "Quit",
+            click: () => {
+              allowWindowClose = true;
+              app.quit();
+            },
+          },
+        ])
+      );
+      tray.on("click", () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          reopenMainWindow();
+        }
+      });
+    } catch (_) {}
+    if (powerMonitor) {
+      powerMonitor.on("resume", () => {
+        checkBackend().then((healthy) => {
+          if (!healthy) {
+            scheduleBackendRestart("system resume health check");
+          } else {
+            setBackendState("healthy", "system resume");
+          }
+        }).catch(() => {
+          scheduleBackendRestart("system resume check failed");
+        });
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("system-resume");
+        }
+      });
+      powerMonitor.on("suspend", () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("system-suspend");
+        }
+      });
+    }
+    await createWindow();
+  });
 }
 
 app.on("activate", () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.show();
-    mainWindow.focus();
+    reopenMainWindow();
     return;
   }
   if (!mainWindow && app.isReady()) {
@@ -1033,6 +1109,10 @@ app.on("before-quit", (event) => {
     return;
   }
   isStopping = true;
+  if (tray) {
+    try { tray.destroy(); } catch (_) {}
+    tray = null;
+  }
   stopHealthMonitor();
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);

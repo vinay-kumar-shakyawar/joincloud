@@ -7,7 +7,7 @@ const state = {
   isAdmin: false,
   sharingEnabled: true,
   fileView: "list",
-  fileSort: "name_asc",
+  fileSort: "recent_desc",
   fileSearch: "",
   foldersOnly: false,
   selectedShares: new Set(),
@@ -51,6 +51,17 @@ const state = {
 const stateShareTab = {
   current: "local",
 };
+
+const stateFileSelection = {
+  enabled: false,
+  selected: new Set(),
+};
+
+const inputMode = {
+  lastPointerType: "mouse",
+  touchpadClickGapMs: 320,
+};
+const socialCache = new Map();
 
 const els = {
   appLayout: document.getElementById("app-layout"),
@@ -114,6 +125,17 @@ const els = {
   myFolderShortcut: document.getElementById("my-folder-shortcut"),
   uploadScopeHint: document.getElementById("upload-scope-hint"),
   uploadButtonLabel: document.getElementById("upload-button-label"),
+  newFolderBtn: document.getElementById("new-folder-btn"),
+  selectModeBtn: document.getElementById("select-mode-btn"),
+  deleteSelectedBtn: document.getElementById("delete-selected-btn"),
+  shareSelectedBtn: document.getElementById("share-selected-btn"),
+  dropZoneOverlay: document.getElementById("drop-zone-overlay"),
+  groupShareList: document.getElementById("group-share-list"),
+  groupShareModal: document.getElementById("group-share-modal"),
+  groupShareName: document.getElementById("group-share-name"),
+  groupShareClose: document.getElementById("group-share-close"),
+  groupShareCancel: document.getElementById("group-share-cancel"),
+  groupShareCreate: document.getElementById("group-share-create"),
   shareList: document.getElementById("share-list"),
   teamsList: document.getElementById("teams-list"),
   teamsEmptyState: document.getElementById("teams-empty-state"),
@@ -198,6 +220,19 @@ const els = {
   closePreviewModal: document.getElementById("close-preview-modal"),
   previewTitle: document.getElementById("preview-title"),
   previewBody: document.getElementById("preview-body"),
+  previewDrawer: document.getElementById("preview-drawer"),
+  previewDrawerBackdrop: document.getElementById("preview-drawer-backdrop"),
+  previewDrawerClose: document.getElementById("preview-drawer-close"),
+  previewDrawerTitle: document.getElementById("preview-drawer-title"),
+  previewDrawerStage: document.getElementById("preview-drawer-stage"),
+  previewDrawerGallery: document.getElementById("preview-drawer-gallery"),
+  previewDrawerGalleryList: document.getElementById("preview-drawer-gallery-list"),
+  previewGalleryToggle: document.getElementById("preview-gallery-toggle"),
+  previewSelectionToggle: document.getElementById("preview-selection-toggle"),
+  previewDownloadCurrent: document.getElementById("preview-download-current"),
+  previewDownloadSelected: document.getElementById("preview-download-selected"),
+  previewPrev: document.getElementById("preview-prev"),
+  previewNext: document.getElementById("preview-next"),
   activationBlock: document.getElementById("activation-block"),
   activationEmail: document.getElementById("activation-email"),
   activationPassword: document.getElementById("activation-password"),
@@ -214,6 +249,7 @@ const els = {
   uploadBanner: document.getElementById("upload-banner"),
   uploadBannerText: document.querySelector(".upload-banner-text"),
   uploadBannerDismiss: document.querySelector(".upload-banner-dismiss"),
+  hostTransferStack: document.getElementById("host-transfer-stack"),
   shareQrModal: document.getElementById("share-qr-modal"),
   closeShareQrModal: document.getElementById("close-share-qr-modal"),
   deleteSharedItemModal: document.getElementById("delete-shared-item-modal"),
@@ -301,6 +337,60 @@ const stateMeta = {
   lastNotificationIds: new Set(),
 };
 
+const FILE_ACTIVITY_KEY = "joincloud:file-activity:v1";
+const FILE_ACTIVITY_LIMIT = 5000;
+
+function loadFileActivityMap() {
+  try {
+    const raw = localStorage.getItem(FILE_ACTIVITY_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_e) {
+    return {};
+  }
+}
+
+const fileActivityMap = loadFileActivityMap();
+
+function persistFileActivityMap() {
+  try {
+    const entries = Object.entries(fileActivityMap)
+      .filter(([, v]) => v && Number.isFinite(Number(v.ts)))
+      .sort((a, b) => Number(b[1].ts) - Number(a[1].ts))
+      .slice(0, FILE_ACTIVITY_LIMIT);
+    const compact = {};
+    entries.forEach(([k, v]) => {
+      compact[k] = { ts: Number(v.ts), reason: String(v.reason || "activity") };
+    });
+    localStorage.setItem(FILE_ACTIVITY_KEY, JSON.stringify(compact));
+  } catch (_e) {
+    // ignore storage failures
+  }
+}
+
+function normalizeActivityPath(pathValue) {
+  const norm = String(pathValue || "")
+    .replace(/\\/g, "/")
+    .replace(/\/+/g, "/");
+  if (!norm || norm === "/") return "/";
+  return norm.startsWith("/") ? norm : `/${norm}`;
+}
+
+function touchFileActivity(pathValue, reason) {
+  const key = normalizeActivityPath(pathValue);
+  fileActivityMap[key] = { ts: Date.now(), reason: String(reason || "activity") };
+  persistFileActivityMap();
+}
+
+function getFileRecency(item) {
+  const key = normalizeActivityPath(item && item.path);
+  const activityTs = fileActivityMap[key] && Number(fileActivityMap[key].ts);
+  if (Number.isFinite(activityTs) && activityTs > 0) return activityTs;
+  const modifiedTs = new Date(item && item.modifiedAt).getTime();
+  return Number.isFinite(modifiedTs) ? modifiedTs : 0;
+}
+
 function getOrCreateFingerprint() {
   const key = "joincloud:device-fingerprint";
   const existing = localStorage.getItem(key);
@@ -370,7 +460,42 @@ function isInMyFolder(pathValue) {
 
 function isPreviewableName(fileName) {
   const lower = String(fileName || "").toLowerCase();
-  return /\.(png|jpe?g|gif|webp|svg|pdf|mp4|webm|mov|m4v)$/i.test(lower);
+  return /\.(png|jpe?g|gif|webp|svg|pdf|csv|mp4|webm|mov|m4v)$/i.test(lower);
+}
+
+function buildFileContentUrl(pathValue, withDownload) {
+  const params = new URLSearchParams({
+    path: pathValue,
+    fp: stateMeta.fingerprint,
+  });
+  if (stateMeta.sessionToken) {
+    params.set("token", stateMeta.sessionToken);
+  }
+  if (withDownload) {
+    params.set("download", "true");
+  }
+  return `/api/v1/file/content?${params.toString()}`;
+}
+
+function getFilePreviewKind(fileName) {
+  const lower = String(fileName || "").toLowerCase();
+  if (/\.(png|jpe?g|gif|webp|svg)$/i.test(lower)) return "image";
+  if (/\.pdf$/i.test(lower)) return "pdf";
+  if (/\.csv$/i.test(lower)) return "csv";
+  if (/\.(mp4|webm|mov|m4v)$/i.test(lower)) return "video";
+  return "none";
+}
+
+function getFileThumbMarkup(item) {
+  const kind = getFilePreviewKind(item.name);
+  const safeName = escapeHtml(item.name || "File");
+  if (kind === "image") {
+    return `<img class="file-card-thumb-media" src="${buildFileContentUrl(item.path, false)}" alt="${safeName}" loading="lazy" />`;
+  }
+  if (kind === "video") {
+    return `<video class="file-card-thumb-media" src="${buildFileContentUrl(item.path, false)}" muted preload="metadata"></video>`;
+  }
+  return `<div class="file-card-thumb-icon">${getFileIcon(item)}</div>`;
 }
 
 function withAuthHeaders(extra = {}) {
@@ -394,6 +519,277 @@ async function apiFetch(url, options = {}, allowUnauthorized = false) {
     throw new Error("approval_required");
   }
   return res;
+}
+
+/** Chunked transfer overlay (Electron host UI is server/ui, not Vite client). */
+var hostTransferUiInitialized = false;
+var hostTransferItems = [];
+var hostTransferController = null;
+var hostTransferCurrentUploadId = null;
+var hostTransferPollTimer = null;
+var hostTransferShareUnsub = null;
+
+function joinOwnerPath(base, rel) {
+  var b = (base || "/").replace(/\/+$/, "") || "";
+  var r = String(rel || "")
+    .replace(/^\/+/, "")
+    .replace(/\\/g, "/");
+  if (!r) return b || "/";
+  return (b + "/" + r).replace(/\/+/g, "/") || "/";
+}
+
+function relativeUploadTarget(basePath, relativePath) {
+  var norm = String(relativePath || "")
+    .replace(/\\/g, "/")
+    .replace(/^\.\/+/, "");
+  var i = norm.lastIndexOf("/");
+  var fileName = i >= 0 ? norm.slice(i + 1) : norm;
+  var dir = i >= 0 ? norm.slice(0, i) : "";
+  var targetPath = joinOwnerPath(basePath, dir);
+  return { fileName: fileName, targetPath: targetPath };
+}
+
+async function transferRequest(url, init) {
+  return apiFetch(url, Object.assign({}, init || {}, { credentials: "include" }));
+}
+
+function formatBytesShortHost(n) {
+  if (!Number.isFinite(n) || n < 0) return "—";
+  var u = ["B", "KB", "MB", "GB"];
+  var i = 0;
+  var v = n;
+  while (v >= 1024 && i < u.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return (i === 0 ? v : v.toFixed(1)) + " " + u[i];
+}
+
+function formatHostSpeed(bps) {
+  if (!Number.isFinite(bps) || bps < 0) return "";
+  var u = ["B/s", "KB/s", "MB/s", "GB/s"];
+  var v = bps;
+  var i = 0;
+  while (v >= 1024 && i < u.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return (i === 0 ? Math.round(v) : v.toFixed(1)) + " " + u[i];
+}
+
+function formatHostEta(sec) {
+  if (!Number.isFinite(sec) || sec < 0 || sec === Infinity) return "";
+  if (sec < 60) return Math.round(sec) + "s";
+  if (sec < 3600) return Math.floor(sec / 60) + "m " + Math.round(sec % 60) + "s";
+  return Math.floor(sec / 3600) + "h " + Math.round((sec % 3600) / 60) + "m";
+}
+
+function hostTransferUpsert(item) {
+  var i = hostTransferItems.findIndex(function (x) {
+    return x.id === item.id;
+  });
+  if (i === -1) hostTransferItems.push(item);
+  else hostTransferItems[i] = Object.assign({}, hostTransferItems[i], item);
+  hostTransferRender();
+}
+
+function hostTransferUpdate(id, patch) {
+  var i = hostTransferItems.findIndex(function (x) {
+    return x.id === id;
+  });
+  if (i === -1) return;
+  hostTransferItems[i] = Object.assign({}, hostTransferItems[i], patch);
+  hostTransferRender();
+}
+
+function hostTransferRemove(id) {
+  hostTransferItems = hostTransferItems.filter(function (x) {
+    return x.id !== id;
+  });
+  hostTransferRender();
+}
+
+function hostTransferSyncIncoming(transfers) {
+  var incomingIds = new Set(
+    transfers.map(function (t) {
+      return "incoming-" + t.transferId;
+    })
+  );
+  hostTransferItems = hostTransferItems.filter(function (x) {
+    if (x.direction !== "receiving") return true;
+    return incomingIds.has(x.id);
+  });
+  transfers.forEach(function (t) {
+    var id = "incoming-" + t.transferId;
+    var pct = Number(t.percentComplete) || 0;
+    var idx = hostTransferItems.findIndex(function (x) {
+      return x.id === id;
+    });
+    var item = {
+      id: id,
+      direction: "receiving",
+      fileName: String(t.fileName || "Upload"),
+      percent: Math.min(100, pct),
+      status: pct >= 100 ? "complete" : "active",
+      metaLine: formatBytesShortHost(t.totalBytes || 0),
+      chunkLabel:
+        t.chunksReceived != null && t.totalChunks != null
+          ? t.chunksReceived + " / " + t.totalChunks + " chunks"
+          : "",
+      speedLabel: "",
+      etaLabel: "",
+    };
+    if (idx === -1) hostTransferItems.push(item);
+    else hostTransferItems[idx] = Object.assign({}, hostTransferItems[idx], item);
+  });
+  hostTransferRender();
+}
+
+function hostTransferRender() {
+  var root = els.hostTransferStack;
+  if (!root) return;
+  var visible = hostTransferItems.filter(function (x) {
+    if (x.status === "error") return true;
+    if (x.direction === "uploading" && (x.status === "active" || x.status === "paused")) return true;
+    if (x.direction === "receiving" || x.direction === "sending") {
+      return x.percent < 100 || x.status === "active";
+    }
+    return x.percent < 100;
+  });
+  visible = visible.slice(-3);
+  if (visible.length === 0) {
+    root.innerHTML = "";
+    root.classList.add("host-transfer-stack-empty");
+    return;
+  }
+  root.classList.remove("host-transfer-stack-empty");
+  root.innerHTML = "";
+  var r = 36;
+  var c = 2 * Math.PI * r;
+  visible.forEach(function (item) {
+    var pct = Math.min(100, Math.max(0, item.percent || 0));
+    var offset = c - (pct / 100) * c;
+    var dirLabel =
+      item.direction === "uploading" ? "Uploading" : item.direction === "receiving" ? "Receiving" : "Sending";
+    var stats = (item.speedLabel || "") + (item.etaLabel ? " · ETA " + item.etaLabel : "");
+    if (item.chunkLabel) {
+      stats = stats ? stats + " · " + item.chunkLabel : item.chunkLabel;
+    }
+    var card = document.createElement("div");
+    card.className = "host-transfer-card";
+    card.innerHTML =
+      '<div class="host-transfer-ring-wrap">' +
+      '<svg class="host-transfer-svg" viewBox="0 0 88 88" width="88" height="88">' +
+      '<circle cx="44" cy="44" r="36" fill="none" stroke="rgba(47,183,255,0.2)" stroke-width="6" />' +
+      '<circle class="host-transfer-arc" cx="44" cy="44" r="36" fill="none" stroke="#2fb7ff" stroke-width="6" ' +
+      'stroke-linecap="round" transform="rotate(-90 44 44)" stroke-dasharray="' +
+      c +
+      '" stroke-dashoffset="' +
+      offset +
+      '" />' +
+      "</svg>" +
+      '<span class="host-transfer-pct"></span></div>' +
+      '<div class="host-transfer-info">' +
+      '<div class="host-transfer-label"></div>' +
+      '<div class="host-transfer-name"></div>' +
+      '<div class="host-transfer-meta"></div>' +
+      '<div class="host-transfer-stats"></div>' +
+      '<div class="host-transfer-actions"></div></div>';
+    card.querySelector(".host-transfer-pct").textContent = Math.round(pct) + "%";
+    card.querySelector(".host-transfer-label").textContent = dirLabel;
+    card.querySelector(".host-transfer-name").textContent = item.fileName || "";
+    card.querySelector(".host-transfer-meta").textContent = item.metaLine || "";
+    card.querySelector(".host-transfer-stats").textContent = stats;
+    if (item.error) {
+      card.querySelector(".host-transfer-meta").textContent = item.error;
+    }
+    var actions = card.querySelector(".host-transfer-actions");
+    if (
+      item.direction === "uploading" &&
+      item.id === hostTransferCurrentUploadId &&
+      hostTransferController &&
+      (item.status === "active" || item.status === "paused")
+    ) {
+      var itemId = item.id;
+      var pauseBtn = document.createElement("button");
+      pauseBtn.type = "button";
+      pauseBtn.className = "button secondary button-compact";
+      pauseBtn.textContent = item.status === "paused" ? "Resume" : "Pause";
+      pauseBtn.onclick = function () {
+        var cur = hostTransferItems.find(function (x) {
+          return x.id === itemId;
+        });
+        if (!hostTransferController || !cur) return;
+        if (cur.status === "paused") {
+          hostTransferController.resume();
+          hostTransferUpdate(itemId, { status: "active" });
+        } else {
+          hostTransferController.pause();
+          hostTransferUpdate(itemId, { status: "paused" });
+        }
+      };
+      var cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "button ghost button-compact";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.onclick = function () {
+        if (hostTransferController) hostTransferController.cancel();
+      };
+      actions.appendChild(pauseBtn);
+      actions.appendChild(cancelBtn);
+    }
+    root.appendChild(card);
+  });
+}
+
+function initHostTransferUi() {
+  if (hostTransferUiInitialized) return;
+  hostTransferUiInitialized = true;
+  if (!els.hostTransferStack) {
+    var el = document.createElement("div");
+    el.id = "host-transfer-stack";
+    el.className = "host-transfer-stack host-transfer-stack-empty";
+    el.setAttribute("aria-live", "polite");
+    document.body.appendChild(el);
+    els.hostTransferStack = el;
+  }
+  function pollIncomingOnce() {
+    if (!els.appLayout || els.appLayout.style.display === "none") return;
+    apiFetch("/api/v1/transfer/active", { method: "GET", credentials: "include" })
+      .then(function (res) {
+        return res.json();
+      })
+      .then(function (data) {
+        var transfers = Array.isArray(data.transfers) ? data.transfers : [];
+        hostTransferSyncIncoming(transfers);
+      })
+      .catch(function () {});
+  }
+  pollIncomingOnce();
+  hostTransferPollTimer = setInterval(pollIncomingOnce, 1200);
+  try {
+    if (window.joincloud && typeof window.joincloud.onShareProgress === "function") {
+      hostTransferShareUnsub = window.joincloud.onShareProgress(function (data) {
+        var total = data.total || 1;
+        var pct = data.pct != null ? data.pct : Math.round((data.bytesSent / total) * 100);
+        hostTransferUpsert({
+          id: "share-outbound",
+          direction: "sending",
+          fileName: "Shared download",
+          percent: Math.min(100, pct),
+          status: pct >= 100 ? "complete" : "active",
+          metaLine: formatBytesShortHost(total),
+          speedLabel: "",
+          etaLabel: "",
+        });
+        if (pct >= 100) {
+          setTimeout(function () {
+            hostTransferRemove("share-outbound");
+          }, 2500);
+        }
+      });
+    }
+  } catch (_e) {}
 }
 
 function showAccessGate(statusText) {
@@ -467,6 +863,7 @@ function showMainApp() {
     els.activationGate.classList.remove("visible");
   }
   els.appLayout.style.display = "grid";
+  initHostTransferUi();
 }
 
 let didBootstrapAfterAuth = false;
@@ -657,6 +1054,13 @@ function getFileExtension(name) {
 }
 
 function compareBySort(a, b, sortKey) {
+  if (sortKey === "recent_desc") {
+    const diff = getFileRecency(b) - getFileRecency(a);
+    if (diff) return diff;
+    const modDiff = new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime();
+    if (modDiff) return modDiff;
+    return a.name.localeCompare(b.name);
+  }
   if (sortKey === "name_desc") {
     return b.name.localeCompare(a.name);
   }
@@ -683,9 +1087,94 @@ function getVisibleItems() {
     return true;
   });
 
-  const folders = filtered.filter((item) => item.type === "folder").sort((a, b) => compareBySort(a, b, state.fileSort));
-  const files = filtered.filter((item) => item.type !== "folder").sort((a, b) => compareBySort(a, b, state.fileSort));
-  return [...folders, ...files];
+  return filtered.sort((a, b) => compareBySort(a, b, state.fileSort));
+}
+
+function updateFileSelectionButtons() {
+  if (els.selectModeBtn) {
+    els.selectModeBtn.textContent = stateFileSelection.enabled ? "Done Selecting" : "Select";
+    els.selectModeBtn.classList.toggle("active", stateFileSelection.enabled);
+  }
+  if (els.deleteSelectedBtn) {
+    const visible = stateFileSelection.enabled && stateFileSelection.selected.size > 0;
+    els.deleteSelectedBtn.style.display = visible ? "inline-flex" : "none";
+    els.deleteSelectedBtn.disabled = !stateFileSelection.enabled || stateFileSelection.selected.size === 0;
+    els.deleteSelectedBtn.textContent = stateFileSelection.selected.size
+      ? `Delete Selected (${stateFileSelection.selected.size})`
+      : "Delete Selected";
+  }
+  if (els.shareSelectedBtn) {
+    const visible = stateFileSelection.enabled && stateFileSelection.selected.size > 0;
+    els.shareSelectedBtn.style.display = visible ? "inline-flex" : "none";
+    els.shareSelectedBtn.disabled = !stateFileSelection.enabled || stateFileSelection.selected.size === 0;
+    els.shareSelectedBtn.textContent = stateFileSelection.selected.size
+      ? `Share Selected (${stateFileSelection.selected.size})`
+      : "Share Selected";
+  }
+}
+
+function setFileSelectionEnabled(enabled) {
+  stateFileSelection.enabled = !!enabled;
+  if (!enabled) {
+    stateFileSelection.selected = new Set();
+  }
+  renderFiles();
+  updateFileSelectionButtons();
+}
+
+function toggleItemSelection(itemPath) {
+  if (!itemPath) return;
+  if (stateFileSelection.selected.has(itemPath)) stateFileSelection.selected.delete(itemPath);
+  else stateFileSelection.selected.add(itemPath);
+  updateFileSelectionButtons();
+}
+
+function handleCardPrimaryOpen(item, sourceEvent) {
+  if (!item) return;
+  if (stateFileSelection.enabled) {
+    toggleItemSelection(item.path);
+    renderFiles();
+    return;
+  }
+  const pointerType = sourceEvent && sourceEvent.pointerType ? sourceEvent.pointerType : inputMode.lastPointerType;
+  const requiresDouble = pointerType !== "mouse";
+  if (requiresDouble && !sourceEvent.__isDoubleIntent) return;
+  if (item.type === "folder") {
+    touchFileActivity(item.path, "open-folder");
+    loadFiles(item.path);
+    return;
+  }
+  openPreviewDrawer(item, state.items.filter((x) => x.type === "file"));
+}
+
+function getSocialActor() {
+  return String(stateMeta?.displayName || stateMeta?.deviceName || "anonymous");
+}
+
+async function fetchSocial(pathValue) {
+  const res = await apiFetch(`/api/v1/files/social?path=${encodeURIComponent(pathValue)}`);
+  if (!res.ok) throw new Error("social_failed");
+  return res.json();
+}
+
+async function reactSocial(pathValue, action) {
+  const res = await apiFetch("/api/v1/files/social/react", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: pathValue, action, actor: getSocialActor() }),
+  });
+  if (!res.ok) throw new Error("social_react_failed");
+  return res.json();
+}
+
+async function commentSocial(pathValue, message) {
+  const res = await apiFetch("/api/v1/files/social/comment", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: pathValue, message, actor: getSocialActor() }),
+  });
+  if (!res.ok) throw new Error("social_comment_failed");
+  return res.json();
 }
 
 function updateFileViewButtons() {
@@ -715,21 +1204,41 @@ function renderFiles() {
   state.items.forEach((item) => {
     const row = document.createElement("div");
     row.className = "file-card";
+    if (stateFileSelection.enabled) row.classList.add("selecting");
+    if (stateFileSelection.selected.has(item.path)) row.classList.add("selected");
+    row.dataset.path = item.path || "";
     const fileExt = getFileExtension(item.name);
     const typeLabel = item.type === "folder" ? "Folder" : (fileExt || "File").toUpperCase();
     const sizeLabel = item.type === "folder" ? "" : formatBytes(item.size);
     const modifiedLabel = item.modifiedAt ? new Date(item.modifiedAt).toLocaleString() : "";
+    const activityTs = getFileRecency(item);
+    const activityLabel = activityTs ? new Date(activityTs).toLocaleString() : modifiedLabel;
 
+    const visual = document.createElement("div");
+    visual.className = "file-card-visual";
+    visual.innerHTML = getFileThumbMarkup(item);
+
+    const body = document.createElement("div");
+    body.className = "file-card-body";
     const topRow = document.createElement("div");
     topRow.className = "file-card-top";
 
-    const icon = document.createElement("div");
-    icon.className = "file-card-icon";
-    icon.innerHTML = getFileIcon(item);
+    if (stateFileSelection.enabled) {
+      const selectWrap = document.createElement("label");
+      selectWrap.className = "file-card-select";
+      const check = document.createElement("input");
+      check.type = "checkbox";
+      check.checked = stateFileSelection.selected.has(item.path);
+      check.onchange = () => {
+        toggleItemSelection(item.path);
+        renderFiles();
+      };
+      selectWrap.appendChild(check);
+      topRow.appendChild(selectWrap);
+    }
 
     const main = document.createElement("div");
     main.className = "file-card-main";
-
     const titleRow = document.createElement("div");
     titleRow.className = "file-card-title-row";
     const titleEl = document.createElement("div");
@@ -793,13 +1302,19 @@ function renderFiles() {
       const openBtn = document.createElement("button");
       openBtn.className = "button secondary";
       openBtn.textContent = "Open";
-      openBtn.onclick = () => loadFiles(item.path);
+      openBtn.onclick = () => {
+        touchFileActivity(item.path, "open-folder");
+        loadFiles(item.path);
+      };
       actions.appendChild(openBtn);
       if (isHostRole()) {
         const shareBtn = document.createElement("button");
         shareBtn.className = "button secondary";
         shareBtn.textContent = "Share";
-        shareBtn.onclick = () => openShareModal(item.path);
+        shareBtn.onclick = () => {
+          touchFileActivity(item.path, "share-open");
+          openShareModal(item.path);
+        };
         actions.appendChild(shareBtn);
       }
     } else {
@@ -811,16 +1326,17 @@ function renderFiles() {
           shareBtn.disabled = true;
           shareBtn.title = "Already shared for both Local and Public scopes";
         }
-        shareBtn.onclick = () => openShareModal(item.path);
+        shareBtn.onclick = () => {
+          touchFileActivity(item.path, "share-open");
+          openShareModal(item.path);
+        };
         actions.appendChild(shareBtn);
       }
-      if (isPreviewableName(item.name)) {
-        const previewBtn = document.createElement("button");
-        previewBtn.className = "button secondary";
-        previewBtn.textContent = "Preview";
-        previewBtn.onclick = () => openPreviewModal(item);
-        actions.appendChild(previewBtn);
-      }
+      const previewBtn = document.createElement("button");
+      previewBtn.className = "button secondary";
+      previewBtn.textContent = "Preview";
+      previewBtn.onclick = () => openPreviewDrawer(item, state.items.filter((x) => x.type === "file"));
+      actions.appendChild(previewBtn);
     }
 
     if (isHostRole()) {
@@ -833,10 +1349,9 @@ function renderFiles() {
       actions.appendChild(deleteBtn);
     }
 
-    topRow.appendChild(icon);
     topRow.appendChild(main);
     topRow.appendChild(actions);
-    row.appendChild(topRow);
+    body.appendChild(topRow);
 
     const meta = document.createElement("div");
     meta.className = "file-card-meta";
@@ -859,11 +1374,75 @@ function renderFiles() {
     meta.appendChild(makeMetaItem("Type", String(typeLabel || ""), "file-card-meta-type"));
     meta.appendChild(makeMetaItem("Size", String(sizeLabel || ""), "file-card-meta-size"));
     meta.appendChild(makeMetaItem("Modified", String(modifiedLabel || ""), "file-card-meta-modified"));
-    row.appendChild(meta);
+    meta.appendChild(makeMetaItem("Recent", String(activityLabel || ""), "file-card-meta-activity"));
+    body.appendChild(meta);
+    if (item.type === "file") {
+      const socialBar = document.createElement("div");
+      socialBar.className = "file-social-bar";
+      const cached = socialCache.get(item.path) || { likes: 0, dislikes: 0, comments: [] };
+      const likeBtn = document.createElement("button");
+      likeBtn.className = "button secondary button-compact";
+      likeBtn.textContent = `Like (${cached.likes || 0})`;
+      likeBtn.onclick = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const data = await reactSocial(item.path, "like").catch(() => null);
+        if (!data) return;
+        socialCache.set(item.path, { ...cached, likes: data.likes, dislikes: data.dislikes });
+        renderFiles();
+      };
+      const dislikeBtn = document.createElement("button");
+      dislikeBtn.className = "button secondary button-compact";
+      dislikeBtn.textContent = `Dislike (${cached.dislikes || 0})`;
+      dislikeBtn.onclick = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const data = await reactSocial(item.path, "dislike").catch(() => null);
+        if (!data) return;
+        socialCache.set(item.path, { ...cached, likes: data.likes, dislikes: data.dislikes });
+        renderFiles();
+      };
+      const commentBtn = document.createElement("button");
+      commentBtn.className = "button secondary button-compact";
+      commentBtn.textContent = `Comments (${Array.isArray(cached.comments) ? cached.comments.length : 0})`;
+      commentBtn.onclick = async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const message = prompt("Add comment");
+        if (!message) return;
+        await commentSocial(item.path, message).catch(() => null);
+        const next = await fetchSocial(item.path).catch(() => null);
+        if (next) socialCache.set(item.path, next);
+        renderFiles();
+      };
+      socialBar.appendChild(likeBtn);
+      socialBar.appendChild(dislikeBtn);
+      socialBar.appendChild(commentBtn);
+      body.appendChild(socialBar);
+      fetchSocial(item.path).then((social) => {
+        socialCache.set(item.path, social);
+      }).catch(() => {});
+    }
+    row.appendChild(visual);
+    row.appendChild(body);
+
+    row.addEventListener("pointerdown", (event) => {
+      inputMode.lastPointerType = event.pointerType || "mouse";
+    });
+    row.addEventListener("click", (event) => {
+      if (event.target && event.target.closest(".file-card-actions, .badge-stop, .file-card-select")) return;
+      handleCardPrimaryOpen(item, event);
+    });
+    row.addEventListener("dblclick", (event) => {
+      if (event.target && event.target.closest(".file-card-actions, .badge-stop, .file-card-select")) return;
+      event.__isDoubleIntent = true;
+      handleCardPrimaryOpen(item, event);
+    });
 
     els.fileList.appendChild(row);
   });
   refreshRemoteUploadUi();
+  updateFileSelectionButtons();
 }
 
 function renderShares() {
@@ -969,12 +1548,16 @@ function renderNetwork() {
   els.networkList.innerHTML = '<div class="empty-state"><div class="empty-state-title">Coming Soon</div><div class="empty-state-sub">Network discovery will be available in a future release.</div></div>';
 }
 
+const previewDrawerState = {
+  items: [],
+  currentIndex: 0,
+  galleryOpen: true,
+  selectionMode: false,
+  selected: new Set(),
+};
+
 function closePreviewModal() {
-  if (!els.previewModal) return;
-  els.previewModal.classList.remove("active");
-  if (els.previewBody) {
-    els.previewBody.innerHTML = "";
-  }
+  closePreviewDrawer();
 }
 
 function showShareQrModal(url) {
@@ -1012,6 +1595,9 @@ async function stopSharesForPath(pathValue) {
   }
   try {
     await loadShares();
+  } catch (_) {}
+  try {
+    await loadGroupShares();
   } catch (_) {}
 }
 
@@ -1076,29 +1662,247 @@ async function confirmDeleteItem(item) {
   }
 }
 
-function openPreviewModal(item) {
-  if (!item || item.type !== "file" || !isPreviewableName(item.name)) return;
-  if (!els.previewModal || !els.previewBody || !els.previewTitle) return;
-  const params = new URLSearchParams({
-    path: item.path,
-    fp: stateMeta.fingerprint,
+async function createFolderAtCurrentPath() {
+  const name = String(prompt("Folder name") || "").trim();
+  if (!name) return;
+  const res = await apiFetch("/api/v1/folder", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: state.path || "/", name }),
   });
-  if (stateMeta.sessionToken) {
-    params.set("token", stateMeta.sessionToken);
-  }
-  const previewUrl = `/api/v1/file/content?${params.toString()}`;
-  const lower = String(item.name || "").toLowerCase();
-  els.previewTitle.textContent = `Preview: ${item.name}`;
-  if (/\.(png|jpe?g|gif|webp|svg)$/i.test(lower)) {
-    els.previewBody.innerHTML = `<img src="${previewUrl}" alt="${item.name}" class="preview-image" />`;
-  } else if (/\.pdf$/i.test(lower)) {
-    els.previewBody.innerHTML = `<object data="${previewUrl}" type="application/pdf" class="preview-frame"><iframe src="${previewUrl}" class="preview-frame" title="${item.name}"></iframe></object>`;
-  } else if (/\.(mp4|webm|mov|m4v)$/i.test(lower)) {
-    els.previewBody.innerHTML = `<video controls class="preview-video" src="${previewUrl}"></video>`;
-  } else {
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    alert(data.error || "Create folder failed");
     return;
   }
-  els.previewModal.classList.add("active");
+  await loadFiles(state.path);
+  await loadGroupShares();
+}
+
+async function deleteSelectedItems() {
+  const paths = Array.from(stateFileSelection.selected);
+  if (!paths.length) return;
+  if (!confirm(`Delete ${paths.length} selected item(s)?`)) return;
+  const res = await apiFetch("/api/v1/files/bulk-delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paths }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    alert(data.error || "Bulk delete failed");
+    return;
+  }
+  stateFileSelection.selected = new Set();
+  await loadFiles(state.path);
+  renderFiles();
+}
+
+async function shareSelectedItems() {
+  const paths = Array.from(stateFileSelection.selected);
+  if (!paths.length) return;
+  if (!els.groupShareModal) return;
+  els.groupShareModal.dataset.paths = JSON.stringify(paths);
+  if (els.groupShareName) {
+    els.groupShareName.value = `Group ${new Date().toLocaleDateString()}`;
+  }
+  els.groupShareModal.classList.add("active");
+}
+
+async function submitGroupShareModal() {
+  if (!els.groupShareModal) return;
+  const paths = JSON.parse(String(els.groupShareModal.dataset.paths || "[]"));
+  const scopeInput = document.querySelector('input[name="group-share-scope"]:checked');
+  const scope = scopeInput ? String(scopeInput.value || "local") : "local";
+  const name = String(els.groupShareName?.value || "").trim() || `Group ${new Date().toLocaleDateString()}`;
+  const res = await apiFetch("/api/v1/share-groups", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      paths,
+      name,
+      scope,
+      capabilities: { allowDownload: true, allowPreview: true, allowUpload: false, allowDelete: false },
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    alert(data.error || "Share group failed");
+    return;
+  }
+  const base = stateMeta.lanBaseUrl || window.location.origin;
+  const url = `${base}${data.url || ""}`;
+  await copyToClipboard(url);
+  alert(`Share group created.\n${url}`);
+  els.groupShareModal.classList.remove("active");
+  await loadGroupShares();
+}
+
+function closeGroupShareModal() {
+  if (!els.groupShareModal) return;
+  els.groupShareModal.classList.remove("active");
+}
+
+async function loadGroupShares() {
+  if (!els.groupShareList) return;
+  const res = await apiFetch("/api/v1/share-groups");
+  if (!res.ok) return;
+  const data = await res.json().catch(() => ({}));
+  const groups = Array.isArray(data.groups) ? data.groups : [];
+  if (!groups.length) {
+    els.groupShareList.innerHTML = "";
+    return;
+  }
+  els.groupShareList.innerHTML = groups
+    .map((group) => {
+      const base = stateMeta.lanBaseUrl || window.location.origin;
+      const link = `${base}/share-group/${group.groupId}`;
+      return `<div class="group-share-item"><div class="group-share-main"><div class="group-share-name">${escapeHtml(group.name || "Group")}</div><div class="group-share-meta">${escapeHtml(group.scope || "local")} · ${Array.isArray(group.paths) ? group.paths.length : 0} items</div><div class="group-share-link mono">${escapeHtml(link)}</div></div><div class="group-share-actions"><button class="button secondary button-compact" data-group-copy="${escapeHtml(group.groupId)}">Copy</button><button class="button danger button-compact" data-group-stop="${escapeHtml(group.groupId)}">Stop</button></div></div>`;
+    })
+    .join("");
+  els.groupShareList.querySelectorAll("[data-group-copy]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.getAttribute("data-group-copy");
+      const base = stateMeta.lanBaseUrl || window.location.origin;
+      const link = `${base}/share-group/${id}`;
+      await copyToClipboard(link);
+      btn.textContent = "Copied";
+      setTimeout(() => (btn.textContent = "Copy"), 1200);
+    });
+  });
+  els.groupShareList.querySelectorAll("[data-group-stop]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.getAttribute("data-group-stop");
+      await apiFetch(`/api/v1/share-groups/${encodeURIComponent(id)}`, { method: "DELETE" });
+      await loadGroupShares();
+      await loadShares();
+      renderFiles();
+    });
+  });
+}
+
+function renderPreviewDrawerGallery() {
+  if (!els.previewDrawerGalleryList) return;
+  els.previewDrawerGalleryList.innerHTML = "";
+  previewDrawerState.items.forEach((entry, idx) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "preview-gallery-item" + (idx === previewDrawerState.currentIndex ? " active" : "");
+    row.innerHTML = `
+      <span class="preview-gallery-thumb">${getFileThumbMarkup(entry)}</span>
+      <span class="preview-gallery-meta">
+        <span class="preview-gallery-name">${escapeHtml(entry.name || "File")}</span>
+        <span class="preview-gallery-path mono">${escapeHtml(entry.path || "")}</span>
+      </span>
+    `;
+    row.onclick = () => {
+      previewDrawerState.currentIndex = idx;
+      renderPreviewDrawerStage();
+    };
+    row.ondblclick = () => {
+      previewDrawerState.currentIndex = idx;
+      renderPreviewDrawerStage();
+    };
+    if (previewDrawerState.selectionMode) {
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "preview-gallery-check";
+      checkbox.checked = previewDrawerState.selected.has(entry.path);
+      checkbox.onclick = (e) => e.stopPropagation();
+      checkbox.onchange = () => {
+        if (checkbox.checked) previewDrawerState.selected.add(entry.path);
+        else previewDrawerState.selected.delete(entry.path);
+        renderPreviewDrawerSelectionState();
+      };
+      row.appendChild(checkbox);
+    }
+    els.previewDrawerGalleryList.appendChild(row);
+  });
+}
+
+function scrollPreviewGalleryActiveIntoView() {
+  if (!els.previewDrawerGalleryList) return;
+  const active = els.previewDrawerGalleryList.querySelector(".preview-gallery-item.active");
+  if (active && typeof active.scrollIntoView === "function") {
+    active.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+}
+
+function renderPreviewDrawerSelectionState() {
+  if (!els.previewDownloadSelected || !els.previewSelectionToggle) return;
+  const count = previewDrawerState.selected.size;
+  els.previewDownloadSelected.style.display = previewDrawerState.selectionMode ? "inline-flex" : "none";
+  els.previewDownloadSelected.textContent = `Download Selected (${count})`;
+  els.previewSelectionToggle.textContent = previewDrawerState.selectionMode ? "Cancel Selection" : "Selection";
+}
+
+function renderPreviewDrawerStage() {
+  if (!els.previewDrawerStage || !previewDrawerState.items.length) return;
+  const current = previewDrawerState.items[previewDrawerState.currentIndex];
+  if (!current) return;
+  const kind = getFilePreviewKind(current.name);
+  const previewUrl = buildFileContentUrl(current.path, false);
+  const safeName = escapeHtml(current.name || "File");
+  touchFileActivity(current.path, "preview");
+  if (els.previewDrawerTitle) {
+    els.previewDrawerTitle.textContent = String(current.name || "File");
+  }
+  if (kind === "image") {
+    els.previewDrawerStage.innerHTML = `<img src="${previewUrl}" alt="${safeName}" class="preview-image preview-fit-media" />`;
+  } else if (kind === "pdf") {
+    els.previewDrawerStage.innerHTML = `<object data="${previewUrl}" type="application/pdf" class="preview-frame preview-fullwidth-doc"><iframe src="${previewUrl}" class="preview-frame preview-fullwidth-doc" title="${safeName}"></iframe></object>`;
+  } else if (kind === "csv") {
+    els.previewDrawerStage.innerHTML = `<iframe src="${previewUrl}" class="preview-frame preview-fullwidth-doc" title="${safeName}"></iframe>`;
+  } else if (kind === "video") {
+    els.previewDrawerStage.innerHTML = `<video controls autoplay class="preview-video preview-fit-media" src="${previewUrl}"></video>`;
+  } else {
+    els.previewDrawerStage.innerHTML = `<div class="preview-drawer-fallback"><div class="preview-drawer-fallback-icon">${getFileIcon(current)}</div><div class="preview-drawer-fallback-text">Preview unavailable</div></div>`;
+  }
+  if (els.previewPrev) els.previewPrev.disabled = previewDrawerState.currentIndex <= 0;
+  if (els.previewNext) els.previewNext.disabled = previewDrawerState.currentIndex >= previewDrawerState.items.length - 1;
+  renderPreviewDrawerGallery();
+  scrollPreviewGalleryActiveIntoView();
+  renderPreviewDrawerSelectionState();
+}
+
+function triggerDownloadForPath(pathValue, fileName) {
+  const link = document.createElement("a");
+  link.href = buildFileContentUrl(pathValue, true);
+  if (fileName) link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function closePreviewDrawer() {
+  if (!els.previewDrawer) return;
+  els.previewDrawer.classList.remove("active");
+  els.previewDrawer.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("preview-drawer-open");
+  if (els.previewDrawerStage) els.previewDrawerStage.innerHTML = "";
+}
+
+function openPreviewDrawer(item, sourceItems) {
+  if (!item || item.type !== "file") return;
+  if (!els.previewDrawer) return;
+  const files = (sourceItems || state.items || []).filter((x) => x && x.type === "file");
+  if (!files.length) return;
+  let idx = files.findIndex((x) => String(x.path || "") === String(item.path || ""));
+  if (idx < 0) idx = 0;
+  previewDrawerState.items = files;
+  previewDrawerState.currentIndex = idx;
+  previewDrawerState.selected = new Set();
+  previewDrawerState.selectionMode = false;
+  previewDrawerState.galleryOpen = true;
+  if (els.previewDrawerGallery) els.previewDrawerGallery.classList.remove("collapsed");
+  els.previewDrawer.classList.add("active");
+  els.previewDrawer.setAttribute("aria-hidden", "false");
+  document.body.classList.add("preview-drawer-open");
+  renderPreviewDrawerStage();
+}
+
+function openPreviewModal(item) {
+  openPreviewDrawer(item, state.items.filter((x) => x.type === "file"));
 }
 
 function shortenFingerprint(value) {
@@ -3046,6 +3850,7 @@ const stateShare = {
 };
 
 async function openShareModal(pathValue) {
+  touchFileActivity(pathValue, "share-open");
   els.shareResult.textContent = "";
   if (els.shareExtraActions) els.shareExtraActions.style.display = "none";
   if (els.copyShare) els.copyShare.style.display = "none";
@@ -3275,6 +4080,7 @@ async function createShare() {
       stateShare.lastShareUrl = primaryUrl;
       stateShare.lastShareId = existing.shareId;
       stateShare.lastPath = pathValue;
+      touchFileActivity(pathValue, "share-existing");
 
       els.shareResult.innerHTML = `<div>Already shared (${escapeHtml(existingScope)}).</div>
 <div style="margin-top:10px;">
@@ -3334,6 +4140,7 @@ async function createShare() {
   stateShare.lastShareUrl = primaryUrl;
   stateShare.lastShareId = data.shareId;
   stateShare.lastPath = pathValue;
+  touchFileActivity(pathValue, "share-created");
   let resultHtml = "<div>Share created.</div>";
   const isProvisioningPublic = scope === "public" && !publicUrl && data.publicStatus === "provisioning";
   if (isProvisioningPublic) {
@@ -3674,36 +4481,58 @@ async function addFileViaNativePicker() {
 
 async function uploadFiles(files) {
   if (!files || files.length === 0) return;
+  if (typeof ChunkUploadController === "undefined") {
+    showUploadBanner("Upload module failed to load. Refresh the app.", "error");
+    return;
+  }
   const fileList = Array.from(files);
-  const count = fileList.length;
-  const label = count === 1 ? fileList[0].name : `${count} files`;
-  showUploadBanner(`Uploading ${label}...`, "loading");
-
-  const formData = new FormData();
-  fileList.forEach((file) => formData.append("files", file));
   const uploadPath = state.path;
-  formData.append("path", uploadPath);
-
-  try {
-    const res = await apiFetch("/api/upload", { method: "POST", body: formData });
-    const payload = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const reason = payload.error || "Upload failed.";
-      showUploadBanner(reason, "error");
-      if (els.uploadScopeHint) {
-        els.uploadScopeHint.textContent = reason;
+  for (let i = 0; i < fileList.length; i++) {
+    const file = fileList[i];
+    const id = `upload-${i}-${file.name}-${Date.now()}`;
+    hostTransferController = new ChunkUploadController();
+    hostTransferCurrentUploadId = id;
+    hostTransferUpsert({
+      id,
+      direction: "uploading",
+      fileName: file.name,
+      percent: 0,
+      status: "active",
+      metaLine: formatBytesShortHost(file.size),
+      speedLabel: "",
+      etaLabel: "",
+    });
+    try {
+      await hostTransferController.upload(file, uploadPath, {
+        request: transferRequest,
+        onProgress: (p) => {
+          hostTransferUpdate(id, {
+            percent: p.percent,
+            speedLabel: formatHostSpeed(p.speedBps),
+            etaLabel: formatHostEta(p.etaSeconds),
+            chunkLabel:
+              p.totalChunks > 0 ? `${p.chunkIndex + 1} / ${p.totalChunks} chunks` : "",
+          });
+        },
+      });
+      hostTransferUpdate(id, { status: "complete", percent: 100 });
+      touchFileActivity(joinOwnerPath(uploadPath, file.name), "upload");
+      setTimeout(() => hostTransferRemove(id), 2000);
+      await loadFiles(uploadPath);
+      await loadLogs();
+    } catch (err) {
+      const msg = err && err.message ? err.message : "Upload failed";
+      if (msg === "Upload cancelled") {
+        hostTransferRemove(id);
+      } else {
+        hostTransferUpdate(id, { status: "error", error: msg });
+        showUploadBanner(msg, "error");
+        if (els.uploadScopeHint) els.uploadScopeHint.textContent = msg;
+        break;
       }
-      return;
-    }
-    const savedTo = String(payload.saved_to || uploadPath || "/");
-    showUploadBanner("Upload complete", "success");
-    setTimeout(hideUploadBanner, 2500);
-    await loadFiles(savedTo);
-    await loadLogs();
-  } catch (err) {
-    showUploadBanner(err.message || "Upload failed", "error");
-    if (els.uploadScopeHint) {
-      els.uploadScopeHint.textContent = err.message || "Upload failed";
+    } finally {
+      hostTransferController = null;
+      hostTransferCurrentUploadId = null;
     }
   }
 }
@@ -4184,6 +5013,9 @@ async function bootstrapApp() {
   } catch (_) {}
   try {
     await loadShares();
+  } catch (_) {}
+  try {
+    await loadGroupShares();
   } catch (_) {}
   try {
     await loadLogs();
@@ -4729,9 +5561,79 @@ if (els.previewModal) {
     if (event.target === els.previewModal) closePreviewModal();
   });
 }
+if (els.previewDrawerBackdrop) {
+  els.previewDrawerBackdrop.addEventListener("click", closePreviewDrawer);
+}
+if (els.previewDrawerClose) {
+  els.previewDrawerClose.addEventListener("click", closePreviewDrawer);
+}
+if (els.previewGalleryToggle && els.previewDrawerGallery) {
+  els.previewGalleryToggle.addEventListener("click", () => {
+    previewDrawerState.galleryOpen = !previewDrawerState.galleryOpen;
+    els.previewDrawerGallery.classList.toggle("collapsed", !previewDrawerState.galleryOpen);
+    if (els.previewDrawer) {
+      els.previewDrawer.classList.toggle("gallery-collapsed", !previewDrawerState.galleryOpen);
+    }
+  });
+}
+if (els.previewSelectionToggle) {
+  els.previewSelectionToggle.addEventListener("click", () => {
+    previewDrawerState.selectionMode = !previewDrawerState.selectionMode;
+    if (!previewDrawerState.selectionMode) previewDrawerState.selected = new Set();
+    renderPreviewDrawerStage();
+  });
+}
+if (els.previewPrev) {
+  els.previewPrev.addEventListener("click", () => {
+    if (previewDrawerState.currentIndex > 0) {
+      previewDrawerState.currentIndex -= 1;
+      renderPreviewDrawerStage();
+    }
+  });
+}
+if (els.previewNext) {
+  els.previewNext.addEventListener("click", () => {
+    if (previewDrawerState.currentIndex < previewDrawerState.items.length - 1) {
+      previewDrawerState.currentIndex += 1;
+      renderPreviewDrawerStage();
+    }
+  });
+}
+if (els.previewDownloadCurrent) {
+  els.previewDownloadCurrent.addEventListener("click", () => {
+    const current = previewDrawerState.items[previewDrawerState.currentIndex];
+    if (!current) return;
+    triggerDownloadForPath(current.path, current.name);
+  });
+}
+if (els.previewDownloadSelected) {
+  els.previewDownloadSelected.addEventListener("click", () => {
+    const paths = Array.from(previewDrawerState.selected);
+    if (!paths.length) return;
+    previewDrawerState.items
+      .filter((x) => paths.includes(x.path))
+      .forEach((x) => triggerDownloadForPath(x.path, x.name));
+  });
+}
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && els.previewModal && els.previewModal.classList.contains("active")) {
-    closePreviewModal();
+  if (event.key === "Escape") {
+    if (els.previewDrawer && els.previewDrawer.classList.contains("active")) {
+      closePreviewDrawer();
+      return;
+    }
+    if (els.previewModal && els.previewModal.classList.contains("active")) {
+      closePreviewModal();
+      return;
+    }
+  }
+  if (els.previewDrawer && els.previewDrawer.classList.contains("active")) {
+    if (event.key === "ArrowLeft" && previewDrawerState.currentIndex > 0) {
+      previewDrawerState.currentIndex -= 1;
+      renderPreviewDrawerStage();
+    } else if (event.key === "ArrowRight" && previewDrawerState.currentIndex < previewDrawerState.items.length - 1) {
+      previewDrawerState.currentIndex += 1;
+      renderPreviewDrawerStage();
+    }
   }
 });
 if (els.closeShareQrModal) {
@@ -4972,6 +5874,16 @@ if (typeof window !== "undefined" && window.joincloud && window.joincloud.onLice
     }
   });
 }
+if (typeof window !== "undefined" && window.joincloud && window.joincloud.onSystemResume) {
+  window.joincloud.onSystemResume(async () => {
+    try { await loadRuntimeStatus(); } catch (_) {}
+    try { await loadFiles(state.path || "/"); } catch (_) {}
+    try { await loadShares(); } catch (_) {}
+    try { await loadLogs(); } catch (_) {}
+    showUploadBanner("System resumed. Sync refreshed.", "success");
+    setTimeout(hideUploadBanner, 1400);
+  });
+}
 if (els.subscriptionManageBtn) els.subscriptionManageBtn.onclick = openBillingPortal;
 // settingsLogout intentionally has no click handler in this build (button is hidden).
 if (els.activationGateRetry) {
@@ -4994,9 +5906,12 @@ els.fileSearch.addEventListener("input", (event) => {
   renderFiles();
 });
 els.fileSort.addEventListener("change", (event) => {
-  state.fileSort = String(event.target.value || "name_asc");
+  state.fileSort = String(event.target.value || "recent_desc");
   renderFiles();
 });
+if (els.fileSort) {
+  els.fileSort.value = state.fileSort;
+}
 els.foldersOnly.addEventListener("change", (event) => {
   state.foldersOnly = !!event.target.checked;
   renderFiles();
@@ -5031,10 +5946,73 @@ els.uploadInput.onchange = (event) => {
   uploadFiles(event.target.files);
   els.uploadInput.value = "";
 };
+if (els.newFolderBtn) {
+  els.newFolderBtn.addEventListener("click", createFolderAtCurrentPath);
+}
+if (els.selectModeBtn) {
+  els.selectModeBtn.addEventListener("click", () => setFileSelectionEnabled(!stateFileSelection.enabled));
+}
+if (els.deleteSelectedBtn) {
+  els.deleteSelectedBtn.addEventListener("click", deleteSelectedItems);
+}
+if (els.shareSelectedBtn) {
+  els.shareSelectedBtn.addEventListener("click", shareSelectedItems);
+}
+if (els.groupShareClose) {
+  els.groupShareClose.addEventListener("click", closeGroupShareModal);
+}
+if (els.groupShareCancel) {
+  els.groupShareCancel.addEventListener("click", closeGroupShareModal);
+}
+if (els.groupShareCreate) {
+  els.groupShareCreate.addEventListener("click", submitGroupShareModal);
+}
 els.dropZone.addEventListener("dragover", (event) => {
   if (els.uploadInput?.disabled) return;
   event.preventDefault();
   els.dropZone.classList.add("active");
+});
+
+let globalDragDepth = 0;
+function isFilesTabActive() {
+  return true;
+}
+function setGlobalDropOverlayVisible(visible) {
+  if (!els.dropZoneOverlay) return;
+  els.dropZoneOverlay.style.display = visible ? "flex" : "none";
+  els.dropZoneOverlay.classList.toggle("active", visible);
+}
+document.addEventListener("dragenter", (event) => {
+  if (!isFilesTabActive() || els.uploadInput?.disabled) return;
+  if (!event.dataTransfer || !Array.from(event.dataTransfer.types || []).includes("Files")) return;
+  globalDragDepth += 1;
+  setGlobalDropOverlayVisible(true);
+});
+document.addEventListener("dragleave", () => {
+  if (!isFilesTabActive()) return;
+  globalDragDepth = Math.max(0, globalDragDepth - 1);
+  if (globalDragDepth === 0) setGlobalDropOverlayVisible(false);
+});
+document.addEventListener("dragover", (event) => {
+  if (!isFilesTabActive() || els.uploadInput?.disabled) return;
+  if (!event.dataTransfer || !Array.from(event.dataTransfer.types || []).includes("Files")) return;
+  event.preventDefault();
+});
+document.addEventListener("drop", async (event) => {
+  if (!isFilesTabActive() || els.uploadInput?.disabled) return;
+  if (!event.dataTransfer || !Array.from(event.dataTransfer.types || []).includes("Files")) return;
+  event.preventDefault();
+  globalDragDepth = 0;
+  setGlobalDropOverlayVisible(false);
+  const items = event.dataTransfer.items;
+  if (items && items.length > 0) {
+    const collected = await collectFilesFromItems(items);
+    if (collected.length > 0) {
+      uploadFilesWithPaths(collected);
+      return;
+    }
+  }
+  uploadFiles(event.dataTransfer.files);
 });
 els.dropZone.addEventListener("dragleave", () => els.dropZone.classList.remove("active"));
 els.dropZone.addEventListener("drop", async (event) => {
@@ -5103,31 +6081,61 @@ async function collectFilesFromItems(items) {
 
 async function uploadFilesWithPaths(items) {
   if (!items || items.length === 0) return;
-  const label = items.length === 1 ? items[0].relativePath : `${items.length} files`;
-  showUploadBanner(`Uploading ${label}...`, "loading");
-  const formData = new FormData();
-  formData.append("path", state.path);
-  for (const { file, relativePath } of items) {
-    formData.append("fileRelPath", relativePath);
-    formData.append("files", file);
+  if (typeof ChunkUploadController === "undefined") {
+    showUploadBanner("Upload module failed to load. Refresh the app.", "error");
+    return;
   }
-  try {
-    const res = await apiFetch("/api/upload", { method: "POST", body: formData });
-    const payload = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const reason = payload.error || "Upload failed.";
-      showUploadBanner(reason, "error");
-      if (els.uploadScopeHint) els.uploadScopeHint.textContent = reason;
-      return;
+  const base = state.path;
+  for (let i = 0; i < items.length; i++) {
+    const { file, relativePath } = items[i];
+    const { fileName, targetPath } = relativeUploadTarget(base, relativePath);
+    const fileToSend =
+      file.name !== fileName ? new File([file], fileName, { type: file.type || "application/octet-stream" }) : file;
+    const id = `upload-path-${i}-${relativePath}-${Date.now()}`;
+    hostTransferController = new ChunkUploadController();
+    hostTransferCurrentUploadId = id;
+    hostTransferUpsert({
+      id,
+      direction: "uploading",
+      fileName: fileName,
+      percent: 0,
+      status: "active",
+      metaLine: formatBytesShortHost(file.size) + " · " + relativePath,
+      speedLabel: "",
+      etaLabel: "",
+    });
+    try {
+      await hostTransferController.upload(fileToSend, targetPath, {
+        request: transferRequest,
+        onProgress: (p) => {
+          hostTransferUpdate(id, {
+            percent: p.percent,
+            speedLabel: formatHostSpeed(p.speedBps),
+            etaLabel: formatHostEta(p.etaSeconds),
+            chunkLabel:
+              p.totalChunks > 0 ? `${p.chunkIndex + 1} / ${p.totalChunks} chunks` : "",
+          });
+        },
+      });
+      hostTransferUpdate(id, { status: "complete", percent: 100 });
+      touchFileActivity(joinOwnerPath(targetPath, fileName), "upload");
+      setTimeout(() => hostTransferRemove(id), 2000);
+      await loadFiles(base);
+      await loadLogs();
+    } catch (err) {
+      const msg = err && err.message ? err.message : "Upload failed";
+      if (msg === "Upload cancelled") {
+        hostTransferRemove(id);
+      } else {
+        hostTransferUpdate(id, { status: "error", error: msg });
+        showUploadBanner(msg, "error");
+        if (els.uploadScopeHint) els.uploadScopeHint.textContent = msg;
+        break;
+      }
+    } finally {
+      hostTransferController = null;
+      hostTransferCurrentUploadId = null;
     }
-    const savedTo = String(payload.saved_to || state.path || "/");
-    showUploadBanner("Upload complete", "success");
-    setTimeout(hideUploadBanner, 2500);
-    await loadFiles(savedTo);
-    await loadLogs();
-  } catch (err) {
-    showUploadBanner(err.message || "Upload failed", "error");
-    if (els.uploadScopeHint) els.uploadScopeHint.textContent = err.message || "Upload failed";
   }
 }
 els.telemetryToggle.addEventListener("change", async (event) => {
@@ -5314,6 +6322,17 @@ setInterval(async () => {
     await loadRuntimeStatus();
     await loadLogs();
     await loadNotifications();
+    try {
+      const socialRes = await apiFetch("/api/v1/files/social/notifications");
+      if (socialRes.ok) {
+        const socialData = await socialRes.json().catch(() => ({}));
+        const first = Array.isArray(socialData.notifications) ? socialData.notifications[0] : null;
+        if (first && first.type === "like") {
+          showUploadBanner(`${first.actor} liked ${first.path}`, "success");
+          setTimeout(hideUploadBanner, 1200);
+        }
+      }
+    } catch (_) {}
     if (state.isAdmin) {
       await loadPendingAccessRequests();
       await loadApprovedDevices();
