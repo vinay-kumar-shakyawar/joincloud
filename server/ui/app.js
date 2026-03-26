@@ -1449,9 +1449,11 @@ function renderShares() {
   };
   const activeShares = state.shares.filter((share) => share.status === "active");
   const isPublicTab = stateShareTab.current === "public";
-  const filteredShares = activeShares.filter((share) =>
-    isPublicTab ? !!share.publicUrl : !share.publicUrl
-  );
+  const filteredShares = activeShares.filter((share) => {
+    const scope = String(share.scope || "local");
+    const isPublicScope = scope === "public";
+    return isPublicTab ? isPublicScope : !isPublicScope;
+  });
   if (!filteredShares.length) {
     state.selectedShares.clear();
     updateBulkButtons();
@@ -1466,7 +1468,16 @@ function renderShares() {
     row.className = "item";
     const localUrl = share.urlIp || share.url || `${stateMeta.lanBaseUrl}/share/${share.shareId}`;
     const publicUrl = share.publicUrl || null;
-    const shareUrl = publicUrl || localUrl;
+    const scope = String(share.scope || "local");
+    const isPublicScope = scope === "public";
+    // Public shares should never display the local URL in the Shares list.
+    const displayUrl = isPublicScope
+      ? (publicUrl || share.tunnelCandidateUrl || "Provisioning…")
+      : localUrl;
+    // Copy/QR should only use an actual URL.
+    const actionUrl = isPublicScope
+      ? (publicUrl || share.tunnelCandidateUrl || "")
+      : localUrl;
     row.innerHTML = `
       <div style="flex:1;min-width:0">
         <div class="item-title">${escapeHtml(share.path)}</div>
@@ -1474,7 +1485,7 @@ function renderShares() {
           const d = share.expiresAt != null && share.expiresAt !== "" ? new Date(share.expiresAt) : null;
           return d && Number.isFinite(d.getTime()) ? d.toLocaleString() : "—";
         })()}</div>
-        <div class="share-link-box" style="margin-top:8px;padding:8px 10px;border:1px solid var(--stroke);border-radius:6px;background:var(--bg);font-size:12px;font-family:ui-monospace,monospace;word-break:break-all">${escapeHtml(shareUrl)}</div>
+        <div class="share-link-box" style="margin-top:8px;padding:8px 10px;border:1px solid var(--stroke);border-radius:6px;background:var(--bg);font-size:12px;font-family:ui-monospace,monospace;word-break:break-all">${escapeHtml(displayUrl)}</div>
       </div>
       <span class="badge badge-active">Active</span>
     `;
@@ -1498,12 +1509,13 @@ function renderShares() {
     copyButton.setAttribute("aria-label", "Copy link");
     copyButton.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>';
     copyButton.onclick = async () => {
-      const ok = await copyToClipboard(shareUrl);
+      if (!actionUrl) return;
+      const ok = await copyToClipboard(actionUrl);
       if (ok) {
         copyButton.style.opacity = "0.7";
         setTimeout(() => (copyButton.style.opacity = ""), 1200);
       } else {
-        showCopyFallback(shareUrl, copyButton);
+        showCopyFallback(actionUrl, copyButton);
       }
     };
     row.appendChild(copyButton);
@@ -1512,7 +1524,10 @@ function renderShares() {
     qrBtn.title = "Show QR";
     qrBtn.setAttribute("aria-label", "Show QR");
     qrBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 3h8v8H3V3zm2 2v4h4V5H5zm8-2h8v8h-8V3zm2 2v4h4V5h-4zM3 13h8v8H3v-8zm2 2v4h4v-4H5zm10-2h2v2h-2v-2zm-2 2h2v2h-2v-2zm4 0h2v2h-2v-2zm2 2h2v2h-2v-2zm-4 0h2v2h-2v-2zm0 2h2v2h-2v-2zm2 0h2v2h-2v-2z"/></svg>';
-    qrBtn.onclick = () => showShareQrModal(shareUrl);
+    qrBtn.onclick = () => {
+      if (!actionUrl) return;
+      showShareQrModal(actionUrl);
+    };
     row.appendChild(qrBtn);
 
     if (isHostRole()) {
@@ -5489,9 +5504,6 @@ function setActiveSection(sectionId) {
     loadPublicAccessStatus().catch(() => {});
     if (typeof window.updater !== "undefined") {
       loadUpdatesPanel().catch(() => {});
-      try {
-        window.updater.checkForUpdates();
-      } catch (_) {}
     }
   }
 }
@@ -6878,8 +6890,20 @@ async function loadUpdatesPanel() {
 }
 
 function initJoinCloudUpdaterUi() {
+  // JoinCloud desktop uses the manual versions installer (Upgrade/Downgrade list).
+  // Keep only version install progress events; the electron-updater banner flow is disabled.
   refreshUpdatesSectionVisibility();
   if (typeof window.updater === "undefined") return;
+  if (!window.__joincloudVersionProgressBound) {
+    window.__joincloudVersionProgressBound = true;
+    window.updater.onVersionProgress((data) => {
+      if (!data || !data.version) return;
+      updatesPanelInstalling = data.version;
+      updatesPanelProgressPct = typeof data.pct === "number" ? data.pct : 0;
+      syncUpdatesRowProgress(escapeUpdatesVersionAttr(data.version), updatesPanelProgressPct);
+    });
+  }
+  return;
 
   const banner = document.getElementById("update-banner");
   const notesEl = document.getElementById("update-banner-notes");
@@ -7063,9 +7087,6 @@ function initJoinCloudUpdaterUi() {
   if (refreshUpdatesBtn) {
     refreshUpdatesBtn.addEventListener("click", () => {
       loadUpdatesPanel().catch(() => {});
-      try {
-        window.updater.checkForUpdates();
-      } catch (_) {}
     });
   }
 }

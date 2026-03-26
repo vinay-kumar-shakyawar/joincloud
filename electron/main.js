@@ -706,9 +706,9 @@ async function createWindow() {
     }
     try {
       setVersionInstallerWindow(mainWindow);
-      if (app.isPackaged || process.env.JOINCLOUD_ENABLE_UPDATER === "1") {
-        initAutoUpdater(mainWindow);
-      }
+      // The app's supported update path is the in-app versions list (manual install on click).
+      // Keep electron-updater disabled unless explicitly enabled for testing.
+      if (process.env.JOINCLOUD_ENABLE_UPDATER === "1") initAutoUpdater(mainWindow);
     } catch (updaterErr) {
       logLine(`Updater init: ${formatError(updaterErr)}`);
     }
