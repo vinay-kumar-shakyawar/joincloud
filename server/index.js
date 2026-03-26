@@ -971,7 +971,13 @@ function sanitizeDownloadFileName(input) {
 
 function isPreviewableFile(fileName) {
   const mimeType = mime.lookup(fileName) || "";
-  return mimeType.startsWith("image/") || mimeType.startsWith("video/") || mimeType === "application/pdf";
+  return (
+    mimeType.startsWith("image/") ||
+    mimeType.startsWith("video/") ||
+    mimeType === "application/pdf" ||
+    mimeType === "text/csv" ||
+    /\.csv$/i.test(String(fileName || ""))
+  );
 }
 
 function sanitizePathSegment(input) {
@@ -1269,7 +1275,13 @@ async function bootstrap() {
   app.use((req, res, next) => {
     const isTunnelRequest = req.headers["x-tunnel-source"] === "cloudflare";
     if (isTunnelRequest) {
-      if (req.path.startsWith("/share/") || req.path === "/api/public-access/status") {
+      // Public share pages are allowed via tunnel without remote pin.
+      if (
+        req.path.startsWith("/share/") ||
+        req.path.startsWith("/share-group/") ||
+        (req.method === "GET" && req.path.startsWith("/api/v1/share-groups/")) ||
+        req.path === "/api/public-access/status"
+      ) {
         return next();
       }
       const remotePin = loadUserConfig()?.remoteAccessPin;
@@ -1718,6 +1730,9 @@ async function bootstrap() {
     } catch (_) {}
     const displayName = userConfig?.display_name || "Join";
     const endpoints = getNetworkEndpoints(displayName, config.server.port, config.server.shareBasePath);
+    const plat = process.platform || "";
+    const platformLabel =
+      plat === "win32" ? "Windows" : plat === "darwin" ? "macOS" : plat === "linux" ? "Linux" : plat || "Desktop";
     res.json({
       version: getAppVersion(),
       build_id: BUILD_ID,
@@ -1727,6 +1742,8 @@ async function bootstrap() {
       share_port: config.server.sharePort,
       uptime_seconds: currentUptimeSeconds,
       uptime_daily_average_seconds: dailyAverageSeconds,
+      platform: plat,
+      platform_label: platformLabel,
     });
   });
 
@@ -2146,7 +2163,6 @@ async function bootstrap() {
         <h1 id="share-title">Shared Item</h1>
         <div class="meta" id="share-meta">Loading share...</div>
         <div class="actions" id="share-actions"></div>
-        <div class="share-drop-zone" id="share-drop-zone">Drag & drop files here</div>
         <div class="preview" id="share-preview"></div>
         <div class="list" id="share-list"></div>
       </section>
@@ -2595,6 +2611,19 @@ async function bootstrap() {
       next();
       return;
     }
+    // Public group-share page fetches metadata without a device session (same as /share/:id for visitors).
+    if (
+      req.method === "GET" &&
+      req.path.startsWith("/v1/share-groups/") &&
+      req.path.length > "/v1/share-groups/".length
+    ) {
+      if (!sharingEnabled && !isLocalhostRequest(req)) {
+        res.status(423).json({ error: "sharing_stopped", message: "Sharing is currently stopped by the admin." });
+        return;
+      }
+      next();
+      return;
+    }
     if (isLocalhostRequest(req)) {
       req.joincloudAccess = {
         role: "host",
@@ -2887,6 +2916,15 @@ async function bootstrap() {
     const shareIds = [];
     const displayName = userConfig?.display_name || "Join";
     const endpoints = getNetworkEndpoints(displayName, config.server.port, config.server.shareBasePath);
+    const tunnelStatus = tunnelManager.getStatus();
+    const tunnelPublicBase = tunnelStatus.status === "active" && tunnelStatus.publicUrl ? String(tunnelStatus.publicUrl) : null;
+    if (scope === "public" && !tunnelPublicBase) {
+      res.status(403).json({
+        error: "public_access_inactive",
+        message: "Enable Remote Access to create public group shares.",
+      });
+      return;
+    }
     const entries = [];
     for (const p of paths) {
       const targetPath = resolveOwnerPath(config.storage.ownerRoot, p);
@@ -2895,12 +2933,18 @@ async function bootstrap() {
         .find((s) => s.status === "active" && (s.scope || "local") === scope && s.targetPath === targetPath);
       const share = existing || (await shareService.createShare({ targetPath, permission, ttlMs, scope }));
       shareIds.push(share.shareId);
+      const localUrl = `${endpoints.ipUrl}/${share.shareId}`;
+      const publicUrl = tunnelPublicBase ? `${tunnelPublicBase}/share/${share.shareId}` : null;
       entries.push({
         path: p,
         shareId: share.shareId,
-        url: `${endpoints.ipUrl}/${share.shareId}`,
+        targetType: share.targetType || "file",
+        name: path.posix.basename(p || "/") || "Item",
+        url: localUrl,
+        publicUrl,
       });
     }
+    const groupPublicUrl = tunnelPublicBase ? `${tunnelPublicBase}/share-group/${groupId}` : null;
     shareGroups.set(groupId, {
       groupId,
       name,
@@ -2908,6 +2952,7 @@ async function bootstrap() {
       paths,
       shareIds,
       entries,
+      publicUrl: groupPublicUrl,
       capabilities: {
         allowDownload: capabilities.allowDownload !== false,
         allowPreview: capabilities.allowPreview !== false,
@@ -2916,7 +2961,7 @@ async function bootstrap() {
       },
       createdAt: new Date().toISOString(),
     });
-    res.json({ groupId, name, scope, url: `/share-group/${groupId}`, entries });
+    res.json({ groupId, name, scope, url: `/share-group/${groupId}`, publicUrl: groupPublicUrl, entries });
   });
 
   app.get("/api/v1/share-groups", async (_req, res) => {
@@ -2946,17 +2991,20 @@ async function bootstrap() {
     res.json({ success: true, revoked });
   });
 
+  // Typo / pasted URL with a space (browser may show "share group"); normalize to hyphenated path.
+  app.get("/share group/:groupId", (req, res) => {
+    const id = String(req.params.groupId || "");
+    res.redirect(302, `/share-group/${encodeURIComponent(id)}`);
+  });
+
   app.get("/share-group/:groupId", async (req, res) => {
     const group = shareGroups.get(String(req.params.groupId || ""));
     if (!group) {
       res.status(404).send("Share group not found");
       return;
     }
-    const rows = (group.entries || [])
-      .map((entry) => `<li><a href="${entry.url}" target="_blank" rel="noopener noreferrer">${entry.path}</a></li>`)
-      .join("");
     res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${group.name}</title></head><body style="font-family:system-ui;background:#0b1114;color:#e7eef1;padding:20px"><h2>${group.name}</h2><div style="opacity:.8;margin-bottom:10px">Scope: ${group.scope}</div><ul>${rows}</ul></body></html>`);
+    res.sendFile(path.join(__dirname, "ui", "group-share.html"));
   });
 
   app.get("/api/v1/files/social", async (req, res) => {
@@ -3064,6 +3112,63 @@ async function bootstrap() {
     }
   });
 
+  app.get("/api/v1/files/download.zip", ensureAdmin, async (req, res) => {
+    try {
+      const selectionRaw = String(req.query.paths || "").trim();
+      const selected = selectionRaw
+        ? selectionRaw
+            .split(",")
+            .map((part) => toSafeRelative(part))
+            .filter(Boolean)
+        : [];
+      if (!selected.length) {
+        res.status(400).json({ error: "paths_required" });
+        return;
+      }
+
+      const archiveName = `download-${Date.now()}.zip`;
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${archiveName}"; filename*=UTF-8''${encodeURIComponent(archiveName)}`
+      );
+      res.setHeader("Content-Type", "application/zip");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "no-store");
+
+      const zipLevel = Number(process.env.JOINCLOUD_ZIP_LEVEL) || 0;
+      const archive = archiver("zip", { zlib: { level: zipLevel } });
+
+      req.on("aborted", () => {
+        try {
+          if (typeof archive.abort === "function") archive.abort();
+          else archive.destroy();
+        } catch (_) {}
+        if (!res.destroyed) res.destroy();
+      });
+
+      archive.on("error", (err) => {
+        logger.error("files zip archive error", { error: err?.message });
+        if (!res.headersSent) res.status(500).end("zip_failed");
+        else if (!res.destroyed) res.destroy();
+      });
+
+      archive.pipe(res);
+
+      for (const relPath of selected) {
+        if (req.destroyed || res.destroyed) break;
+        const resolvedPath = resolveOwnerPath(config.storage.ownerRoot, toPosixPath(relPath));
+        const stats = await fs.stat(resolvedPath);
+        if (!stats.isFile()) continue;
+        const entryName = relPath.replace(/^\/+/, "");
+        archive.file(resolvedPath, { name: entryName });
+      }
+
+      await archive.finalize();
+    } catch (error) {
+      res.status(400).json({ error: error.message || "zip_failed" });
+    }
+  });
+
   app.post("/api/share", async (req, res) => {
     try {
       const access = getRequestContext(req);
@@ -3071,14 +3176,18 @@ async function bootstrap() {
         res.status(403).json({ error: "remote_devices_are_read_only_for_sharing" });
         return;
       }
-      // Strict rule: block all sharing when internet is unavailable.
-      const online = await isInternetOnline();
-      if (!online) {
-        res.status(403).json({
-          error: "offline",
-          message: "Sharing is disabled while internet is unavailable. Please reconnect and try again.",
-        });
-        return;
+      const { path: sharePath, permission, ttlMs, scope } = req.body || {};
+      const requestedScope = scope || "local";
+      // Allow LAN/local sharing while offline; only Public sharing requires internet.
+      if (requestedScope === "public") {
+        const online = await isInternetOnline();
+        if (!online) {
+          res.status(403).json({
+            error: "offline",
+            message: "Public sharing requires an internet connection. Please reconnect and try again.",
+          });
+          return;
+        }
       }
       const licenseState = getLicenseStateFromLocalState();
       const isExpiredOrUnregistered = licenseState === "expired" || licenseState === "unregistered";
@@ -3089,7 +3198,6 @@ async function bootstrap() {
         });
         return;
       }
-      const { path: sharePath, permission, ttlMs, scope } = req.body || {};
       if (!sharePath) {
         res.status(400).json({ error: "path is required" });
         return;
@@ -3117,7 +3225,6 @@ async function bootstrap() {
         return;
       }
       const targetPath = resolveOwnerPath(config.storage.ownerRoot, toPosixPath(sharePath));
-      const requestedScope = scope || "local";
       const existing = shareService
         .listShares()
         .find((s) => s.status === "active" && (s.scope || "local") === requestedScope && s.targetPath === targetPath);
@@ -4452,6 +4559,7 @@ async function bootstrap() {
               display_name: result.data.display_name || null,
               entitlements: result.data.entitlements || null,
               usage: result.data.usage || null,
+              updates: result.data.updates || null,
             };
             const paths = getActivationPaths();
             if (paths) {
@@ -4496,6 +4604,14 @@ async function bootstrap() {
                     }
                   } catch (_) {}
                 }
+                try {
+                  const u = result.data.updates;
+                  const versionsUrl = u && typeof u.versions_url === "string" ? u.versions_url.trim() : "";
+                  if (versionsUrl) {
+                    const updaterCfgPath = path.join(paths.systemDir, "update_config.json");
+                    fsSync.writeFileSync(updaterCfgPath, JSON.stringify({ versions_url: versionsUrl }, null, 2), "utf8");
+                  }
+                } catch (_) {}
               } catch (e) {
                 if (logger) logger.warn("persist config to disk failed", { error: e && e.message });
               }

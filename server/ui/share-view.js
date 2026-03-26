@@ -55,6 +55,7 @@
     galleryOpen: true,
     selectionMode: false,
     selected: new Set(),
+    galleryNodes: null,
   };
 
   function getShareUrl() {
@@ -209,9 +210,36 @@
       '<div class="share-transfer-label">Downloading</div>' +
       '<div class="share-transfer-name"></div>' +
       '<div class="share-transfer-meta"></div>' +
-      '<div class="share-transfer-stats"></div></div>';
+      '<div class="share-transfer-stats"></div>' +
+      '<div class="share-transfer-controls">' +
+      '<button type="button" class="button secondary" id="share-transfer-pause">Pause</button>' +
+      '<button type="button" class="button secondary" id="share-transfer-resume" style="display:none;">Resume</button>' +
+      '<button type="button" class="button secondary" id="share-transfer-cancel">Cancel</button>' +
+      "</div></div>";
     document.body.appendChild(el);
     return el;
+  }
+
+  let activeTransferControl = null;
+
+  function syncTransferControls() {
+    const el = document.getElementById("share-transfer-panel");
+    if (!el) return;
+    const pauseBtn = el.querySelector("#share-transfer-pause");
+    const resumeBtn = el.querySelector("#share-transfer-resume");
+    const cancelBtn = el.querySelector("#share-transfer-cancel");
+    const ctrl = activeTransferControl;
+    if (!pauseBtn || !resumeBtn || !cancelBtn) return;
+    if (!ctrl) {
+      pauseBtn.style.display = "none";
+      resumeBtn.style.display = "none";
+      cancelBtn.style.display = "none";
+      return;
+    }
+    const state = ctrl.state || "running";
+    pauseBtn.style.display = state === "running" ? "" : "none";
+    resumeBtn.style.display = state === "paused" ? "" : "none";
+    cancelBtn.style.display = state === "complete" ? "none" : "";
   }
 
   function hideTransferPanel() {
@@ -248,15 +276,28 @@
     if (metaEl2) metaEl2.textContent = opts.metaLine || "";
     if (statsEl) statsEl.textContent = opts.statsLine || "";
     if (labelEl) labelEl.textContent = opts.label || "Downloading";
+    syncTransferControls();
   }
 
   async function startResumableDownload(url, fileName, sizeHint) {
     const chunks = [];
     let bytesReceived = 0;
     let totalBytes = 0;
-    let retry = 0;
-    const maxRetries = 5;
     let startedAt = Date.now();
+
+    const control = {
+      state: "running", // running | paused | cancelled | complete
+      controller: null,
+      resumeWaiter: null,
+      pause: () => {},
+      resume: () => {},
+      cancel: () => {},
+    };
+    activeTransferControl = control;
+    const panel = ensureTransferPanel();
+    const pauseBtn = panel.querySelector("#share-transfer-pause");
+    const resumeBtn = panel.querySelector("#share-transfer-resume");
+    const cancelBtn = panel.querySelector("#share-transfer-cancel");
 
     async function getTotalSize() {
       try {
@@ -277,10 +318,84 @@
       label: "Downloading",
     });
 
-    while (retry <= maxRetries) {
+    function waitForResume() {
+      return new Promise((resolve) => {
+        control.resumeWaiter = resolve;
+      });
+    }
+
+    control.pause = () => {
+      if (control.state !== "running") return;
+      control.state = "paused";
       try {
+        if (control.controller) control.controller.abort();
+      } catch (_) {}
+      updateTransferPanel({
+        fileName: fileName || "download",
+        pct: totalBytes > 0 ? Math.round((bytesReceived / totalBytes) * 100) : 0,
+        metaLine: totalBytes ? formatBytesShort(bytesReceived) + " / " + formatBytesShort(totalBytes) : formatBytesShort(bytesReceived),
+        statsLine: "Paused",
+        label: "Paused",
+      });
+    };
+
+    control.resume = () => {
+      if (control.state !== "paused") return;
+      control.state = "running";
+      startedAt = Date.now();
+      if (typeof control.resumeWaiter === "function") {
+        const r = control.resumeWaiter;
+        control.resumeWaiter = null;
+        r();
+      }
+      updateTransferPanel({
+        fileName: fileName || "download",
+        pct: totalBytes > 0 ? Math.round((bytesReceived / totalBytes) * 100) : 0,
+        metaLine: totalBytes ? formatBytesShort(bytesReceived) + " / " + formatBytesShort(totalBytes) : formatBytesShort(bytesReceived),
+        statsLine: "Resuming…",
+        label: "Downloading",
+      });
+    };
+
+    control.cancel = () => {
+      if (control.state === "cancelled" || control.state === "complete") return;
+      control.state = "cancelled";
+      try {
+        if (control.controller) control.controller.abort();
+      } catch (_) {}
+      hideTransferPanel();
+      showToast("Download cancelled", "info");
+      activeTransferControl = null;
+      syncTransferControls();
+    };
+
+    if (pauseBtn) pauseBtn.onclick = control.pause;
+    if (resumeBtn) resumeBtn.onclick = control.resume;
+    if (cancelBtn) cancelBtn.onclick = control.cancel;
+
+    // Auto-pause on connection loss
+    if (!window.__joincloudShareNetHooks) {
+      window.__joincloudShareNetHooks = true;
+      window.addEventListener("offline", () => {
+        try {
+          if (activeTransferControl && activeTransferControl.state === "running") {
+            activeTransferControl.pause();
+          }
+        } catch (_) {}
+      });
+    }
+
+    while (true) {
+      if (control.state === "cancelled") return;
+      if (control.state === "paused") {
+        await waitForResume();
+        continue;
+      }
+      try {
+        control.controller = new AbortController();
         const response = await fetch(url, {
           headers: bytesReceived > 0 ? { Range: "bytes=" + bytesReceived + "-" } : {},
+          signal: control.controller.signal,
         });
         if (!(response.ok || response.status === 206)) {
           throw new Error("Download failed (" + response.status + ")");
@@ -297,6 +412,12 @@
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
+          if (control.state !== "running") {
+            try {
+              if (control.controller) control.controller.abort();
+            } catch (_) {}
+            break;
+          }
           chunks.push(value);
           bytesReceived += value.length;
           const elapsed = Math.max((Date.now() - startedAt) / 1000, 1);
@@ -317,26 +438,30 @@
             label: "Downloading",
           });
         }
+        // Stream finished successfully; exit outer loop and finalize.
         break;
       } catch (error) {
-        retry += 1;
-        if (retry > maxRetries) {
-          hideTransferPanel();
-          showToast(error.message || "Download failed", "error");
-          return;
+        if (control.state === "cancelled") return;
+        if (error && error.name === "AbortError" && control.state === "paused") {
+          syncTransferControls();
+          await waitForResume();
+          continue;
         }
+        // Auto-pause on network glitches; user can resume.
+        control.state = "paused";
         updateTransferPanel({
           fileName: fileName || "download",
           pct: totalBytes ? Math.round((bytesReceived / totalBytes) * 100) : 0,
-          metaLine: "Retry " + retry + "/" + maxRetries,
-          statsLine: "Reconnecting…",
-          label: "Downloading",
+          metaLine: "Connection issue",
+          statsLine: "Paused due to a connection glitch. Click Resume to continue.",
+          label: "Paused",
         });
-        await new Promise(function (resolve) {
-          setTimeout(resolve, 1000 * retry);
-        });
+        syncTransferControls();
+        await waitForResume();
       }
     }
+
+    if (control.state === "cancelled") return;
 
     updateTransferPanel({
       fileName: fileName || "download",
@@ -358,8 +483,14 @@
       URL.revokeObjectURL(blobUrl);
       a.remove();
     }, 1000);
+    control.state = "complete";
+    syncTransferControls();
     showToast("Download complete", "success");
     setTimeout(hideTransferPanel, 2000);
+    setTimeout(() => {
+      if (activeTransferControl === control) activeTransferControl = null;
+      syncTransferControls();
+    }, 2500);
   }
 
   function renderFileDownloadButton(pathValue, sizeHint, nameHint) {
@@ -470,6 +601,18 @@
     document.getElementById("share-preview-download").onclick = () => {
       const current = previewDrawerState.items[previewDrawerState.currentIndex];
       if (!current) return;
+
+      // Multi-select download: build a ZIP using backend /download.zip selection support.
+      if (previewDrawerState.selectionMode && previewDrawerState.selected && previewDrawerState.selected.size >= 2) {
+        const joined = Array.from(previewDrawerState.selected).join(",");
+        const zipUrl = buildShareUrl(`/share/${encodeURIComponent(shareId)}/download.zip`, {
+          paths: joined,
+        });
+        startResumableDownload(zipUrl, "selected-files.zip");
+        return;
+      }
+
+      // Single-select download in selection mode (or normal mode): download current file.
       startResumableDownload(current.downloadUrl, current.name, current.size);
     };
     document.getElementById("share-preview-toggle-selection").onclick = () => {
@@ -518,7 +661,25 @@
     } else if (kind === "pdf") {
       stage.innerHTML = `<object class="preview-frame preview-fullwidth-doc" data="${current.previewUrl}" type="application/pdf"><iframe class="preview-frame preview-fullwidth-doc" src="${current.previewUrl}" title="${escapeHtml(current.name)}"></iframe></object>`;
     } else if (/\.csv$/i.test(String(current.name || ""))) {
-      stage.innerHTML = `<iframe class="preview-frame preview-fullwidth-doc" src="${current.previewUrl}" title="${escapeHtml(current.name)}"></iframe>`;
+      const safeTitle = escapeHtml(current.name || "CSV");
+      stage.innerHTML = `<div class="preview-fullwidth-doc" style="width:100%;height:100%;overflow:auto;padding:12px;">
+        <div class="muted" style="margin-bottom:8px;">CSV preview (first lines)</div>
+        <pre class="mono" id="share-csv-preview" style="white-space:pre;overflow:auto;margin:0;border:1px solid var(--stroke);border-radius:10px;padding:12px;background:rgba(255,255,255,0.03);">${safeTitle}\nLoading…</pre>
+      </div>`;
+      const pre = document.getElementById("share-csv-preview");
+      // Best-effort fetch; if it fails, show a clear fallback.
+      fetch(current.previewUrl)
+        .then((r) => {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.text();
+        })
+        .then((text) => {
+          const lines = String(text || "").split(/\r?\n/).slice(0, 60).join("\n");
+          pre.textContent = lines || "Preview unavailable";
+        })
+        .catch(() => {
+          pre.textContent = "Preview unavailable";
+        });
     } else if (kind === "video") {
       stage.innerHTML = `<video controls class="preview-video preview-fit-media" src="${current.previewUrl}"></video>`;
     } else {
@@ -527,41 +688,90 @@
     document.getElementById("share-preview-prev").disabled = previewDrawerState.currentIndex <= 0;
     document.getElementById("share-preview-next").disabled = previewDrawerState.currentIndex >= previewDrawerState.items.length - 1;
     const galleryList = document.getElementById("share-preview-gallery-list");
-    galleryList.innerHTML = "";
     const selectionToggle = document.getElementById("share-preview-toggle-selection");
     if (selectionToggle) {
       selectionToggle.textContent = previewDrawerState.selectionMode ? `Selection (${previewDrawerState.selected.size})` : "Selection";
     }
-    previewDrawerState.items.forEach((entry, index) => {
-      const btn = document.createElement("button");
-      btn.className = "share-preview-gallery-item" + (index === previewDrawerState.currentIndex ? " active" : "");
-      const thumbKind = getPreviewKind(entry.name);
-      const thumb = thumbKind === "image"
-        ? `<img class="share-preview-gallery-thumb-media" src="${entry.previewUrl}" alt="${escapeHtml(entry.name)}" />`
-        : `<div class="share-preview-gallery-thumb-icon">${thumbKind === "video" ? "🎬" : thumbKind === "pdf" ? "📕" : "📄"}</div>`;
-      btn.innerHTML = `<span class="share-preview-gallery-thumb">${thumb}</span><span class="share-preview-gallery-meta"><span class="share-preview-gallery-name">${escapeHtml(entry.name)}</span><span class="muted">${formatBytes(entry.size)}</span></span>`;
-      btn.onclick = () => {
-        previewDrawerState.currentIndex = index;
-        renderSharePreviewDrawer();
-      };
-      btn.ondblclick = () => {
-        previewDrawerState.currentIndex = index;
-        renderSharePreviewDrawer();
-      };
-      if (previewDrawerState.selectionMode) {
+
+    function buildGalleryOnce() {
+      galleryList.innerHTML = "";
+      previewDrawerState.galleryNodes = [];
+      previewDrawerState.items.forEach((entry, index) => {
+        const btn = document.createElement("button");
+        btn.className = "share-preview-gallery-item";
+
+        const thumbWrap = document.createElement("span");
+        thumbWrap.className = "share-preview-gallery-thumb";
+        const thumbKind = getPreviewKind(entry.name);
+        if (thumbKind === "image") {
+          const img = document.createElement("img");
+          img.className = "share-preview-gallery-thumb-media";
+          img.src = entry.previewUrl;
+          img.alt = entry.name || "Preview";
+          thumbWrap.appendChild(img);
+        } else {
+          const icon = document.createElement("div");
+          icon.className = "share-preview-gallery-thumb-icon";
+          icon.textContent = thumbKind === "video" ? "🎬" : thumbKind === "pdf" ? "📕" : "📄";
+          thumbWrap.appendChild(icon);
+        }
+
+        const meta = document.createElement("span");
+        meta.className = "share-preview-gallery-meta";
+        const nameEl = document.createElement("span");
+        nameEl.className = "share-preview-gallery-name";
+        nameEl.textContent = entry.name || "File";
+        const sizeEl = document.createElement("span");
+        sizeEl.className = "muted";
+        sizeEl.textContent = formatBytes(entry.size);
+        meta.appendChild(nameEl);
+        meta.appendChild(sizeEl);
+
         const check = document.createElement("input");
         check.type = "checkbox";
         check.className = "share-preview-gallery-check";
-        check.checked = previewDrawerState.selected.has(entry.downloadUrl);
+        check.style.display = "none";
         check.onclick = (e) => e.stopPropagation();
         check.onchange = () => {
-          if (check.checked) previewDrawerState.selected.add(entry.downloadUrl);
-          else previewDrawerState.selected.delete(entry.downloadUrl);
+          if (!entry.relativePath) return;
+          if (check.checked) previewDrawerState.selected.add(entry.relativePath);
+          else previewDrawerState.selected.delete(entry.relativePath);
           renderSharePreviewDrawer();
         };
+
+        btn.appendChild(thumbWrap);
+        btn.appendChild(meta);
         btn.appendChild(check);
+
+        btn.onclick = () => {
+          previewDrawerState.currentIndex = index;
+          renderSharePreviewDrawer();
+        };
+        btn.ondblclick = () => {
+          previewDrawerState.currentIndex = index;
+          renderSharePreviewDrawer();
+        };
+
+        previewDrawerState.galleryNodes.push({ btn, check, entry, index });
+        galleryList.appendChild(btn);
+      });
+    }
+
+    if (!previewDrawerState.galleryNodes || previewDrawerState.galleryNodes.length !== previewDrawerState.items.length) {
+      buildGalleryOnce();
+    }
+
+    previewDrawerState.galleryNodes.forEach((node) => {
+      const { btn, check, entry, index } = node;
+      btn.classList.toggle("active", index === previewDrawerState.currentIndex);
+      if (previewDrawerState.selectionMode) {
+        const selectable = !!entry.relativePath;
+        check.style.display = "";
+        check.disabled = !selectable;
+        check.checked = selectable && previewDrawerState.selected.has(entry.relativePath);
+      } else {
+        check.style.display = "none";
       }
-      galleryList.appendChild(btn);
     });
     const activeCard = galleryList.querySelector(".share-preview-gallery-item.active");
     if (activeCard && typeof activeCard.scrollIntoView === "function") {
@@ -576,6 +786,7 @@
     previewDrawerState.galleryOpen = true;
     previewDrawerState.selectionMode = false;
     previewDrawerState.selected = new Set();
+    previewDrawerState.galleryNodes = null;
     document.body.classList.add("share-preview-open");
     renderSharePreviewDrawer();
   }
@@ -674,29 +885,70 @@
       return;
     }
 
-    payload.items.forEach((item) => {
-      const row = document.createElement("div");
-      row.className = "list-item";
-      const left = document.createElement("div");
-      left.className = "share-file-card";
-      left.innerHTML =
-        `<div class="share-file-card-thumb">${getPreviewThumbMarkup({
-          name: item.name,
-          type: item.type,
-          previewUrl: item.previewUrl
-            ? buildShareUrl(`/share/${encodeURIComponent(shareId)}/preview?path=${encodeURIComponent(item.relativePath)}`)
-            : "",
-        })}</div>` +
-        `<div class="share-file-card-body"><div>${item.type === "folder" ? "Folder" : "File"}: <span class="mono">${escapeHtml(item.name)}</span></div>` +
-        `<div class="muted">${item.type === "file" ? formatBytes(item.size) : "-"}</div></div>`;
-      row.appendChild(left);
-      if (item.type === "folder") {
+    const items = payload.items || [];
+    const folders = items.filter((x) => x && x.type === "folder");
+    const files = items.filter((x) => x && x.type !== "folder");
+
+    function renderSectionTitle(text) {
+      const t = document.createElement("div");
+      t.className = "muted";
+      t.style.margin = "10px 0 6px";
+      t.style.fontSize = "12px";
+      t.style.textTransform = "uppercase";
+      t.style.letterSpacing = "0.08em";
+      t.textContent = text;
+      return t;
+    }
+
+    if (folders.length) {
+      listEl.appendChild(renderSectionTitle("Folders"));
+      folders.forEach((item) => {
+        const row = document.createElement("div");
+        row.className = "list-item";
+        const left = document.createElement("div");
+        left.className = "share-file-card";
+        left.innerHTML =
+          `<div class="share-file-card-thumb">${getPreviewThumbMarkup({
+            name: item.name,
+            type: item.type,
+            previewUrl: "",
+          })}</div>` +
+          `<div class="share-file-card-body"><div>Folder: <span class="mono">${escapeHtml(item.name)}</span></div>` +
+          `<div class="muted">—</div></div>`;
+        row.appendChild(left);
         const openBtn = document.createElement("button");
         openBtn.className = "button";
         openBtn.textContent = "Open";
         openBtn.onclick = () => loadFolder(item.relativePath);
         row.appendChild(openBtn);
-      } else {
+        listEl.appendChild(row);
+      });
+    }
+
+    listEl.appendChild(renderSectionTitle("Files"));
+    if (!files.length) {
+      const emptyFiles = document.createElement("div");
+      emptyFiles.className = "muted";
+      emptyFiles.textContent = "No files in this folder.";
+      listEl.appendChild(emptyFiles);
+    } else {
+      files.forEach((item) => {
+        const row = document.createElement("div");
+        row.className = "list-item";
+        const left = document.createElement("div");
+        left.className = "share-file-card";
+        left.innerHTML =
+          `<div class="share-file-card-thumb">${getPreviewThumbMarkup({
+            name: item.name,
+            type: item.type,
+            previewUrl: item.previewUrl
+              ? buildShareUrl(`/share/${encodeURIComponent(shareId)}/preview?path=${encodeURIComponent(item.relativePath)}`)
+              : "",
+          })}</div>` +
+          `<div class="share-file-card-body"><div>File: <span class="mono">${escapeHtml(item.name)}</span></div>` +
+          `<div class="muted">${formatBytes(item.size)}</div></div>`;
+        row.appendChild(left);
+
         const selectWrap = document.createElement("label");
         selectWrap.className = "select-wrap";
         const checkbox = document.createElement("input");
@@ -708,16 +960,18 @@
         selectWrap.appendChild(checkbox);
         row.appendChild(selectWrap);
         row.appendChild(renderFileDownloadButton(item.relativePath, item.size, item.name));
+
         if (item.previewUrl) {
           const previewBtn = document.createElement("button");
           previewBtn.className = "button secondary";
           previewBtn.textContent = "Preview";
           previewBtn.onclick = () => {
-            const previewables = (payload.items || [])
+            const previewables = (items || [])
               .filter((x) => x.type === "file" && x.previewUrl)
               .map((x) => ({
                 name: x.name,
                 size: x.size,
+                relativePath: x.relativePath,
                 previewUrl: buildShareUrl(
                   `/share/${encodeURIComponent(shareId)}/preview?path=${encodeURIComponent(x.relativePath)}`
                 ),
@@ -731,9 +985,10 @@
           };
           row.appendChild(previewBtn);
         }
-      }
-      listEl.appendChild(row);
-    });
+
+        listEl.appendChild(row);
+      });
+    }
     renderZipActions(folderPath || "/");
     if (metaCache && metaCache.marketingUrl) renderGrowthCta(metaCache.marketingUrl);
   }
@@ -750,7 +1005,11 @@
 
   async function fetchJson(url) {
     const res = await fetch(url);
-    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+    if (!res.ok) {
+      const err = new Error(`Request failed: ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
     return res.json();
   }
 
@@ -775,7 +1034,11 @@
       const meta = await fetchJson(metaUrl);
       titleEl.textContent = meta.name || "Shared Item";
       const sizeText = meta.targetType === "file" && Number.isFinite(meta.size) ? ` | Size: ${formatBytes(meta.size)}` : "";
-      metaEl.textContent = `Type: ${meta.targetType === "folder" ? "Folder" : "File"}${sizeText} | Expires: ${new Date(meta.expiresAt).toLocaleString()}`;
+      const expRaw = meta.expiresAt;
+      const expDate = expRaw != null && expRaw !== "" ? new Date(expRaw) : null;
+      const expLabel =
+        expDate && Number.isFinite(expDate.getTime()) ? expDate.toLocaleString() : "No expiry shown";
+      metaEl.textContent = `Type: ${meta.targetType === "folder" ? "Folder" : "File"}${sizeText} | Expires: ${expLabel}`;
       sharePermission = meta.permission || "read-only";
 
       actionsEl.innerHTML = "";
@@ -831,7 +1094,15 @@
       note.textContent = "Sharing is caring ❤️";
       listEl.appendChild(note);
     } catch (error) {
-      setError("Share unavailable or expired.");
+      const st = error && error.status != null ? Number(error.status) : NaN;
+      const msg = error && error.message ? String(error.message) : "";
+      if (st === 404 || msg.includes("404")) {
+        setError("This share link is invalid or has expired.");
+      } else if (st === 423 || msg.includes("423")) {
+        setError("Sharing is currently stopped on the host. Try again later.");
+      } else {
+        setError("Could not load this share. Check your connection and try again.");
+      }
     }
   }
 

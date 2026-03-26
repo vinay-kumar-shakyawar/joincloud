@@ -21,11 +21,14 @@
     "bonjour": "^3.5.1",
     "busboy": "^1.6.0",
     "dotenv": "^16.4.5",
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.8.3",
     "express": "^5.2.1",
     "mime-types": "^3.0.2",
     "qrious": "^4.0.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "semver": "^7.7.4",
     "webdav-server": "^2.6.2"
   },
   "devDependencies": {

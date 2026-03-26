@@ -70,7 +70,10 @@ h1 {
 
 .button:hover {
   transform: translateY(-1px);
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
+  box-shadow:
+    0 8px 18px rgba(0, 0, 0, 0.24),
+    0 0 0 3px rgba(47, 183, 255, 0.14),
+    0 12px 34px rgba(47, 183, 255, 0.10);
 }
 
 .button.secondary {
@@ -268,22 +271,6 @@ iframe.preview-frame {
   color: var(--text);
 }
 
-.share-drop-zone {
-  margin: 12px 0;
-  padding: 14px;
-  border: 1px dashed var(--stroke);
-  border-radius: 8px;
-  text-align: center;
-  color: var(--muted);
-  font-size: 14px;
-  transition: all 0.15s ease;
-}
-
-.share-drop-zone.active {
-  border-color: var(--primary);
-  color: var(--text);
-}
-
 .share-transfer-panel {
   position: fixed;
   right: 16px;
@@ -338,6 +325,18 @@ iframe.preview-frame {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.share-transfer-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.share-transfer-controls .button {
+  padding: 6px 10px;
+  font-size: 13px;
 }
 
 .share-transfer-label {
@@ -636,11 +635,16 @@ body.share-preview-open {
   .share-preview-main {
     padding: 6px;
     gap: 6px;
+    flex: 1;
+    min-height: 0;
   }
   .share-preview-stage {
     border-radius: 0;
     border: 0;
     padding: 0;
+    min-height: 0;
+    display: grid;
+    place-items: center;
   }
   .share-card {
     padding: 14px;

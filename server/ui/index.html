@@ -38,6 +38,33 @@
       <a id="grace-banner-upgrade" href="#" target="_blank" rel="noopener noreferrer" style="margin-left:12px; color:inherit; font-weight:600; text-decoration:underline; display:none;">Upgrade now</a>
     </div>
 
+    <div id="update-banner" class="update-banner update-banner--hidden" style="display:none;" role="alert" aria-live="polite">
+      <div class="update-banner-inner">
+        <div id="update-banner-available" class="update-banner-panel">
+          <span id="update-banner-msg-available" class="update-banner-msg"></span>
+          <div class="update-banner-actions">
+            <button type="button" class="button secondary" id="update-banner-btn-changelog">Changelog</button>
+            <button type="button" class="button" id="update-banner-btn-upgrade">Upgrade</button>
+            <button type="button" class="button secondary" id="update-banner-btn-dismiss" aria-label="Dismiss">×</button>
+          </div>
+          <ul id="update-banner-notes" class="update-banner-notes" style="display:none;"></ul>
+        </div>
+        <div id="update-banner-downloading" class="update-banner-panel" style="display:none;">
+          <span id="update-banner-msg-download" class="update-banner-msg"></span>
+          <div class="update-banner-progress" aria-hidden="true"><div id="update-banner-progress-fill" class="update-banner-progress-fill"></div></div>
+          <span id="update-banner-speed" class="update-banner-speed"></span>
+        </div>
+        <div id="update-banner-ready" class="update-banner-panel" style="display:none;">
+          <span id="update-banner-msg-ready" class="update-banner-msg"></span>
+          <button type="button" class="button" id="update-banner-btn-install">Restart &amp; Install</button>
+        </div>
+        <div id="update-banner-error" class="update-banner-panel" style="display:none;">
+          <span id="update-banner-msg-error" class="update-banner-msg"></span>
+          <button type="button" class="button" id="update-banner-btn-retry">Retry</button>
+        </div>
+      </div>
+    </div>
+
     <section class="layout" id="access-gate" style="display:none;">
       <div class="content">
         <section class="card access-card">
@@ -181,12 +208,10 @@
           <div class="file-actions">
             <label class="button" id="upload-button-label" for="upload-input"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"/></svg></span> Upload</label>
             <input id="upload-input" type="file" multiple hidden />
-            <button class="button secondary" id="new-folder-btn"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2zM13 13h4v2h-4v4h-2v-4H7v-2h4V9h2v4z"/></svg></span> New Folder</button>
-            <button class="button secondary" id="select-mode-btn">Select</button>
+            <!-- <button class="button secondary" id="select-mode-btn">Select</button>
             <button class="button danger" id="delete-selected-btn" disabled>Delete Selected</button>
-            <button class="button secondary" id="share-selected-btn" disabled>Share Selected</button>
+            <button class="button secondary" id="share-selected-btn" disabled>Share Selected</button> -->
             <button class="button secondary" id="my-folder-shortcut" style="display:none">My Folder</button>
-            <button class="button secondary" id="back-button"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg></span>Back</button>
             <button class="button secondary" id="refresh-files"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></span>Refresh</button>
           </div>
         </div>
@@ -218,6 +243,15 @@
         <div class="drop-zone-overlay" id="drop-zone-overlay" style="display:none;">
           <div class="drop-zone-overlay-inner">Drop files or folders anywhere to upload</div>
         </div>
+        <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;">
+          <button class="button secondary" id="back-button"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg></span>Back</button>
+          <div>
+            <button class="button secondary" id="select-mode-btn">Select</button>
+            <button class="button danger" id="delete-selected-btn" disabled>Delete Selected</button>
+            <button class="button secondary" id="share-selected-btn" disabled>Share Selected</button>
+          </div>
+        </div>
+        
         <div class="group-share-list" id="group-share-list"></div>
         <div class="value value-muted" id="upload-scope-hint"></div>
         <div class="breadcrumbs" id="breadcrumbs"></div>
@@ -492,6 +526,40 @@
           </div>
         </div>
 
+        <!-- SECTION: Updates (Electron — requires app update IPC) -->
+        <div class="settings-section" id="settings-updates-section" style="display:none;">
+          <h3 class="settings-section-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14zm-1-6h-3V8h-2v5H8l4 4 4-4z"/></svg>
+            Updates
+          </h3>
+          <div class="row space-between" style="margin-top:8px; flex-wrap:wrap; gap:8px;">
+            <div>
+              <div class="label">Current version</div>
+              <div class="value" id="updates-current-version">—</div>
+            </div>
+            <div>
+              <div class="label">Last checked</div>
+              <div class="value value-muted" id="updates-last-checked">—</div>
+            </div>
+            <button type="button" class="button secondary" id="updates-refresh-btn"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></span> Refresh</button>
+          </div>
+          <div id="updates-panel-status" class="value value-muted" style="margin-top:10px; display:none;"></div>
+          <div id="updates-newer-wrap" style="margin-top:16px; display:none;">
+            <h4 class="updates-subheading">Newer versions</h4>
+            <div id="updates-newer-list" class="updates-version-list"></div>
+          </div>
+          <div id="updates-uptodate-msg" class="value value-muted" style="margin-top:12px; display:none;">You are on the latest version (for versions listed in the manifest).</div>
+          <div id="updates-installed-wrap" style="margin-top:16px;">
+            <h4 class="updates-subheading">Installed</h4>
+            <div id="updates-installed-row" class="updates-version-list"></div>
+          </div>
+          <details id="updates-older-details" class="updates-older-details" style="margin-top:16px;">
+            <summary class="updates-older-summary">Older versions <span class="value-muted" style="font-weight:400;">(last 3 — downgrade only)</span></summary>
+            <p class="value value-muted" style="font-size:12px; margin:8px 0 12px;">Downgrading may remove features or cause data issues. Only the three most recent older builds are shown.</p>
+            <div id="updates-older-list" class="updates-version-list"></div>
+          </details>
+        </div>
+
         <!-- SECTION: Display -->
         <div class="settings-section">
           <h3 class="settings-section-title">
@@ -665,7 +733,7 @@
             </div>
             <div>
               <div class="label">Platform</div>
-              <div class="value">Desktop App</div>
+              <div class="value" id="about-platform">—</div>
             </div>
           </div>
           <div class="row" style="margin-top:16px;gap:16px;flex-wrap:wrap;">
@@ -956,6 +1024,10 @@
             <label><input type="radio" name="share-scope" value="public" id="share-scope-public" /> Public</label>
           </div>
           <div id="share-scope-public-hint" class="value value-muted" style="display:none; margin-top:6px; font-size:12px;">Enable Remote Access in Settings to create public shares.</div>
+          <div id="share-public-enable-row" style="display:none; margin-top:8px; align-items:center; gap:10px; flex-wrap:wrap;">
+            <button type="button" class="button secondary button-compact" id="share-enable-remote-access">Enable Remote Access</button>
+            <div class="value value-muted" id="share-public-enable-status" style="font-size:12px"></div>
+          </div>
 
           <label class="label">Permission</label>
           <select class="input" id="share-permission">
@@ -1118,13 +1190,19 @@
           <button class="button ghost" id="group-share-close">✕</button>
         </div>
         <div class="modal-body">
-          <label>Group name</label>
-          <input class="input" id="group-share-name" placeholder="Team files" />
+          <label for="group-share-name">Group name</label>
+          <input class="input" id="group-share-name" name="groupShareName" type="text" autocomplete="off" placeholder="Team files" />
           <label style="margin-top:10px;display:block;">Scope</label>
           <div class="radio-group">
             <label><input type="radio" name="group-share-scope" value="local" checked /> Local</label>
-            <label><input type="radio" name="group-share-scope" value="public" /> Public</label>
+            <label><input type="radio" name="group-share-scope" value="public" id="group-share-scope-public" /> Public</label>
           </div>
+          <div id="group-share-scope-public-hint" class="value value-muted" style="display:none; margin-top:6px; font-size:12px;">Enable Remote Access to create public group shares.</div>
+          <div id="group-share-public-enable-row" style="display:none; margin-top:8px; align-items:center; gap:10px; flex-wrap:wrap;">
+            <button type="button" class="button secondary button-compact" id="group-share-enable-remote-access">Enable Remote Access</button>
+            <div class="value value-muted" id="group-share-public-enable-status" style="font-size:12px"></div>
+          </div>
+          <div id="group-share-result" style="margin-top:12px;"></div>
         </div>
         <div class="modal-actions">
           <button class="button secondary" id="group-share-cancel">Cancel</button>

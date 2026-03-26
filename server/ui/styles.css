@@ -246,6 +246,82 @@ body.activation-gate-active {
   background: var(--surface-elevated);
 }
 
+/* Devices cards */
+.device-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  background: var(--surface-elevated);
+}
+
+.device-card-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.device-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.device-card-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: rgba(47, 183, 255, 0.14);
+  color: var(--primary);
+  flex-shrink: 0;
+  font-size: 14px;
+}
+
+.device-card-name {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-card-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.device-card-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.device-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 11px;
+  color: var(--foreground-soft);
+}
+
+.device-card-actions {
+  display: inline-flex;
+  gap: 8px;
+  flex-shrink: 0;
+  align-items: center;
+}
+
 .pending-item-meta {
   min-width: 240px;
   flex: 1;
@@ -730,6 +806,11 @@ body.activation-gate-active {
   background: var(--surface-elevated);
 }
 
+.group-share-item-active {
+  border-color: rgba(47, 183, 255, 0.55);
+  box-shadow: 0 0 0 1px rgba(47, 183, 255, 0.22) inset;
+}
+
 .group-share-main {
   min-width: 0;
 }
@@ -1118,7 +1199,10 @@ body.activation-gate-active {
 .button:hover {
   background: var(--primary-hover);
   transform: translateY(-1px);
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
+  box-shadow:
+    0 8px 18px rgba(0, 0, 0, 0.22),
+    0 0 0 3px rgba(47, 183, 255, 0.16),
+    0 10px 30px rgba(47, 183, 255, 0.12);
 }
 
 .button:disabled {
@@ -1143,6 +1227,9 @@ body.activation-gate-active {
   color: var(--foreground);
   border-color: var(--border-light);
   transform: translateY(-1px);
+  box-shadow:
+    0 8px 18px rgba(0, 0, 0, 0.18),
+    0 0 0 3px rgba(47, 183, 255, 0.12);
 }
 
 .button.ghost {
@@ -1154,6 +1241,8 @@ body.activation-gate-active {
 .button.ghost:hover {
   color: var(--foreground);
   transform: translateY(-1px);
+  box-shadow:
+    0 0 0 3px rgba(47, 183, 255, 0.10);
 }
 
 .button.danger {
@@ -1734,6 +1823,26 @@ body.preview-drawer-open {
 
 #share-ttl-custom {
   display: none;
+}
+
+#share-public-enable-row {
+  display: flex;
+}
+
+#share-public-enable-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#group-share-public-enable-row {
+  display: flex;
+}
+
+#group-share-public-enable-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .radio-group {
@@ -3466,6 +3575,182 @@ h3 {
 .grace-banner a:hover {
   opacity: 0.8;
 }
+
+/* In-app update banner (Electron) */
+.update-banner {
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  background: rgba(47, 183, 255, 0.12);
+  color: var(--foreground);
+}
+.update-banner--hidden {
+  display: none !important;
+}
+.update-banner--ready {
+  background: rgba(34, 197, 94, 0.15);
+  border-bottom-color: var(--success);
+}
+.update-banner--error {
+  background: rgba(239, 68, 68, 0.12);
+  border-bottom-color: var(--error);
+  color: #fecaca;
+}
+.update-banner-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 10px 16px;
+}
+.update-banner-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+}
+#update-banner-available {
+  flex-direction: column;
+  align-items: stretch;
+}
+#update-banner-available .update-banner-actions {
+  justify-content: flex-end;
+}
+#update-banner-downloading {
+  flex-direction: column;
+  align-items: stretch;
+}
+.update-banner-msg {
+  flex: 1 1 200px;
+  line-height: 1.4;
+}
+.update-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.update-banner-notes {
+  width: 100%;
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--foreground-soft);
+}
+.update-banner-progress {
+  width: 100%;
+  flex-basis: 100%;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+.update-banner-progress-fill {
+  height: 100%;
+  background: var(--primary);
+  width: 0%;
+  transition: width 0.2s ease;
+}
+.update-banner-speed {
+  font-size: 12px;
+  color: var(--foreground-soft);
+}
+
+/* Settings → Updates list */
+.updates-subheading {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 8px;
+  color: var(--foreground);
+}
+.updates-version-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.updates-version-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.updates-version-row--newer {
+  border-color: rgba(34, 197, 94, 0.35);
+}
+.updates-version-row--older {
+  border-color: rgba(245, 158, 11, 0.35);
+}
+.updates-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(47, 183, 255, 0.2);
+  color: var(--primary);
+}
+.updates-badge--installed {
+  background: rgba(47, 183, 255, 0.2);
+  color: var(--primary);
+}
+.updates-btn-upgrade {
+  margin-left: auto;
+  font-size: 12px;
+  padding: 6px 12px;
+  background: var(--success);
+  color: #041008;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-weight: 600;
+}
+.updates-btn-upgrade:hover {
+  filter: brightness(1.05);
+}
+.updates-btn-downgrade {
+  margin-left: auto;
+  font-size: 12px;
+  padding: 6px 12px;
+  background: rgba(245, 158, 11, 0.25);
+  color: var(--warning);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-weight: 600;
+}
+.updates-btn-downgrade:hover {
+  filter: brightness(1.08);
+}
+.updates-row-progress {
+  width: 100%;
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.updates-row-progress-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+.updates-row-progress-fill {
+  height: 100%;
+  background: var(--primary);
+  width: 0%;
+  transition: width 0.15s ease;
+}
+.updates-older-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+}
+.updates-older-details summary::-webkit-details-marker {
+  margin-right: 8px;
+}
+
 /* Usage progress bars (Settings page) */
 .usage-bar-wrap { margin: 8px 0 12px; }
 .usage-bar-label-title { font-size: 12px; color: var(--muted, #8B9CA3); margin-bottom: 4px; }

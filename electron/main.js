@@ -23,6 +23,11 @@ const net = require("net");
 const { spawn } = require("child_process");
 const http = require("http");
 
+require(path.join(__dirname, "updater", "versionFetcher"));
+require(path.join(__dirname, "updater", "versionInstaller"));
+const { initAutoUpdater } = require(path.join(__dirname, "updater", "autoUpdate"));
+const { setVersionInstallerWindow } = require(path.join(__dirname, "updater", "versionInstaller"));
+
 if (!app.isPackaged) {
   try {
     const devUserDataPath = path.join(app.getPath("appData"), "JoinCloud-dev");
@@ -698,6 +703,14 @@ async function createWindow() {
       stopBackend();
       app.quit();
       return;
+    }
+    try {
+      setVersionInstallerWindow(mainWindow);
+      if (app.isPackaged || process.env.JOINCLOUD_ENABLE_UPDATER === "1") {
+        initAutoUpdater(mainWindow);
+      }
+    } catch (updaterErr) {
+      logLine(`Updater init: ${formatError(updaterErr)}`);
     }
     mainWindow.on("close", async (event) => {
       if (isStopping || allowWindowClose) {

@@ -43,3 +43,49 @@ contextBridge.exposeInMainWorld("joincloud", {
     });
   },
 });
+
+contextBridge.exposeInMainWorld("updater", {
+  checkForUpdates: () => ipcRenderer.send("update:check"),
+  downloadUpdate: () => ipcRenderer.send("update:download"),
+  installUpdate: () => ipcRenderer.send("update:install"),
+  getAppVersion: () => ipcRenderer.sendSync("get-app-version"),
+  fetchVersions: () => ipcRenderer.invoke("versions:fetch"),
+  getVersionBuckets: () => ipcRenderer.invoke("versions:buckets"),
+  installVersion: (versionObj) => ipcRenderer.invoke("versions:install", versionObj),
+  onUpdateAvailable: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on("update:available", handler);
+    return () => ipcRenderer.removeListener("update:available", handler);
+  },
+  onDownloadProgress: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on("update:progress", handler);
+    return () => ipcRenderer.removeListener("update:progress", handler);
+  },
+  onUpdateDownloaded: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on("update:ready", handler);
+    return () => ipcRenderer.removeListener("update:ready", handler);
+  },
+  onUpdateError: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on("update:error", handler);
+    return () => ipcRenderer.removeListener("update:error", handler);
+  },
+  onUpdateNone: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const handler = () => callback();
+    ipcRenderer.on("update:none", handler);
+    return () => ipcRenderer.removeListener("update:none", handler);
+  },
+  onVersionProgress: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on("version:progress", handler);
+    return () => ipcRenderer.removeListener("version:progress", handler);
+  },
+});
