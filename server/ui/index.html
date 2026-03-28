@@ -128,7 +128,7 @@
           <button class="nav-button" data-section="settings" title="Settings"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg></span><span class="nav-label">Settings</span></button>
           <button class="nav-button" data-section="logs" title="Logs"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg></span><span class="nav-label">Logs</span></button>
           <!-- <button class="nav-button" data-section="network" title="Network"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.7 2.06 7.3 2.06 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg></span><span class="nav-label">Network</span></button> -->
-          <button class="nav-button" data-section="support" title="Support"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/></svg></span><span class="nav-label">Support</span></button>
+          <button class="nav-button" data-section="support" title="Support"><span class="nav-icon" style="position:relative"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/></svg><span id="support-nav-badge" class="sc-nav-badge"></span></span><span class="nav-label">Support</span></button>
         </nav>
       </aside>
 
@@ -990,12 +990,73 @@
 
       <section class="card section" data-section="support">
         <h2>Support</h2>
-        <p class="value value-muted">Chat with your admin. Messages sync with the control panel.</p>
-        <div class="support-chat">
-          <div class="support-messages" id="support-messages"></div>
-          <div class="support-send-row">
-            <input class="input" id="support-message-input" type="text" placeholder="Type a message..." maxlength="2000" />
-            <button class="button" id="support-send">Send</button>
+
+        <!-- START SCREEN — shown when no messages yet -->
+        <div id="support-start-screen" class="sc-start-screen">
+          <div class="sc-start-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+          </div>
+          <div class="sc-start-title">How can we help?</div>
+          <div class="sc-start-sub">Send us a message and our team will respond as soon as possible.</div>
+          <button class="button" id="support-start-btn" style="margin-top:4px">Start a Conversation</button>
+        </div>
+
+        <!-- RESOLVED SCREEN — replaces chat after admin resolves -->
+        <div id="support-resolved-screen" class="sc-resolved-screen" style="display:none">
+          <div class="sc-resolved-screen-icon">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#22C55E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+              <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+          </div>
+          <div class="sc-resolved-screen-title">Your case is resolved</div>
+          <div class="sc-resolved-screen-sub">Our team has marked this conversation as resolved. Thank you for reaching out!</div>
+          <button class="button secondary" id="support-new-chat-btn" style="margin-top:8px;font-size:13px">Start New Chat</button>
+        </div>
+
+        <!-- CHAT BODY — shown once conversation started -->
+        <div id="support-chat-body" class="sc-chat-body" style="display:none">
+
+          <!-- Admin "LIVE" banner -->
+          <div id="support-admin-active" class="sc-admin-banner" style="display:none">
+            <span class="sc-live-dot"></span>
+            <span>Support is with you right now</span>
+            <span class="sc-live-label">LIVE</span>
+          </div>
+
+          <!-- Pending banner: shown until admin responds -->
+          <div id="support-pending-banner" class="sc-pending-banner" style="display:none">
+            <span class="sc-pending-icon">🕐</span>
+            <div>
+              <div class="sc-pending-title">Message received</div>
+              <div class="sc-pending-sub">Our team will get back to you shortly.</div>
+            </div>
+          </div>
+
+          <!-- Messages list -->
+          <div class="sc-messages" id="support-messages"></div>
+
+          <!-- Admin typing indicator -->
+          <div id="support-admin-typing" class="sc-typing-row" style="display:none">
+            <div class="sc-typing-avatar">S</div>
+            <div class="sc-typing-bubble">
+              <span class="sc-dot" style="animation-delay:0ms"></span>
+              <span class="sc-dot" style="animation-delay:180ms"></span>
+              <span class="sc-dot" style="animation-delay:360ms"></span>
+            </div>
+          </div>
+
+          <!-- Input row -->
+          <div class="sc-input-row">
+            <input class="sc-input" id="support-message-input" type="text" placeholder="Type a message…" maxlength="2000" />
+            <button class="sc-send-btn" id="support-send" aria-label="Send">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13"/>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+              </svg>
+            </button>
           </div>
         </div>
       </section>

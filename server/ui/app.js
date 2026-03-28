@@ -25,6 +25,8 @@ const state = {
   upgradeUrl: "",
   subscription: null,
   supportMessages: [],
+  supportResolved: false,
+  supportUnreadCount: 0,
   accountId: null,
   hostUuidFromConfig: null,
   accountEmail: null,
@@ -2320,6 +2322,8 @@ async function loadControlPlaneConfig() {
     try { updateActivationGateTrialText(); } catch (_) {}
     try { updateButtonStates(); } catch (_) {}
     try { scheduleExpiryRefresh(); } catch (_) {}
+    // Reset TTL so usage is always fresh after a config load (e.g. plan upgrade via socket)
+    _usageBarsLastFetchMs = 0;
     try { renderUsageBars().catch(function() {}); } catch (_) {}
   } catch (_) {}
 }
@@ -2353,7 +2357,7 @@ function startDevCountdown() {
       bannerText.textContent = "Dev mode: trial has expired. Upgrade to keep using JoinCloud.";
       graceBanner.classList.add("grace-banner-warning");
       stopDevCountdown();
-      loadControlPlaneConfig().catch(function() {});
+      // License state will be pushed via socket.io → no need to poll here
       return;
     }
     var mins = Math.floor(remaining / 60);
@@ -2385,17 +2389,15 @@ function scheduleExpiryRefresh() {
   // Only arm the timer if expiry is within the look-ahead window.
   var windowMs = state.devMode ? 2 * 60 * 1000 : 24 * 60 * 60 * 1000;
   if (msLeft > windowMs) return;
-  expiryRefreshTimer = setTimeout(async () => {
+  expiryRefreshTimer = setTimeout(() => {
     expiryRefreshTimer = null;
-    try {
-      await loadControlPlaneConfig();
-      updateAppGate();
-      updateGraceBanner();
-      updateSubscriptionSection();
-      updateTeamsLockedState();
-      renderUsageBars().catch(() => {});
-    } catch (_) {}
-  }, msLeft + 500); // 500 ms buffer so the server has registered the expiry
+    // Update UI based on current cached state — socket.io pushes real changes
+    updateAppGate();
+    updateGraceBanner();
+    updateSubscriptionSection();
+    updateTeamsLockedState();
+    renderUsageBars().catch(() => {});
+  }, msLeft + 500); // 500 ms buffer
 }
 
 /** Update button states based on license status */
@@ -2721,7 +2723,11 @@ function updateServerStatusIndicator() {
   }
 }
 
+var _usageBarsLastFetchMs = 0;
 async function renderUsageBars() {
+  var now = Date.now();
+  if (now - _usageBarsLastFetchMs < 15000) return; // skip if fetched within last 15 s
+  _usageBarsLastFetchMs = now;
   var section = document.getElementById("usage-bars-section");
   var loader = document.getElementById("usage-bars-loader");
   var errorEl = document.getElementById("usage-bars-error");
@@ -5244,25 +5250,83 @@ async function loadSupportMessages() {
     const res = await apiFetch("/api/support/messages");
     const data = await res.json().catch(() => ({}));
     state.supportMessages = Array.isArray(data.messages) ? data.messages : [];
+    updateSupportChatState();
     renderSupportMessages();
   } catch (_) {
     state.supportMessages = [];
+    updateSupportChatState();
     renderSupportMessages();
   }
+}
+
+function updateSupportChatState() {
+  var msgs = state.supportMessages || [];
+  var startScreen = document.getElementById("support-start-screen");
+  var chatBody = document.getElementById("support-chat-body");
+  var resolvedScreen = document.getElementById("support-resolved-screen");
+  var pendingBanner = document.getElementById("support-pending-banner");
+  if (!startScreen || !chatBody) return;
+
+  if (state.supportResolved) {
+    // Resolved: hide everything else, show resolved screen
+    startScreen.style.display = "none";
+    chatBody.style.display = "none";
+    if (resolvedScreen) resolvedScreen.style.display = "flex";
+    return;
+  }
+
+  if (resolvedScreen) resolvedScreen.style.display = "none";
+
+  if (msgs.length === 0) {
+    // Empty: show start screen
+    startScreen.style.display = "flex";
+    chatBody.style.display = "none";
+    return;
+  }
+
+  // Has messages: show chat body
+  startScreen.style.display = "none";
+  chatBody.style.display = "flex";
+
+  // Pending: only device messages so far
+  var hasAdminReply = msgs.some(function(m) { return (m.sender || "").toLowerCase() === "admin"; });
+  if (pendingBanner) pendingBanner.style.display = hasAdminReply ? "none" : "flex";
 }
 
 function renderSupportMessages() {
   if (!els.supportMessages) return;
   const list = state.supportMessages || [];
-  els.supportMessages.innerHTML = list.length === 0
-    ? "<div class=\"value value-muted\">No messages yet. Send a message to start the conversation.</div>"
-    : list.map((m) => {
-        const isDevice = (m.sender || "").toLowerCase() === "device";
-        const label = isDevice ? "You" : "Support";
-        const cls = isDevice ? "support-message device" : "support-message admin";
-        const time = m.timestamp ? new Date(m.timestamp).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "";
-        return `<div class="${cls}"><span class="value value-muted" style="font-size:11px">${label} ${time}</span><br/>${escapeHtml(m.text || "")}</div>`;
-      }).join("");
+  if (!list.length) {
+    els.supportMessages.innerHTML = "";
+    return;
+  }
+  var html = "";
+  var lastDateStr = "";
+  list.forEach(function(m) {
+    var isDevice = (m.sender || "").toLowerCase() === "device";
+    var ts = m.timestamp ? new Date(m.timestamp) : new Date();
+    var today = new Date();
+    var yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+    var dateStr = ts.toDateString();
+    var dateLabel = dateStr === today.toDateString() ? "Today"
+      : dateStr === yesterday.toDateString() ? "Yesterday"
+      : ts.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    if (dateStr !== lastDateStr) {
+      html += '<div class="sc-date-divider">' + dateLabel + '</div>';
+      lastDateStr = dateStr;
+    }
+    var time = ts.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    var msgCls = isDevice ? "sc-msg device" : "sc-msg admin";
+    var avatarText = isDevice ? "You" : "S";
+    html += '<div class="' + msgCls + '">'
+      + '<div class="sc-msg-avatar">' + avatarText + '</div>'
+      + '<div class="sc-msg-wrap">'
+      + '<div class="sc-msg-bubble">' + escapeHtml(m.text || "") + '</div>'
+      + '<span class="sc-msg-time">' + time + '</span>'
+      + '</div>'
+      + '</div>';
+  });
+  els.supportMessages.innerHTML = html;
   els.supportMessages.scrollTop = els.supportMessages.scrollHeight;
 }
 
@@ -5276,21 +5340,20 @@ async function sendSupportMessage() {
   if (!els.supportMessageInput) return;
   const text = (els.supportMessageInput.value || "").trim();
   if (!text) return;
+  // Optimistically add message
+  if (!Array.isArray(state.supportMessages)) state.supportMessages = [];
+  state.supportMessages.push({ sender: "device", text: text, timestamp: new Date().toISOString() });
+  els.supportMessageInput.value = "";
+  updateSupportChatState();
+  renderSupportMessages();
   try {
-    const res = await apiFetch("/api/support/send", {
+    await apiFetch("/api/support/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
     });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      alert(data.message || "Failed to send message.");
-      return;
-    }
-    els.supportMessageInput.value = "";
-    await loadSupportMessages();
   } catch (_) {
-    alert("Network error. Try again.");
+    // Best-effort; local state already shows message
   }
 }
 
@@ -5426,9 +5489,7 @@ async function bootstrapApp() {
   } catch (_) {}
   updateMuteButton();
 
-  setInterval(() => {
-    if (document.querySelector(".section.active")?.dataset.section === "support") loadSupportMessages();
-  }, 8000);
+  // Support messages are now delivered in real-time via SSE; no polling needed.
 }
 
 async function continueBootstrapAfterActivation() {
@@ -5482,9 +5543,7 @@ async function continueBootstrapAfterActivation() {
     await loadNotifications();
   } catch (_) {}
   updateMuteButton();
-  setInterval(() => {
-    if (document.querySelector(".section.active")?.dataset.section === "support") loadSupportMessages();
-  }, 8000);
+  // Support messages are now delivered in real-time via SSE; no polling needed.
 }
 
 function setActiveSection(sectionId) {
@@ -5496,7 +5555,17 @@ function setActiveSection(sectionId) {
   if (window.location.hash !== `#${safeSection}`) window.location.hash = safeSection;
   els.sections.forEach((section) => section.classList.toggle("active", section.dataset.section === safeSection));
   els.navButtons.forEach((button) => button.classList.toggle("active", button.dataset.section === safeSection));
-  if (safeSection === "support") loadSupportMessages();
+  if (safeSection === "support") {
+    // Clear unread badge when support tab is opened
+    var badge = document.getElementById("support-nav-badge");
+    if (badge) badge.classList.remove("visible");
+    state.supportUnreadCount = 0;
+    // Request notification permission for future messages
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      Notification.requestPermission().catch(function() {});
+    }
+    loadSupportMessages();
+  }
   if (safeSection === "network") loadNetwork();
   if (safeSection === "teams") loadTeams();
   if (safeSection === "settings") {
@@ -7095,41 +7164,31 @@ initJoinCloudUpdaterUi();
 
 bootstrapApp();
 
-// Dynamic config poll: 10 s in dev mode, 60 s in production.
-// Self-reschedules so the interval can adapt after the first config load sets state.devMode.
-(function scheduleConfigPoll() {
-  var delay = state.devMode ? 10 * 1000 : 60 * 1000;
-  setTimeout(async () => {
-    if (els.appLayout.style.display !== "none") {
-      try {
-        await loadControlPlaneConfig();
-        updateGraceBanner();
-        updateSubscriptionSection();
-        updateHeaderProfile();
-        renderUsageBars().catch(() => {});
-      } catch (_) {}
-    }
-    scheduleConfigPoll();
-  }, delay);
-})();
 
 setInterval(async () => {
   if (els.appLayout.style.display !== "none") {
+    const _section = window.location.hash.replace("#", "") || "home";
+    // Always update header status badge and notification count
     await loadRuntimeStatus();
-    await loadLogs();
     await loadNotifications();
-    try {
-      const socialRes = await apiFetch("/api/v1/files/social/notifications");
-      if (socialRes.ok) {
-        const socialData = await socialRes.json().catch(() => ({}));
-        const first = Array.isArray(socialData.notifications) ? socialData.notifications[0] : null;
-        if (first && first.type === "like") {
-          showUploadBanner(`${first.actor} liked ${first.path}`, "success");
-          setTimeout(hideUploadBanner, 1200);
+    // Only fetch logs when the logs section is active
+    if (_section === "logs") await loadLogs();
+    // Social notifications only matter on the home/files sections
+    if (_section === "home" || _section === "files" || _section === "") {
+      try {
+        const socialRes = await apiFetch("/api/v1/files/social/notifications");
+        if (socialRes.ok) {
+          const socialData = await socialRes.json().catch(() => ({}));
+          const first = Array.isArray(socialData.notifications) ? socialData.notifications[0] : null;
+          if (first && first.type === "like") {
+            showUploadBanner(`${first.actor} liked ${first.path}`, "success");
+            setTimeout(hideUploadBanner, 1200);
+          }
         }
-      }
-    } catch (_) {}
-    if (state.isAdmin) {
+      } catch (_) {}
+    }
+    // Admin-specific fetches — skip on pages where they're not displayed
+    if (state.isAdmin && _section !== "settings" && _section !== "network" && _section !== "support") {
       await loadPendingAccessRequests();
       await loadApprovedDevices();
       await loadShareVisitSummary();
@@ -7139,3 +7198,169 @@ setInterval(async () => {
     await pollAccessStatus(state.requestId);
   }
 }, 3000);
+
+// ─── Real-time SSE client (support chat + plan/license events) ───────────────
+(function initRealtimeSSE() {
+  var sseUrl = "http://127.0.0.1:8787/api/sse/events";
+  var adminTypingTimer = null;
+  var es = null;
+
+  function getEl(id) { return document.getElementById(id); }
+
+  function setAdminActive(active) {
+    var el = getEl("support-admin-active");
+    if (!el) return;
+    el.style.display = active ? "flex" : "none";
+  }
+
+  function setAdminTyping(isTyping) {
+    var el = getEl("support-admin-typing");
+    if (!el) return;
+    el.style.display = isTyping ? "flex" : "none";
+  }
+
+  function appendRealtimeMessage(msg) {
+    if (!msg || !msg.text) return;
+    if (!Array.isArray(state.supportMessages)) state.supportMessages = [];
+    state.supportMessages.push(msg);
+    updateSupportChatState();
+    renderSupportMessages();
+
+    // Show in-app unread badge if user is NOT on support tab
+    var currentSection = window.location.hash.replace("#", "") || "home";
+    if (currentSection !== "support") {
+      var badge = getEl("support-nav-badge");
+      if (badge) badge.classList.add("visible");
+      state.supportUnreadCount = (state.supportUnreadCount || 0) + 1;
+      // Browser notification
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        try {
+          new Notification("JoinCloud Support", {
+            body: msg.text.length > 80 ? msg.text.slice(0, 80) + "…" : msg.text,
+            silent: false,
+          });
+        } catch (_) {}
+      }
+    }
+  }
+
+  function handleResolved() {
+    state.supportResolved = true;
+    var chatBody = getEl("support-chat-body");
+    var startScreen = getEl("support-start-screen");
+    var resolvedScreen = getEl("support-resolved-screen");
+    if (chatBody && chatBody.style.display !== "none") {
+      chatBody.style.transition = "opacity 0.4s ease";
+      chatBody.style.opacity = "0";
+      setTimeout(function() {
+        chatBody.style.display = "none";
+        chatBody.style.opacity = "";
+        chatBody.style.transition = "";
+        if (startScreen) startScreen.style.display = "none";
+        if (resolvedScreen) resolvedScreen.style.display = "flex";
+      }, 400);
+    } else {
+      if (startScreen) startScreen.style.display = "none";
+      if (chatBody) chatBody.style.display = "none";
+      if (resolvedScreen) resolvedScreen.style.display = "flex";
+    }
+    setAdminActive(false);
+    setAdminTyping(false);
+  }
+
+  function connect() {
+    if (es) return;
+    try {
+      es = new EventSource(sseUrl);
+
+      es.addEventListener("support:message", function(e) {
+        try {
+          var msg = JSON.parse(e.data);
+          appendRealtimeMessage(msg);
+        } catch (_) {}
+      });
+
+      es.addEventListener("support:admin_joined", function() {
+        setAdminActive(true);
+      });
+
+      es.addEventListener("support:admin_left", function() {
+        setAdminActive(false);
+        setAdminTyping(false);
+        if (adminTypingTimer) { clearTimeout(adminTypingTimer); adminTypingTimer = null; }
+      });
+
+      es.addEventListener("support:typing", function(e) {
+        try {
+          var data = JSON.parse(e.data);
+          setAdminTyping(!!data.isTyping);
+          if (adminTypingTimer) clearTimeout(adminTypingTimer);
+          if (data.isTyping) {
+            adminTypingTimer = setTimeout(function() { setAdminTyping(false); }, 3000);
+          }
+        } catch (_) {}
+      });
+
+      es.addEventListener("support:resolved", function() {
+        handleResolved();
+      });
+
+      es.onerror = function() {
+        try { es.close(); } catch (_) {}
+        es = null;
+        setTimeout(connect, 5000);
+      };
+    } catch (_) {
+      setTimeout(connect, 10000);
+    }
+  }
+
+  // Wire up typing indicator on the support input
+  var inputEl = getEl("support-message-input");
+  var typingSendTimer = null;
+  if (inputEl) {
+    inputEl.addEventListener("input", function() {
+      fetch("/api/support/typing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isTyping: true }),
+      }).catch(function() {});
+      if (typingSendTimer) clearTimeout(typingSendTimer);
+      typingSendTimer = setTimeout(function() {
+        fetch("/api/support/typing", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isTyping: false }),
+        }).catch(function() {});
+      }, 1500);
+    });
+  }
+
+  // "Start Conversation" button
+  var startBtn = getEl("support-start-btn");
+  if (startBtn) {
+    startBtn.addEventListener("click", function() {
+      var startScreen = getEl("support-start-screen");
+      var chatBody = getEl("support-chat-body");
+      if (startScreen) startScreen.style.display = "none";
+      if (chatBody) chatBody.style.display = "flex";
+      setTimeout(function() {
+        var inp = getEl("support-message-input");
+        if (inp) inp.focus();
+      }, 50);
+    });
+  }
+
+  // "New Chat" button (after resolved)
+  var newChatBtn = getEl("support-new-chat-btn");
+  if (newChatBtn) {
+    newChatBtn.addEventListener("click", function() {
+      state.supportResolved = false;
+      state.supportMessages = [];
+      updateSupportChatState();
+      renderSupportMessages();
+    });
+  }
+
+  connect();
+})();

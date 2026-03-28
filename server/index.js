@@ -1,5 +1,6 @@
 const path = require("path");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
+const socketClient = require("./realtime/socketClient");
 const http = require("http");
 const https = require("https");
 const fs = require("fs/promises");
@@ -1669,6 +1670,14 @@ async function bootstrap() {
       res.status(400).json({ message: "Message text required." });
       return;
     }
+    // Try socket first (real-time + persists server-side); HTTP only as fallback
+    const sentViaSocket = socketClient.sendSupportMessage(text);
+    if (sentViaSocket) {
+      // Socket path: admin server handles persistence, no duplicate HTTP call needed
+      res.status(201).json({ sent: true, via: "socket" });
+      return;
+    }
+    // Fallback: socket not connected, persist via HTTP
     controlPlanePost(adminHost, `/api/messages/${encodeURIComponent(deviceUUID)}/reply`, { sender: "device", text }, null, (err, result) => {
       if (err) {
         logger.warn("support send proxy error", { error: err.message });
@@ -1681,6 +1690,28 @@ async function bootstrap() {
       }
       res.status(201).json(result.data || {});
     });
+  });
+
+  // ─── SSE endpoint: real-time push events to the React frontend ───────────
+  app.get("/api/sse/events", (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+    // Send a heartbeat every 25s to keep the connection alive through proxies
+    const heartbeat = setInterval(() => {
+      try { res.write(":heartbeat\n\n"); } catch (_) { clearInterval(heartbeat); }
+    }, 25000);
+    res.on("close", () => clearInterval(heartbeat));
+    socketClient.addSseClient(res);
+  });
+
+  // Typing indicator from the React support UI → forward to admin via socket
+  app.post("/api/support/typing", (req, res) => {
+    const isTyping = req.body?.isTyping === true;
+    socketClient.sendTyping(isTyping);
+    res.json({ ok: true });
   });
 
   app.get("/api/v1/build", (_req, res) => {
@@ -4902,6 +4933,25 @@ async function bootstrap() {
   shareOnlyServer.listen(config.server.sharePort, "127.0.0.1");
   server.listen(config.server.port, config.server.host, () => {
     const publicHost = config.server.host === "0.0.0.0" ? "127.0.0.1" : config.server.host;
+
+    // Connect to JoinCloud Admin Socket.IO for real-time events
+    const _adminHostForSocket = config.telemetry && config.telemetry.adminHost;
+    const _hostUuidForSocket = getHostUuidForConfig && getHostUuidForConfig();
+    if (_adminHostForSocket && _hostUuidForSocket) {
+      // Read socket_port from already-cached config (populated by refreshLicenseFromControlPlane on startup)
+      const _socketPort = (controlPlaneConfigCache && controlPlaneConfigCache.socket_port)
+        ? Number(controlPlaneConfigCache.socket_port)
+        : (config.telemetry && config.telemetry.socketPort ? Number(config.telemetry.socketPort) : 3001);
+      socketClient.connectToAdmin({
+        adminHost: _adminHostForSocket,
+        hostUuid: _hostUuidForSocket,
+        socketPort: _socketPort,
+        writeEntitlements: writeSignedEntitlements,
+        getCache: () => controlPlaneConfigCache,
+        setCache: (val) => { controlPlaneConfigCache = val; },
+      });
+    }
+
     logger.info("app started", {
       host: config.server.host,
       port: config.server.port,

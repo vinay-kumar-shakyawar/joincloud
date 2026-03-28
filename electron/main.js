@@ -320,8 +320,9 @@ function startBackend() {
   backendProcess.stdout.on("data", (chunk) => {
     const text = chunk.toString().trim();
     logLine(text);
-    // Loopback callback route emits this marker after successful auth/extend verify.
-    if (text.includes("[joincloud-auth-callback] license-updated") && mainWindow && !mainWindow.isDestroyed()) {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    // Loopback callback route / socket client emits this marker after a license change.
+    if (text.includes("[joincloud-auth-callback] license-updated")) {
       mainWindow.webContents.send("license-updated");
       mainWindow.show();
       mainWindow.focus();

@@ -44,6 +44,18 @@ contextBridge.exposeInMainWorld("joincloud", {
   },
 });
 
+// ─── Support real-time helpers (SSE-based, no Electron IPC needed) ──────────
+// The React frontend connects directly to the embedded server's SSE endpoint.
+// These constants are exposed so React components can reference the correct URL.
+contextBridge.exposeInMainWorld("joincloudRealtime", {
+  /** URL of the SSE stream for real-time support / plan events */
+  sseUrl: "http://127.0.0.1:8787/api/sse/events",
+  /** POST endpoint to send a support message */
+  supportSendUrl: "http://127.0.0.1:8787/api/support/send",
+  /** POST endpoint to report typing indicator */
+  supportTypingUrl: "http://127.0.0.1:8787/api/support/typing",
+});
+
 contextBridge.exposeInMainWorld("updater", {
   checkForUpdates: () => ipcRenderer.send("update:check"),
   downloadUpdate: () => ipcRenderer.send("update:download"),
