@@ -4938,14 +4938,9 @@ async function bootstrap() {
     const _adminHostForSocket = config.telemetry && config.telemetry.adminHost;
     const _hostUuidForSocket = getHostUuidForConfig && getHostUuidForConfig();
     if (_adminHostForSocket && _hostUuidForSocket) {
-      // Read socket_port from already-cached config (populated by refreshLicenseFromControlPlane on startup)
-      const _socketPort = (controlPlaneConfigCache && controlPlaneConfigCache.socket_port)
-        ? Number(controlPlaneConfigCache.socket_port)
-        : (config.telemetry && config.telemetry.socketPort ? Number(config.telemetry.socketPort) : 3001);
       socketClient.connectToAdmin({
         adminHost: _adminHostForSocket,
         hostUuid: _hostUuidForSocket,
-        socketPort: _socketPort,
         writeEntitlements: writeSignedEntitlements,
         getCache: () => controlPlaneConfigCache,
         setCache: (val) => { controlPlaneConfigCache = val; },

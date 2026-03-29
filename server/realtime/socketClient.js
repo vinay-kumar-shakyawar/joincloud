@@ -59,21 +59,11 @@ function pushSse(eventType, data) {
  * @param {function} opts.getCache           () => controlPlaneConfigCache
  * @param {function} opts.setCache           (val) => { controlPlaneConfigCache = val }
  */
-function connectToAdmin({ adminHost, hostUuid, socketPort, writeEntitlements, getCache, setCache }) {
+function connectToAdmin({ adminHost, hostUuid, writeEntitlements, getCache, setCache }) {
   if (_socket) return; // already connected
 
-  const baseUrl = adminHost.replace(/\/$/, "");
-  // If a dedicated socket port is provided, swap in that port
-  let url = baseUrl;
-  if (socketPort && socketPort !== 80 && socketPort !== 443) {
-    try {
-      const parsed = new URL(baseUrl.indexOf("://") === -1 ? `https://${baseUrl}` : baseUrl);
-      parsed.port = String(socketPort);
-      url = parsed.toString().replace(/\/$/, "");
-    } catch (_) {
-      url = baseUrl;
-    }
-  }
+  // Socket.IO is on the same server as the admin Express app — no separate port needed.
+  const url = adminHost.replace(/\/$/, "");
 
   _socket = io(`${url}/device`, {
     reconnection: true,
