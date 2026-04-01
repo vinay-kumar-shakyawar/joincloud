@@ -14,6 +14,11 @@ directories:
   buildResources: build
   output: dist
 
+publish:
+  provider: github
+  owner: joincloud
+  repo: joincloud
+
 extraResources:
   - from: server/bin/tunnel/
     to: bin/tunnel/

@@ -4,14 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>JoinCloud</title>
+    <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <header class="topbar">
       <div class="brand">
         <button class="button secondary menu-toggle" id="menu-toggle" aria-label="Toggle sidebar" title="Toggle menu">☰</button>
-        <img class="brand-logo" src="/logo.png" alt="JoinCloud" />
-        <span>JoinCloud</span>
+        <img src="/logo.png" alt="JoinCloud" style="height: 30px;"  />
+        <!-- <span>JoinCloud</span> -->
         <span class="badge" id="pending-badge" style="display:none">0 Pending</span>
         <span class="brand-separator">|</span>
         <span class="brand-user" id="header-display-name">Join</span>
@@ -36,6 +37,33 @@
     <div class="grace-banner" id="grace-banner" style="display:none;" role="alert">
       <span id="grace-banner-text">Payment issue – please update your payment method. Full access until <span id="grace-ends-date"></span>.</span>
       <a id="grace-banner-upgrade" href="#" target="_blank" rel="noopener noreferrer" style="margin-left:12px; color:inherit; font-weight:600; text-decoration:underline; display:none;">Upgrade now</a>
+    </div>
+
+    <div id="update-banner" class="update-banner update-banner--hidden" style="display:none;" role="alert" aria-live="polite">
+      <div class="update-banner-inner">
+        <div id="update-banner-available" class="update-banner-panel">
+          <span id="update-banner-msg-available" class="update-banner-msg"></span>
+          <div class="update-banner-actions">
+            <button type="button" class="button secondary" id="update-banner-btn-changelog">Changelog</button>
+            <button type="button" class="button" id="update-banner-btn-upgrade">Upgrade</button>
+            <button type="button" class="button secondary" id="update-banner-btn-dismiss" aria-label="Dismiss">×</button>
+          </div>
+          <ul id="update-banner-notes" class="update-banner-notes" style="display:none;"></ul>
+        </div>
+        <div id="update-banner-downloading" class="update-banner-panel" style="display:none;">
+          <span id="update-banner-msg-download" class="update-banner-msg"></span>
+          <div class="update-banner-progress" aria-hidden="true"><div id="update-banner-progress-fill" class="update-banner-progress-fill"></div></div>
+          <span id="update-banner-speed" class="update-banner-speed"></span>
+        </div>
+        <div id="update-banner-ready" class="update-banner-panel" style="display:none;">
+          <span id="update-banner-msg-ready" class="update-banner-msg"></span>
+          <button type="button" class="button" id="update-banner-btn-install">Restart &amp; Install</button>
+        </div>
+        <div id="update-banner-error" class="update-banner-panel" style="display:none;">
+          <span id="update-banner-msg-error" class="update-banner-msg"></span>
+          <button type="button" class="button" id="update-banner-btn-retry">Retry</button>
+        </div>
+      </div>
     </div>
 
     <section class="layout" id="access-gate" style="display:none;">
@@ -93,14 +121,14 @@
           <button class="nav-button" data-section="files" title="Files"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg></span><span class="nav-label">Files</span></button>
           <button class="nav-button" data-section="devices" title="Devices"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4V6zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1zm-1 9h-4v-7h4v7z"/></svg></span><span class="nav-label">Devices</span></button>
           <button class="nav-button" data-section="shares" title="Shares"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92c0-1.61-1.31-2.92-2.92-2.92z"/></svg></span><span class="nav-label">Shares</span></button>
-          <button class="nav-button nav-button-teams" data-section="teams" title="Teams"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg></span><span class="nav-label">Teams</span><span class="nav-unread-dot" id="teams-nav-unread-dot" style="display:none"></span></button>
+          <!-- <button class="nav-button nav-button-teams" data-section="teams" title="Teams"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg></span><span class="nav-label">Teams</span><span class="nav-unread-dot" id="teams-nav-unread-dot" style="display:none"></span></button> -->
           <button class="nav-button" data-section="activity" title="Activity"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/></svg></span><span class="nav-label">Activity</span></button>
         </nav>
         <nav class="nav-group nav-group-bottom">
           <button class="nav-button" data-section="settings" title="Settings"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg></span><span class="nav-label">Settings</span></button>
           <button class="nav-button" data-section="logs" title="Logs"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg></span><span class="nav-label">Logs</span></button>
           <!-- <button class="nav-button" data-section="network" title="Network"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.7 2.06 7.3 2.06 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg></span><span class="nav-label">Network</span></button> -->
-          <button class="nav-button" data-section="support" title="Support"><span class="nav-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/></svg></span><span class="nav-label">Support</span></button>
+          <button class="nav-button" data-section="support" title="Support"><span class="nav-icon" style="position:relative"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/></svg><span id="support-nav-badge" class="sc-nav-badge"></span></span><span class="nav-label">Support</span></button>
         </nav>
       </aside>
 
@@ -181,8 +209,10 @@
           <div class="file-actions">
             <label class="button" id="upload-button-label" for="upload-input"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"/></svg></span> Upload</label>
             <input id="upload-input" type="file" multiple hidden />
+            <!-- <button class="button secondary" id="select-mode-btn">Select</button>
+            <button class="button danger" id="delete-selected-btn" disabled>Delete Selected</button>
+            <button class="button secondary" id="share-selected-btn" disabled>Share Selected</button> -->
             <button class="button secondary" id="my-folder-shortcut" style="display:none">My Folder</button>
-            <button class="button secondary" id="back-button"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg></span>Back</button>
             <button class="button secondary" id="refresh-files"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></span>Refresh</button>
           </div>
         </div>
@@ -192,6 +222,7 @@
           </div>
           <div class="file-filters">
             <select class="input input-compact" id="file-sort">
+              <option value="recent_desc" selected>Recent Activity</option>
               <option value="name_asc">Name (A-Z)</option>
               <option value="name_desc">Name (Z-A)</option>
               <option value="modified_desc">Date Modified (Newest)</option>
@@ -210,6 +241,19 @@
           </div>
         </div>
         <div class="drop-zone" id="drop-zone">Drag & drop files here</div>
+        <div class="drop-zone-overlay" id="drop-zone-overlay" style="display:none;">
+          <div class="drop-zone-overlay-inner">Drop files or folders anywhere to upload</div>
+        </div>
+        <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;">
+          <button class="button secondary" id="back-button"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg></span>Back</button>
+          <div>
+            <button class="button secondary" id="select-mode-btn">Select</button>
+            <button class="button danger" id="delete-selected-btn" disabled>Delete Selected</button>
+            <!-- <button class="button secondary" id="share-selected-btn" disabled>Share Selected</button> -->
+          </div>
+        </div>
+        
+        <div class="group-share-list" id="group-share-list"></div>
         <div class="value value-muted" id="upload-scope-hint"></div>
         <div class="breadcrumbs" id="breadcrumbs"></div>
         <div class="file-list" id="file-list" data-view="list"></div>
@@ -483,6 +527,40 @@
           </div>
         </div>
 
+        <!-- SECTION: Updates (Electron — requires app update IPC) -->
+        <div class="settings-section" id="settings-updates-section" style="display:none;">
+          <h3 class="settings-section-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17 1.01L7 1c-1.1 0-2 .9-2 2v18c0 1.1.9 2 2 2h10c1.1 0 2-.9 2-2V3c0-1.1-.9-1.99-2-1.99zM17 19H7V5h10v14zm-1-6h-3V8h-2v5H8l4 4 4-4z"/></svg>
+            Updates
+          </h3>
+          <div class="row space-between" style="margin-top:8px; flex-wrap:wrap; gap:8px;">
+            <div>
+              <div class="label">Current version</div>
+              <div class="value" id="updates-current-version">—</div>
+            </div>
+            <div>
+              <div class="label">Last checked</div>
+              <div class="value value-muted" id="updates-last-checked">—</div>
+            </div>
+            <button type="button" class="button secondary" id="updates-refresh-btn"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></span> Refresh</button>
+          </div>
+          <div id="updates-panel-status" class="value value-muted" style="margin-top:10px; display:none;"></div>
+          <div id="updates-newer-wrap" style="margin-top:16px; display:none;">
+            <h4 class="updates-subheading">Newer versions</h4>
+            <div id="updates-newer-list" class="updates-version-list"></div>
+          </div>
+          <div id="updates-uptodate-msg" class="value value-muted" style="margin-top:12px; display:none;">You are on the latest version (for versions listed in the manifest).</div>
+          <div id="updates-installed-wrap" style="margin-top:16px;">
+            <h4 class="updates-subheading">Installed</h4>
+            <div id="updates-installed-row" class="updates-version-list"></div>
+          </div>
+          <details id="updates-older-details" class="updates-older-details" style="margin-top:16px;">
+            <summary class="updates-older-summary">Older versions <span class="value-muted" style="font-weight:400;">(last 3 — downgrade only)</span></summary>
+            <p class="value value-muted" style="font-size:12px; margin:8px 0 12px;">Downgrading may remove features or cause data issues. Only the three most recent older builds are shown.</p>
+            <div id="updates-older-list" class="updates-version-list"></div>
+          </details>
+        </div>
+
         <!-- SECTION: Display -->
         <div class="settings-section">
           <h3 class="settings-section-title">
@@ -656,7 +734,7 @@
             </div>
             <div>
               <div class="label">Platform</div>
-              <div class="value">Desktop App</div>
+              <div class="value" id="about-platform">—</div>
             </div>
           </div>
           <div class="row" style="margin-top:16px;gap:16px;flex-wrap:wrap;">
@@ -912,12 +990,73 @@
 
       <section class="card section" data-section="support">
         <h2>Support</h2>
-        <p class="value value-muted">Chat with your admin. Messages sync with the control panel.</p>
-        <div class="support-chat">
-          <div class="support-messages" id="support-messages"></div>
-          <div class="support-send-row">
-            <input class="input" id="support-message-input" type="text" placeholder="Type a message..." maxlength="2000" />
-            <button class="button" id="support-send">Send</button>
+
+        <!-- START SCREEN — shown when no messages yet -->
+        <div id="support-start-screen" class="sc-start-screen">
+          <div class="sc-start-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+          </div>
+          <div class="sc-start-title">How can we help?</div>
+          <div class="sc-start-sub">Send us a message and our team will respond as soon as possible.</div>
+          <button class="button" id="support-start-btn" style="margin-top:4px">Start a Conversation</button>
+        </div>
+
+        <!-- RESOLVED SCREEN — replaces chat after admin resolves -->
+        <div id="support-resolved-screen" class="sc-resolved-screen" style="display:none">
+          <div class="sc-resolved-screen-icon">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#22C55E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+              <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+          </div>
+          <div class="sc-resolved-screen-title">Your case is resolved</div>
+          <div class="sc-resolved-screen-sub">Our team has marked this conversation as resolved. Thank you for reaching out!</div>
+          <button class="button secondary" id="support-new-chat-btn" style="margin-top:8px;font-size:13px">Start New Chat</button>
+        </div>
+
+        <!-- CHAT BODY — shown once conversation started -->
+        <div id="support-chat-body" class="sc-chat-body" style="display:none">
+
+          <!-- Admin "LIVE" banner -->
+          <div id="support-admin-active" class="sc-admin-banner" style="display:none">
+            <span class="sc-live-dot"></span>
+            <span>Support is with you right now</span>
+            <span class="sc-live-label">LIVE</span>
+          </div>
+
+          <!-- Pending banner: shown until admin responds -->
+          <div id="support-pending-banner" class="sc-pending-banner" style="display:none">
+            <span class="sc-pending-icon">🕐</span>
+            <div>
+              <div class="sc-pending-title">Message received</div>
+              <div class="sc-pending-sub">Our team will get back to you shortly.</div>
+            </div>
+          </div>
+
+          <!-- Messages list -->
+          <div class="sc-messages" id="support-messages"></div>
+
+          <!-- Admin typing indicator -->
+          <div id="support-admin-typing" class="sc-typing-row" style="display:none">
+            <div class="sc-typing-avatar">S</div>
+            <div class="sc-typing-bubble">
+              <span class="sc-dot" style="animation-delay:0ms"></span>
+              <span class="sc-dot" style="animation-delay:180ms"></span>
+              <span class="sc-dot" style="animation-delay:360ms"></span>
+            </div>
+          </div>
+
+          <!-- Input row -->
+          <div class="sc-input-row">
+            <input class="sc-input" id="support-message-input" type="text" placeholder="Type a message…" maxlength="2000" />
+            <button class="sc-send-btn" id="support-send" aria-label="Send">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13"/>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+              </svg>
+            </button>
           </div>
         </div>
       </section>
@@ -947,6 +1086,10 @@
             <label><input type="radio" name="share-scope" value="public" id="share-scope-public" /> Public</label>
           </div>
           <div id="share-scope-public-hint" class="value value-muted" style="display:none; margin-top:6px; font-size:12px;">Enable Remote Access in Settings to create public shares.</div>
+          <div id="share-public-enable-row" style="display:none; margin-top:8px; align-items:center; gap:10px; flex-wrap:wrap;">
+            <button type="button" class="button secondary button-compact" id="share-enable-remote-access">Enable Remote Access</button>
+            <div class="value value-muted" id="share-public-enable-status" style="font-size:12px"></div>
+          </div>
 
           <label class="label">Permission</label>
           <select class="input" id="share-permission">
@@ -1102,6 +1245,33 @@
         </div>
       </div>
     </div>
+    <div class="modal" id="group-share-modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Create Group Share</h3>
+          <button class="button ghost" id="group-share-close">✕</button>
+        </div>
+        <div class="modal-body">
+          <label for="group-share-name">Group name</label>
+          <input class="input" id="group-share-name" name="groupShareName" type="text" autocomplete="off" placeholder="Team files" />
+          <label style="margin-top:10px;display:block;">Scope</label>
+          <div class="radio-group">
+            <label><input type="radio" name="group-share-scope" value="local" checked /> Local</label>
+            <label><input type="radio" name="group-share-scope" value="public" id="group-share-scope-public" /> Public</label>
+          </div>
+          <div id="group-share-scope-public-hint" class="value value-muted" style="display:none; margin-top:6px; font-size:12px;">Enable Remote Access to create public group shares.</div>
+          <div id="group-share-public-enable-row" style="display:none; margin-top:8px; align-items:center; gap:10px; flex-wrap:wrap;">
+            <button type="button" class="button secondary button-compact" id="group-share-enable-remote-access">Enable Remote Access</button>
+            <div class="value value-muted" id="group-share-public-enable-status" style="font-size:12px"></div>
+          </div>
+          <div id="group-share-result" style="margin-top:12px;"></div>
+        </div>
+        <div class="modal-actions">
+          <button class="button secondary" id="group-share-cancel">Cancel</button>
+          <button class="button" id="group-share-create">Create</button>
+        </div>
+      </div>
+    </div>
     <!-- Device Limit Exceeded Modal: shown when approved devices exceed plan limit after downgrade -->
     <div class="modal" id="device-limit-exceeded-modal">
       <div class="modal-content" style="max-width:520px;">
@@ -1123,7 +1293,38 @@
       <button type="button" class="upload-banner-dismiss" aria-label="Dismiss">✕</button>
     </div>
 
+    <div id="preview-drawer" class="preview-drawer" aria-hidden="true">
+      <div class="preview-drawer-backdrop" id="preview-drawer-backdrop"></div>
+      <div class="preview-drawer-panel">
+        <div class="preview-drawer-toolbar">
+          <div class="preview-drawer-title" id="preview-drawer-title">Preview</div>
+          <div class="preview-drawer-actions">
+            <button type="button" class="button secondary button-compact button-icon-only" id="preview-gallery-toggle" title="Toggle gallery" aria-label="Toggle gallery">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5h18v4H3V5zm0 5h18v4H3v-4zm0 5h18v4H3v-4z"/></svg>
+            </button>
+            <button type="button" class="button secondary button-compact" id="preview-selection-toggle">Selection</button>
+            <button type="button" class="button secondary button-compact" id="preview-download-current"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M5 20h14v-2H5v2zm7-18-5.5 5.5h4v6h3v-6h4L12 2z"/></svg></span>Download</button>
+            <button type="button" class="button secondary button-compact" id="preview-download-selected" style="display:none;">Download Selected (0)</button>
+            <button type="button" class="button ghost button-compact" id="preview-drawer-close" aria-label="Close preview drawer">✕</button>
+          </div>
+        </div>
+        <div class="preview-drawer-body">
+          <div class="preview-drawer-main">
+            <button type="button" class="preview-nav-btn" id="preview-prev" aria-label="Previous file">‹</button>
+            <div class="preview-drawer-stage" id="preview-drawer-stage"></div>
+            <button type="button" class="preview-nav-btn" id="preview-next" aria-label="Next file">›</button>
+          </div>
+          <aside class="preview-drawer-gallery" id="preview-drawer-gallery">
+            <div class="preview-drawer-gallery-list" id="preview-drawer-gallery-list"></div>
+          </aside>
+        </div>
+      </div>
+    </div>
+
+    <div id="host-transfer-stack" class="host-transfer-stack host-transfer-stack-empty" aria-live="polite"></div>
+
     <script src="/vendor/qrious.min.js"></script>
+    <script src="/chunk-upload.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>

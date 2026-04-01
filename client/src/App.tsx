@@ -22,6 +22,8 @@ import Shares from "@/pages/sharing";
 import ElectronDashboard from "./pages/electron"
 import { Badge } from "@/ui-kit"
 import { InternetStatus } from "@/components/internet-status"
+import { TransferProvider } from "@/contexts/transfer-context"
+import { TransferOverlay } from "@/components/transfer-overlay"
 
 interface User {
   id: string
@@ -114,40 +116,43 @@ export default function App() {
   // }
 
   return (
-    <TooltipProvider>
-      <SidebarProvider style={style as React.CSSProperties}>
-        <div className="flex h-screen w-full">
-          <AppSidebar />
-          <div className="flex flex-col flex-1">
-            <header className="flex items-center justify-between h-16 px-6 border-b gap-4 border-slate-700">
-              <SidebarTrigger data-testid="button-sidebar-toggle" />
-              <div className="flex items-center gap-4">
-                <InternetStatus />
-                <Badge
-                  variant={
-                    statusQuery.isLoading
-                      ? "warning"
+    <TransferProvider>
+      <TooltipProvider>
+        <SidebarProvider style={style as React.CSSProperties}>
+          <div className="flex h-screen w-full">
+            <AppSidebar />
+            <div className="flex flex-col flex-1">
+              <header className="flex items-center justify-between h-16 px-6 border-b gap-4 border-slate-700">
+                <SidebarTrigger data-testid="button-sidebar-toggle" />
+                <div className="flex items-center gap-4">
+                  <InternetStatus />
+                  <Badge
+                    variant={
+                      statusQuery.isLoading
+                        ? "warning"
+                        : statusQuery.isError || statusQuery.data?.status !== "running"
+                          ? "error"
+                          : "success"
+                    }
+                  >
+                    {statusQuery.isLoading
+                      ? "Recovering"
                       : statusQuery.isError || statusQuery.data?.status !== "running"
-                        ? "error"
-                        : "success"
-                  }
-                >
-                  {statusQuery.isLoading
-                    ? "Recovering"
-                    : statusQuery.isError || statusQuery.data?.status !== "running"
-                      ? "Offline"
-                      : "Healthy"}
-                </Badge>
-              </div>
-            </header>
-            <SharedFilesBar />
-            <main className="flex-1 overflow-auto">
-              <Router user={user} />
-            </main>
+                        ? "Offline"
+                        : "Healthy"}
+                  </Badge>
+                </div>
+              </header>
+              <SharedFilesBar />
+              <main className="flex-1 overflow-auto">
+                <Router user={user} />
+              </main>
+            </div>
           </div>
-        </div>
-      </SidebarProvider>
-      <Toaster />
-    </TooltipProvider>
+        </SidebarProvider>
+        <TransferOverlay />
+        <Toaster />
+      </TooltipProvider>
+    </TransferProvider>
   )
 }

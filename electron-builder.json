@@ -43,5 +43,10 @@
       "from": "server/bin",
       "to": "bin"
     }
-  ]
+  ],
+  "publish": {
+    "provider": "github",
+    "owner": "joincloud",
+    "repo": "joincloud"
+  }
 }
