@@ -1,0 +1,21 @@
+directories:
+  output: dist-mac2
+  buildResources: build
+appId: app.joincloud.desktop
+productName: JoinCloud
+extraResources:
+  - from: server/bin/tunnel/
+    to: bin/tunnel/
+    filter:
+      - '**/*'
+mac:
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlementsInherit: build/entitlements.mac.plist
+  entitlements: build/entitlements.mac.plist
+win:
+  target: nsis
+linux:
+  target: AppImage
+files: []
+electronVersion: 31.7.7

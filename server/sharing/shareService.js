@@ -4,6 +4,19 @@ const { generateShareId } = require("./tokenGenerator");
 const { normalizePermission } = require("./permissionResolver");
 const { validateShareTarget } = require("../security/pathGuard");
 
+function shareExpiryMs(share) {
+  if (!share || share.expiryTime == null || share.expiryTime === "") return null;
+  const t = new Date(share.expiryTime).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+/** Share is expired only when wall clock is strictly past expiry (invalid/missing expiry never auto-expires here). */
+function isSharePastExpiry(share, now = Date.now()) {
+  const t = shareExpiryMs(share);
+  if (t == null) return false;
+  return now > t;
+}
+
 class ShareService {
   constructor({ ownerRoot, defaultPermission, defaultTtlMs, storagePath, logger, telemetry }) {
     this.ownerRoot = ownerRoot;
@@ -82,6 +95,7 @@ class ShareService {
       expiryTime: expiresAt.toISOString(),
       createdAt: createdAt.toISOString(),
       revoked: false,
+      publicUrl: null,
     };
 
     this.shares.set(shareId, share);
@@ -120,6 +134,14 @@ class ShareService {
     return true;
   }
 
+  async setPublicUrl(shareId, publicUrl) {
+    const share = this.shares.get(shareId);
+    if (!share) return;
+    share.publicUrl = publicUrl || null;
+    this.shares.set(shareId, share);
+    await this.saveToDisk();
+  }
+
   getShare(shareId) {
     const share = this.shares.get(shareId);
     if (!share) {
@@ -128,10 +150,9 @@ class ShareService {
     if (share.revoked) {
       return null;
     }
-    if (new Date(share.expiryTime).getTime() <= Date.now()) {
-      share.revoked = true;
-      this.shares.set(shareId, share);
-      this.saveToDisk().catch(() => {});
+    // Do not persist expiry from a hot read — ExpiryManager sweep marks revoked. Avoids false "expired"
+    // when clocks/metadata are odd and matches listShares() semantics (strictly past expiry).
+    if (isSharePastExpiry(share)) {
       return null;
     }
     return share;
@@ -143,20 +164,24 @@ class ShareService {
 
   expireShares() {
     const now = Date.now();
+    let dirty = false;
     for (const share of this.shares.values()) {
-      if (!share.revoked && new Date(share.expiryTime).getTime() <= now) {
+      if (!share.revoked && isSharePastExpiry(share, now)) {
         share.revoked = true;
         this.shares.set(share.shareId, share);
+        dirty = true;
       }
     }
-    this.saveToDisk().catch(() => {});
+    if (dirty) {
+      this.saveToDisk().catch(() => {});
+    }
   }
 
   listShares() {
     const results = [];
     const now = Date.now();
     for (const share of this.shares.values()) {
-      const expired = new Date(share.expiryTime).getTime() <= now;
+      const expired = isSharePastExpiry(share, now);
       const status = share.revoked ? "revoked" : expired ? "expired" : "active";
       results.push({ ...share, status });
     }

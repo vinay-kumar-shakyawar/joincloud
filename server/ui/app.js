@@ -7,7 +7,7 @@ const state = {
   isAdmin: false,
   sharingEnabled: true,
   fileView: "list",
-  fileSort: "name_asc",
+  fileSort: "recent_desc",
   fileSearch: "",
   foldersOnly: false,
   selectedShares: new Set(),
@@ -25,6 +25,8 @@ const state = {
   upgradeUrl: "",
   subscription: null,
   supportMessages: [],
+  supportResolved: false,
+  supportUnreadCount: 0,
   accountId: null,
   hostUuidFromConfig: null,
   accountEmail: null,
@@ -42,7 +44,26 @@ const state = {
   devExpiryWarningMinutes: 2,
   usageSharesThisMonth: 0,
   usageDevicesLinked: 0,
+  serverStatus: "online", // "online" | "offline"
+  lastServerSuccessAt: 0,
+  serverFailureStreak: 0,
 };
+
+// Current tab for Shares list: 'local' or 'public'
+const stateShareTab = {
+  current: "local",
+};
+
+const stateFileSelection = {
+  enabled: false,
+  selected: new Set(),
+};
+
+const inputMode = {
+  lastPointerType: "mouse",
+  touchpadClickGapMs: 320,
+};
+const socialCache = new Map();
 
 const els = {
   appLayout: document.getElementById("app-layout"),
@@ -65,12 +86,22 @@ const els = {
   toggleSharing: document.getElementById("toggle-sharing"),
   statusDot: document.getElementById("status-dot"),
   status: document.getElementById("node-status"),
+  networkStatusBadge: document.getElementById("network-status-badge"),
   uploadDestinationLabel: document.getElementById("upload-destination-label"),
   headerDisplayName: document.getElementById("header-display-name"),
   homeStorageSection: document.getElementById("home-storage-section"),
   storageLabel: document.getElementById("storage-label"),
   ownerMount: document.getElementById("owner-mount"),
   openStorage: document.getElementById("open-storage"),
+  homeRemoteAccessToggle: document.getElementById("home-remote-access-toggle"),
+  homeRemoteAccessSettings: document.getElementById("home-remote-access-settings"),
+  remoteCloudUrlInput: document.getElementById("remote-cloud-url-input"),
+  remoteCloudCopy: document.getElementById("remote-cloud-copy"),
+  remoteCloudUrlQr: document.getElementById("remote-cloud-url-qr"),
+  remoteCloudActiveWrap: document.getElementById("remote-cloud-active-wrap"),
+  remoteCloudQrWrap: document.getElementById("remote-cloud-qr-wrap"),
+  remoteCloudSetupCta: document.getElementById("remote-cloud-setup-cta"),
+  remoteCloudSetupBtn: document.getElementById("remote-cloud-setup-btn"),
   cloudUrlInput: document.getElementById("cloud-url-input"),
   copyCloudUrl: document.getElementById("copy-cloud-url"),
   cloudUrlQr: document.getElementById("cloud-url-qr"),
@@ -96,6 +127,18 @@ const els = {
   myFolderShortcut: document.getElementById("my-folder-shortcut"),
   uploadScopeHint: document.getElementById("upload-scope-hint"),
   uploadButtonLabel: document.getElementById("upload-button-label"),
+  newFolderBtn: document.getElementById("new-folder-btn"),
+  selectModeBtn: document.getElementById("select-mode-btn"),
+  deleteSelectedBtn: document.getElementById("delete-selected-btn"),
+  shareSelectedBtn: document.getElementById("share-selected-btn"),
+  dropZoneOverlay: document.getElementById("drop-zone-overlay"),
+  groupShareList: document.getElementById("group-share-list"),
+  groupShareModal: document.getElementById("group-share-modal"),
+  groupShareName: document.getElementById("group-share-name"),
+  groupShareResult: document.getElementById("group-share-result"),
+  groupShareClose: document.getElementById("group-share-close"),
+  groupShareCancel: document.getElementById("group-share-cancel"),
+  groupShareCreate: document.getElementById("group-share-create"),
   shareList: document.getElementById("share-list"),
   teamsList: document.getElementById("teams-list"),
   teamsEmptyState: document.getElementById("teams-empty-state"),
@@ -154,6 +197,7 @@ const els = {
   downloadPrivacyPolicy: document.getElementById("download-privacy-policy"),
   privacyPolicyContent: document.getElementById("privacy-policy-content"),
   buildId: document.getElementById("build-id"),
+  aboutPlatform: document.getElementById("about-platform"),
   graceBanner: document.getElementById("grace-banner"),
   graceEndsDate: document.getElementById("grace-ends-date"),
   settingsProfileRow: document.getElementById("settings-profile-row"),
@@ -162,6 +206,7 @@ const els = {
   settingsProfileEmail: document.getElementById("settings-profile-email"),
   settingsProfilePlan: document.getElementById("settings-profile-plan"),
   settingsProfileStatus: document.getElementById("settings-profile-status"),
+  settingsServerStatus: document.getElementById("settings-server-status"),
   settingsProfileDeviceLimit: document.getElementById("settings-profile-device-limit"),
   settingsProfileExpiry: document.getElementById("settings-profile-expiry"),
   subscriptionCard: document.getElementById("subscription-card"),
@@ -179,6 +224,19 @@ const els = {
   closePreviewModal: document.getElementById("close-preview-modal"),
   previewTitle: document.getElementById("preview-title"),
   previewBody: document.getElementById("preview-body"),
+  previewDrawer: document.getElementById("preview-drawer"),
+  previewDrawerBackdrop: document.getElementById("preview-drawer-backdrop"),
+  previewDrawerClose: document.getElementById("preview-drawer-close"),
+  previewDrawerTitle: document.getElementById("preview-drawer-title"),
+  previewDrawerStage: document.getElementById("preview-drawer-stage"),
+  previewDrawerGallery: document.getElementById("preview-drawer-gallery"),
+  previewDrawerGalleryList: document.getElementById("preview-drawer-gallery-list"),
+  previewGalleryToggle: document.getElementById("preview-gallery-toggle"),
+  previewSelectionToggle: document.getElementById("preview-selection-toggle"),
+  previewDownloadCurrent: document.getElementById("preview-download-current"),
+  previewDownloadSelected: document.getElementById("preview-download-selected"),
+  previewPrev: document.getElementById("preview-prev"),
+  previewNext: document.getElementById("preview-next"),
   activationBlock: document.getElementById("activation-block"),
   activationEmail: document.getElementById("activation-email"),
   activationPassword: document.getElementById("activation-password"),
@@ -195,8 +253,17 @@ const els = {
   uploadBanner: document.getElementById("upload-banner"),
   uploadBannerText: document.querySelector(".upload-banner-text"),
   uploadBannerDismiss: document.querySelector(".upload-banner-dismiss"),
+  hostTransferStack: document.getElementById("host-transfer-stack"),
   shareQrModal: document.getElementById("share-qr-modal"),
   closeShareQrModal: document.getElementById("close-share-qr-modal"),
+  deleteSharedItemModal: document.getElementById("delete-shared-item-modal"),
+  deleteSharedItemCancelTop: document.getElementById("delete-shared-item-cancel-top"),
+  deleteSharedItemCancel: document.getElementById("delete-shared-item-cancel"),
+  deleteSharedItemStopOnly: document.getElementById("delete-shared-item-stop-only"),
+  deleteSharedItemStopAndDelete: document.getElementById("delete-shared-item-stop-and-delete"),
+  deleteSharedItemTitle: document.getElementById("delete-shared-item-title"),
+  deleteSharedItemDescription: document.getElementById("delete-shared-item-description"),
+  deleteSharedItemPath: document.getElementById("delete-shared-item-path"),
   technicalConfigContent: document.getElementById("technical-config-content"),
   mdnsHostname: document.getElementById("mdns-hostname"),
   mdnsIpFallback: document.getElementById("mdns-ip-fallback"),
@@ -207,6 +274,16 @@ const els = {
   manualConnectBtn: document.getElementById("manual-connect-btn"),
   manualConnectStatus: document.getElementById("manual-connect-status"),
   shareExtraActions: document.getElementById("share-extra-actions"),
+  shareScopePublic: document.getElementById("share-scope-public"),
+  shareScopePublicHint: document.getElementById("share-scope-public-hint"),
+  sharePublicEnableRow: document.getElementById("share-public-enable-row"),
+  shareEnableRemoteAccess: document.getElementById("share-enable-remote-access"),
+  sharePublicEnableStatus: document.getElementById("share-public-enable-status"),
+  groupShareScopePublic: document.getElementById("group-share-scope-public"),
+  groupShareScopePublicHint: document.getElementById("group-share-scope-public-hint"),
+  groupSharePublicEnableRow: document.getElementById("group-share-public-enable-row"),
+  groupShareEnableRemoteAccess: document.getElementById("group-share-enable-remote-access"),
+  groupSharePublicEnableStatus: document.getElementById("group-share-public-enable-status"),
   shareWithUserBtn: document.getElementById("share-with-user-btn"),
   shareWithTeamBtn: document.getElementById("share-with-team-btn"),
   networkSearchBtn: document.getElementById("network-search-btn"),
@@ -235,6 +312,24 @@ const els = {
   networkDiscoveryIp: document.getElementById("network-discovery-ip"),
   networkDiscoveryBadge: document.getElementById("network-discovery-badge"),
   networkDiscoveryOpenBtn: document.getElementById("network-discovery-open-btn"),
+  publicStatus: document.getElementById("public-status"),
+  remoteAccessNotConfigured: document.getElementById("remote-access-not-configured"),
+  remoteAccessSetupWrap: document.getElementById("remote-access-setup-wrap"),
+  remoteAccessSetupBtn: document.getElementById("remote-access-setup-btn"),
+  remoteAccessSetupSpinner: document.getElementById("remote-access-setup-spinner"),
+  remoteAccessSetupError: document.getElementById("remote-access-setup-error"),
+  remoteAccessSetupErrorText: document.getElementById("remote-access-setup-error-text"),
+  remoteAccessSetupRetry: document.getElementById("remote-access-setup-retry"),
+  remoteAccessConfiguredWrap: document.getElementById("remote-access-configured-wrap"),
+  remoteAccessToggle: document.getElementById("remote-access-toggle"),
+  remoteAccessStarting: document.getElementById("remote-access-starting"),
+  remoteAccessActive: document.getElementById("remote-access-active"),
+  remoteAccessUrl: document.getElementById("remote-access-url"),
+  remoteAccessCopy: document.getElementById("remote-access-copy"),
+  remoteAccessOpen: document.getElementById("remote-access-open"),
+  remoteAccessQr: document.getElementById("remote-access-qr"),
+  remoteAccessPin: document.getElementById("remote-access-pin"),
+  remoteAccessPinSave: document.getElementById("remote-access-pin-save"),
 };
 
 const stateMeta = {
@@ -253,6 +348,60 @@ const stateMeta = {
   notificationsMuted: localStorage.getItem("joincloud:mute-notifications") === "1",
   lastNotificationIds: new Set(),
 };
+
+const FILE_ACTIVITY_KEY = "joincloud:file-activity:v1";
+const FILE_ACTIVITY_LIMIT = 5000;
+
+function loadFileActivityMap() {
+  try {
+    const raw = localStorage.getItem(FILE_ACTIVITY_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (_e) {
+    return {};
+  }
+}
+
+const fileActivityMap = loadFileActivityMap();
+
+function persistFileActivityMap() {
+  try {
+    const entries = Object.entries(fileActivityMap)
+      .filter(([, v]) => v && Number.isFinite(Number(v.ts)))
+      .sort((a, b) => Number(b[1].ts) - Number(a[1].ts))
+      .slice(0, FILE_ACTIVITY_LIMIT);
+    const compact = {};
+    entries.forEach(([k, v]) => {
+      compact[k] = { ts: Number(v.ts), reason: String(v.reason || "activity") };
+    });
+    localStorage.setItem(FILE_ACTIVITY_KEY, JSON.stringify(compact));
+  } catch (_e) {
+    // ignore storage failures
+  }
+}
+
+function normalizeActivityPath(pathValue) {
+  const norm = String(pathValue || "")
+    .replace(/\\/g, "/")
+    .replace(/\/+/g, "/");
+  if (!norm || norm === "/") return "/";
+  return norm.startsWith("/") ? norm : `/${norm}`;
+}
+
+function touchFileActivity(pathValue, reason) {
+  const key = normalizeActivityPath(pathValue);
+  fileActivityMap[key] = { ts: Date.now(), reason: String(reason || "activity") };
+  persistFileActivityMap();
+}
+
+function getFileRecency(item) {
+  const key = normalizeActivityPath(item && item.path);
+  const activityTs = fileActivityMap[key] && Number(fileActivityMap[key].ts);
+  if (Number.isFinite(activityTs) && activityTs > 0) return activityTs;
+  const modifiedTs = new Date(item && item.modifiedAt).getTime();
+  return Number.isFinite(modifiedTs) ? modifiedTs : 0;
+}
 
 function getOrCreateFingerprint() {
   const key = "joincloud:device-fingerprint";
@@ -323,7 +472,43 @@ function isInMyFolder(pathValue) {
 
 function isPreviewableName(fileName) {
   const lower = String(fileName || "").toLowerCase();
-  return /\.(png|jpe?g|gif|webp|svg|pdf|mp4|webm|mov|m4v)$/i.test(lower);
+  return /\.(png|jpe?g|gif|webp|svg|pdf|csv|mp4|webm|mov|m4v)$/i.test(lower);
+}
+
+function buildFileContentUrl(pathValue, withDownload) {
+  const params = new URLSearchParams({
+    path: pathValue,
+    fp: stateMeta.fingerprint,
+  });
+  if (stateMeta.sessionToken) {
+    params.set("token", stateMeta.sessionToken);
+  }
+  if (withDownload) {
+    params.set("download", "true");
+  }
+  return `/api/v1/file/content?${params.toString()}`;
+}
+
+function getFilePreviewKind(fileName) {
+  const lower = String(fileName || "").toLowerCase();
+  if (/\.(png|jpe?g|gif|webp|svg)$/i.test(lower)) return "image";
+  if (/\.pdf$/i.test(lower)) return "pdf";
+  if (/\.csv$/i.test(lower)) return "csv";
+  if (/\.(xlsx|xls)$/i.test(lower)) return "excel";
+  if (/\.(mp4|webm|mov|m4v)$/i.test(lower)) return "video";
+  return "none";
+}
+
+function getFileThumbMarkup(item) {
+  const kind = getFilePreviewKind(item.name);
+  const safeName = escapeHtml(item.name || "File");
+  if (kind === "image") {
+    return `<img class="file-card-thumb-media" src="${buildFileContentUrl(item.path, false)}" alt="${safeName}" loading="lazy" />`;
+  }
+  if (kind === "video") {
+    return `<video class="file-card-thumb-media" src="${buildFileContentUrl(item.path, false)}" muted preload="metadata"></video>`;
+  }
+  return `<div class="file-card-thumb-icon">${getFileIcon(item)}</div>`;
 }
 
 function withAuthHeaders(extra = {}) {
@@ -347,6 +532,301 @@ async function apiFetch(url, options = {}, allowUnauthorized = false) {
     throw new Error("approval_required");
   }
   return res;
+}
+
+/** Chunked transfer overlay (Electron host UI is server/ui, not Vite client). */
+var hostTransferUiInitialized = false;
+var hostTransferItems = [];
+var hostTransferController = null;
+var hostTransferCurrentUploadId = null;
+var hostTransferPollTimer = null;
+var hostTransferShareUnsub = null;
+var hostTransferIncomingCompleteTimers = Object.create(null);
+
+function joinOwnerPath(base, rel) {
+  var b = (base || "/").replace(/\/+$/, "") || "";
+  var r = String(rel || "")
+    .replace(/^\/+/, "")
+    .replace(/\\/g, "/");
+  if (!r) return b || "/";
+  return (b + "/" + r).replace(/\/+/g, "/") || "/";
+}
+
+function relativeUploadTarget(basePath, relativePath) {
+  var norm = String(relativePath || "")
+    .replace(/\\/g, "/")
+    .replace(/^\.\/+/, "");
+  var i = norm.lastIndexOf("/");
+  var fileName = i >= 0 ? norm.slice(i + 1) : norm;
+  var dir = i >= 0 ? norm.slice(0, i) : "";
+  var targetPath = joinOwnerPath(basePath, dir);
+  return { fileName: fileName, targetPath: targetPath };
+}
+
+async function transferRequest(url, init) {
+  return apiFetch(url, Object.assign({}, init || {}, { credentials: "include" }));
+}
+
+function formatBytesShortHost(n) {
+  if (!Number.isFinite(n) || n < 0) return "—";
+  var u = ["B", "KB", "MB", "GB"];
+  var i = 0;
+  var v = n;
+  while (v >= 1024 && i < u.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return (i === 0 ? v : v.toFixed(1)) + " " + u[i];
+}
+
+function formatHostSpeed(bps) {
+  if (!Number.isFinite(bps) || bps < 0) return "";
+  var u = ["B/s", "KB/s", "MB/s", "GB/s"];
+  var v = bps;
+  var i = 0;
+  while (v >= 1024 && i < u.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return (i === 0 ? Math.round(v) : v.toFixed(1)) + " " + u[i];
+}
+
+function formatHostEta(sec) {
+  if (!Number.isFinite(sec) || sec < 0 || sec === Infinity) return "";
+  if (sec < 60) return Math.round(sec) + "s";
+  if (sec < 3600) return Math.floor(sec / 60) + "m " + Math.round(sec % 60) + "s";
+  return Math.floor(sec / 3600) + "h " + Math.round((sec % 3600) / 60) + "m";
+}
+
+function hostTransferUpsert(item) {
+  var i = hostTransferItems.findIndex(function (x) {
+    return x.id === item.id;
+  });
+  if (i === -1) hostTransferItems.push(item);
+  else hostTransferItems[i] = Object.assign({}, hostTransferItems[i], item);
+  hostTransferRender();
+}
+
+function hostTransferUpdate(id, patch) {
+  var i = hostTransferItems.findIndex(function (x) {
+    return x.id === id;
+  });
+  if (i === -1) return;
+  hostTransferItems[i] = Object.assign({}, hostTransferItems[i], patch);
+  hostTransferRender();
+}
+
+function hostTransferRemove(id) {
+  hostTransferItems = hostTransferItems.filter(function (x) {
+    return x.id !== id;
+  });
+  hostTransferRender();
+}
+
+function hostTransferSyncIncoming(transfers) {
+  var incomingIds = new Set(
+    transfers.map(function (t) {
+      return "incoming-" + t.transferId;
+    })
+  );
+  hostTransferItems.forEach(function (x) {
+    if (x.direction !== "receiving") return;
+    if (incomingIds.has(x.id)) return;
+    if (hostTransferIncomingCompleteTimers[x.id]) return;
+    var pct = Number(x.percent) || 0;
+    if (x.status === "complete" || pct >= 95) {
+      hostTransferIncomingCompleteTimers[x.id] = true;
+      if (x.status !== "complete") {
+        hostTransferUpdate(x.id, {
+          percent: 100,
+          status: "complete",
+          metaLine: "Upload complete",
+        });
+      }
+      var id = x.id;
+      setTimeout(function () {
+        delete hostTransferIncomingCompleteTimers[id];
+        hostTransferRemove(id);
+      }, 4000);
+    }
+  });
+  hostTransferItems = hostTransferItems.filter(function (x) {
+    if (x.direction !== "receiving") return true;
+    if (incomingIds.has(x.id)) return true;
+    return x.status === "complete";
+  });
+  transfers.forEach(function (t) {
+    var id = "incoming-" + t.transferId;
+    var pct = Number(t.percentComplete) || 0;
+    var idx = hostTransferItems.findIndex(function (x) {
+      return x.id === id;
+    });
+    var item = {
+      id: id,
+      direction: "receiving",
+      fileName: String(t.fileName || "Upload"),
+      percent: Math.min(100, pct),
+      status: pct >= 100 ? "complete" : "active",
+      metaLine: formatBytesShortHost(t.totalBytes || 0),
+      chunkLabel:
+        t.chunksReceived != null && t.totalChunks != null
+          ? t.chunksReceived + " / " + t.totalChunks + " chunks"
+          : "",
+      speedLabel: "",
+      etaLabel: "",
+    };
+    if (idx === -1) hostTransferItems.push(item);
+    else hostTransferItems[idx] = Object.assign({}, hostTransferItems[idx], item);
+  });
+  hostTransferRender();
+}
+
+function hostTransferRender() {
+  var root = els.hostTransferStack;
+  if (!root) return;
+  var visible = hostTransferItems.filter(function (x) {
+    if (x.status === "error") return true;
+    if (x.direction === "uploading" && (x.status === "active" || x.status === "paused")) return true;
+    if (x.direction === "receiving" || x.direction === "sending") {
+      if (x.status === "complete") return true;
+      return x.percent < 100 || x.status === "active";
+    }
+    return x.percent < 100;
+  });
+  visible = visible.slice(-3);
+  if (visible.length === 0) {
+    root.innerHTML = "";
+    root.classList.add("host-transfer-stack-empty");
+    return;
+  }
+  root.classList.remove("host-transfer-stack-empty");
+  root.innerHTML = "";
+  var r = 36;
+  var c = 2 * Math.PI * r;
+  visible.forEach(function (item) {
+    var pct = Math.min(100, Math.max(0, item.percent || 0));
+    var offset = c - (pct / 100) * c;
+    var dirLabel =
+      item.direction === "uploading" ? "Uploading" : item.direction === "receiving" ? "Receiving" : "Sending";
+    var stats = (item.speedLabel || "") + (item.etaLabel ? " · ETA " + item.etaLabel : "");
+    if (item.chunkLabel) {
+      stats = stats ? stats + " · " + item.chunkLabel : item.chunkLabel;
+    }
+    var card = document.createElement("div");
+    card.className = "host-transfer-card";
+    card.innerHTML =
+      '<div class="host-transfer-ring-wrap">' +
+      '<svg class="host-transfer-svg" viewBox="0 0 88 88" width="88" height="88">' +
+      '<circle cx="44" cy="44" r="36" fill="none" stroke="rgba(47,183,255,0.2)" stroke-width="6" />' +
+      '<circle class="host-transfer-arc" cx="44" cy="44" r="36" fill="none" stroke="#2fb7ff" stroke-width="6" ' +
+      'stroke-linecap="round" transform="rotate(-90 44 44)" stroke-dasharray="' +
+      c +
+      '" stroke-dashoffset="' +
+      offset +
+      '" />' +
+      "</svg>" +
+      '<span class="host-transfer-pct"></span></div>' +
+      '<div class="host-transfer-info">' +
+      '<div class="host-transfer-label"></div>' +
+      '<div class="host-transfer-name"></div>' +
+      '<div class="host-transfer-meta"></div>' +
+      '<div class="host-transfer-stats"></div>' +
+      '<div class="host-transfer-actions"></div></div>';
+    card.querySelector(".host-transfer-pct").textContent = Math.round(pct) + "%";
+    card.querySelector(".host-transfer-label").textContent = dirLabel;
+    card.querySelector(".host-transfer-name").textContent = item.fileName || "";
+    card.querySelector(".host-transfer-meta").textContent = item.metaLine || "";
+    card.querySelector(".host-transfer-stats").textContent = stats;
+    if (item.error) {
+      card.querySelector(".host-transfer-meta").textContent = item.error;
+    }
+    var actions = card.querySelector(".host-transfer-actions");
+    if (
+      item.direction === "uploading" &&
+      item.id === hostTransferCurrentUploadId &&
+      hostTransferController &&
+      (item.status === "active" || item.status === "paused")
+    ) {
+      var itemId = item.id;
+      var pauseBtn = document.createElement("button");
+      pauseBtn.type = "button";
+      pauseBtn.className = "button secondary button-compact";
+      pauseBtn.textContent = item.status === "paused" ? "Resume" : "Pause";
+      pauseBtn.onclick = function () {
+        var cur = hostTransferItems.find(function (x) {
+          return x.id === itemId;
+        });
+        if (!hostTransferController || !cur) return;
+        if (cur.status === "paused") {
+          hostTransferController.resume();
+          hostTransferUpdate(itemId, { status: "active" });
+        } else {
+          hostTransferController.pause();
+          hostTransferUpdate(itemId, { status: "paused" });
+        }
+      };
+      var cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "button ghost button-compact";
+      cancelBtn.textContent = "Cancel";
+      cancelBtn.onclick = function () {
+        if (hostTransferController) hostTransferController.cancel();
+      };
+      actions.appendChild(pauseBtn);
+      actions.appendChild(cancelBtn);
+    }
+    root.appendChild(card);
+  });
+}
+
+function initHostTransferUi() {
+  if (hostTransferUiInitialized) return;
+  hostTransferUiInitialized = true;
+  if (!els.hostTransferStack) {
+    var el = document.createElement("div");
+    el.id = "host-transfer-stack";
+    el.className = "host-transfer-stack host-transfer-stack-empty";
+    el.setAttribute("aria-live", "polite");
+    document.body.appendChild(el);
+    els.hostTransferStack = el;
+  }
+  function pollIncomingOnce() {
+    if (!els.appLayout || els.appLayout.style.display === "none") return;
+    apiFetch("/api/v1/transfer/active", { method: "GET", credentials: "include" })
+      .then(function (res) {
+        return res.json();
+      })
+      .then(function (data) {
+        var transfers = Array.isArray(data.transfers) ? data.transfers : [];
+        hostTransferSyncIncoming(transfers);
+      })
+      .catch(function () {});
+  }
+  pollIncomingOnce();
+  hostTransferPollTimer = setInterval(pollIncomingOnce, 1200);
+  try {
+    if (window.joincloud && typeof window.joincloud.onShareProgress === "function") {
+      hostTransferShareUnsub = window.joincloud.onShareProgress(function (data) {
+        var total = data.total || 1;
+        var pct = data.pct != null ? data.pct : Math.round((data.bytesSent / total) * 100);
+        hostTransferUpsert({
+          id: "share-outbound",
+          direction: "sending",
+          fileName: "Shared download",
+          percent: Math.min(100, pct),
+          status: pct >= 100 ? "complete" : "active",
+          metaLine: formatBytesShortHost(total),
+          speedLabel: "",
+          etaLabel: "",
+        });
+        if (pct >= 100) {
+          setTimeout(function () {
+            hostTransferRemove("share-outbound");
+          }, 2500);
+        }
+      });
+    }
+  } catch (_e) {}
 }
 
 function showAccessGate(statusText) {
@@ -420,6 +900,7 @@ function showMainApp() {
     els.activationGate.classList.remove("visible");
   }
   els.appLayout.style.display = "grid";
+  initHostTransferUi();
 }
 
 let didBootstrapAfterAuth = false;
@@ -610,6 +1091,13 @@ function getFileExtension(name) {
 }
 
 function compareBySort(a, b, sortKey) {
+  if (sortKey === "recent_desc") {
+    const diff = getFileRecency(b) - getFileRecency(a);
+    if (diff) return diff;
+    const modDiff = new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime();
+    if (modDiff) return modDiff;
+    return a.name.localeCompare(b.name);
+  }
   if (sortKey === "name_desc") {
     return b.name.localeCompare(a.name);
   }
@@ -636,15 +1124,114 @@ function getVisibleItems() {
     return true;
   });
 
-  const folders = filtered.filter((item) => item.type === "folder").sort((a, b) => compareBySort(a, b, state.fileSort));
-  const files = filtered.filter((item) => item.type !== "folder").sort((a, b) => compareBySort(a, b, state.fileSort));
-  return [...folders, ...files];
+  return filtered.sort((a, b) => compareBySort(a, b, state.fileSort));
+}
+
+function updateFileSelectionButtons() {
+  if (els.selectModeBtn) {
+    els.selectModeBtn.textContent = stateFileSelection.enabled ? "Done Selecting" : "Select";
+    els.selectModeBtn.classList.toggle("active", stateFileSelection.enabled);
+  }
+  if (els.deleteSelectedBtn) {
+    const visible = stateFileSelection.enabled && stateFileSelection.selected.size > 0;
+    els.deleteSelectedBtn.style.display = visible ? "inline-flex" : "none";
+    els.deleteSelectedBtn.disabled = !stateFileSelection.enabled || stateFileSelection.selected.size === 0;
+    els.deleteSelectedBtn.textContent = stateFileSelection.selected.size
+      ? `Delete Selected (${stateFileSelection.selected.size})`
+      : "Delete Selected";
+  }
+  if (els.shareSelectedBtn) {
+    const visible = stateFileSelection.enabled && stateFileSelection.selected.size > 0;
+    els.shareSelectedBtn.style.display = visible ? "inline-flex" : "none";
+    els.shareSelectedBtn.disabled = !stateFileSelection.enabled || stateFileSelection.selected.size === 0;
+    els.shareSelectedBtn.textContent = stateFileSelection.selected.size
+      ? `Share Selected (${stateFileSelection.selected.size})`
+      : "Share Selected";
+  }
+}
+
+function setFileSelectionEnabled(enabled) {
+  stateFileSelection.enabled = !!enabled;
+  if (!enabled) {
+    stateFileSelection.selected = new Set();
+  }
+  renderFiles();
+  updateFileSelectionButtons();
+}
+
+function toggleItemSelection(itemPath) {
+  if (!itemPath) return;
+  if (stateFileSelection.selected.has(itemPath)) stateFileSelection.selected.delete(itemPath);
+  else stateFileSelection.selected.add(itemPath);
+  updateFileSelectionButtons();
+}
+
+function handleCardPrimaryOpen(item, sourceEvent) {
+  if (!item) return;
+  if (stateFileSelection.enabled) {
+    toggleItemSelection(item.path);
+    renderFiles();
+    return;
+  }
+  const pointerType = sourceEvent && sourceEvent.pointerType ? sourceEvent.pointerType : inputMode.lastPointerType;
+  const requiresDouble = pointerType !== "mouse";
+  if (requiresDouble && !sourceEvent.__isDoubleIntent) return;
+  if (item.type === "folder") {
+    touchFileActivity(item.path, "open-folder");
+    loadFiles(item.path);
+    return;
+  }
+  openPreviewDrawer(item, state.items.filter((x) => x.type === "file"));
+}
+
+function getSocialActor() {
+  return String(stateMeta?.displayName || stateMeta?.deviceName || "anonymous");
+}
+
+async function fetchSocial(pathValue) {
+  const res = await apiFetch(`/api/v1/files/social?path=${encodeURIComponent(pathValue)}`);
+  if (!res.ok) throw new Error("social_failed");
+  return res.json();
+}
+
+async function reactSocial(pathValue, action) {
+  const res = await apiFetch("/api/v1/files/social/react", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: pathValue, action, actor: getSocialActor() }),
+  });
+  if (!res.ok) throw new Error("social_react_failed");
+  return res.json();
+}
+
+async function commentSocial(pathValue, message) {
+  const res = await apiFetch("/api/v1/files/social/comment", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: pathValue, message, actor: getSocialActor() }),
+  });
+  if (!res.ok) throw new Error("social_comment_failed");
+  return res.json();
 }
 
 function updateFileViewButtons() {
   els.fileList.dataset.view = state.fileView;
   els.viewList.classList.toggle("active", state.fileView === "list");
   els.viewThumb.classList.toggle("active", state.fileView === "thumb");
+}
+
+function getActiveShareForPathAndScope(itemPath, scope) {
+  const normalizedPath = normalizeActivityPath(itemPath);
+  const normalizedScope = scope || "local";
+  return (
+    (state.shares || []).find(
+      (s) =>
+        s &&
+        s.status === "active" &&
+        normalizeActivityPath(s.path || "") === normalizedPath &&
+        (s.scope || "local") === normalizedScope
+    ) || null
+  );
 }
 
 function renderFiles() {
@@ -661,33 +1248,118 @@ function renderFiles() {
 
   state.items.forEach((item) => {
     const row = document.createElement("div");
-    row.className = "item file-item";
+    row.className = "file-card";
+    if (stateFileSelection.enabled) row.classList.add("selecting");
+    if (stateFileSelection.selected.has(item.path)) row.classList.add("selected");
+    row.dataset.path = item.path || "";
     const fileExt = getFileExtension(item.name);
-    const details = item.type === "folder" ? "Folder" : `${fileExt || "file"} · ${formatBytes(item.size)}`;
+    const typeLabel = item.type === "folder" ? "Folder" : (fileExt || "File").toUpperCase();
+    const sizeLabel = item.type === "folder" ? "" : formatBytes(item.size);
+    const modifiedLabel = item.modifiedAt ? new Date(item.modifiedAt).toLocaleString() : "";
+    const activityTs = getFileRecency(item);
+    const activityLabel = activityTs ? new Date(activityTs).toLocaleString() : modifiedLabel;
 
+    const visual = document.createElement("div");
+    visual.className = "file-card-visual";
+    visual.innerHTML = getFileThumbMarkup(item);
+
+    const body = document.createElement("div");
+    body.className = "file-card-body";
     const topRow = document.createElement("div");
-    topRow.className = "file-item-top";
-    const titleEl = document.createElement("span");
-    titleEl.className = "item-title";
+    topRow.className = "file-card-top";
+
+    if (stateFileSelection.enabled) {
+      const selectWrap = document.createElement("label");
+      selectWrap.className = "file-card-select";
+      const check = document.createElement("input");
+      check.type = "checkbox";
+      check.checked = stateFileSelection.selected.has(item.path);
+      check.onchange = () => {
+        toggleItemSelection(item.path);
+        renderFiles();
+      };
+      selectWrap.appendChild(check);
+      topRow.appendChild(selectWrap);
+    }
+
+    const main = document.createElement("div");
+    main.className = "file-card-main";
+    const titleRow = document.createElement("div");
+    titleRow.className = "file-card-title-row";
+    const titleEl = document.createElement("div");
+    titleEl.className = "file-card-name";
     titleEl.textContent = item.name;
     titleEl.title = item.name;
-    topRow.innerHTML = `<span class="file-icon">${getFileIcon(item)}</span>`;
-    topRow.appendChild(titleEl);
+    titleRow.appendChild(titleEl);
+
+    const badges = document.createElement("div");
+    badges.className = "file-card-badges";
+
+    const localShare = isHostRole() ? getActiveShareForPathAndScope(item.path, "local") : null;
+    const publicShare = isHostRole() ? getActiveShareForPathAndScope(item.path, "public") : null;
+    if (localShare || publicShare) {
+      const makeShareBadge = (kind, share) => {
+        const wrap = document.createElement("span");
+        wrap.className = "badge badge-pill " + (kind === "local" ? "badge-shared-local" : "badge-shared-public");
+        wrap.title = kind === "local" ? "Shared on local network" : "Shared publicly";
+        const label = document.createElement("span");
+        label.className = "badge-label";
+        label.textContent = kind === "local" ? "Local" : "Public";
+        wrap.appendChild(label);
+
+        const stop = document.createElement("button");
+        stop.type = "button";
+        stop.className = "badge-stop";
+        stop.textContent = "×";
+        stop.title = kind === "local" ? "Stop local share" : "Stop public share";
+        stop.setAttribute("aria-label", stop.title);
+        stop.onclick = async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          try {
+            await revokeShare(share.shareId);
+          } catch (_) {}
+          try { await loadShares(); } catch (_) {}
+          try { renderFiles(); } catch (_) {}
+        };
+        wrap.appendChild(stop);
+        return wrap;
+      };
+
+      if (localShare) badges.appendChild(makeShareBadge("local", localShare));
+      if (publicShare) badges.appendChild(makeShareBadge("public", publicShare));
+    }
+
+    titleRow.appendChild(badges);
+
+    const subEl = document.createElement("div");
+    subEl.className = "file-card-path mono";
+    subEl.textContent = item.path || "";
+    subEl.title = item.path || "";
+
+    main.appendChild(titleRow);
+    main.appendChild(subEl);
 
     const actions = document.createElement("div");
-    actions.className = "file-item-actions";
+    actions.className = "file-card-actions";
 
     if (item.type === "folder") {
       const openBtn = document.createElement("button");
       openBtn.className = "button secondary";
       openBtn.textContent = "Open";
-      openBtn.onclick = () => loadFiles(item.path);
+      openBtn.onclick = () => {
+        touchFileActivity(item.path, "open-folder");
+        loadFiles(item.path);
+      };
       actions.appendChild(openBtn);
       if (isHostRole()) {
         const shareBtn = document.createElement("button");
         shareBtn.className = "button secondary";
         shareBtn.textContent = "Share";
-        shareBtn.onclick = () => openShareModal(item.path);
+        shareBtn.onclick = () => {
+          touchFileActivity(item.path, "share-open");
+          openShareModal(item.path);
+        };
         actions.appendChild(shareBtn);
       }
     } else {
@@ -695,70 +1367,81 @@ function renderFiles() {
         const shareBtn = document.createElement("button");
         shareBtn.className = "button secondary";
         shareBtn.textContent = "Share";
-        shareBtn.onclick = () => openShareModal(item.path);
+        if (localShare && publicShare) {
+          shareBtn.disabled = true;
+          shareBtn.title = "Already shared for both Local and Public scopes";
+        }
+        shareBtn.onclick = () => {
+          touchFileActivity(item.path, "share-open");
+          openShareModal(item.path);
+        };
         actions.appendChild(shareBtn);
       }
-      if (isPreviewableName(item.name)) {
-        const previewBtn = document.createElement("button");
-        previewBtn.className = "button secondary";
-        previewBtn.textContent = "Preview";
-        previewBtn.onclick = () => openPreviewModal(item);
-        actions.appendChild(previewBtn);
-      }
+      const previewBtn = document.createElement("button");
+      previewBtn.className = "button secondary";
+      previewBtn.textContent = "Preview";
+      previewBtn.onclick = () => openPreviewDrawer(item, state.items.filter((x) => x.type === "file"));
+      actions.appendChild(previewBtn);
     }
 
-    topRow.appendChild(actions);
-    row.appendChild(topRow);
-
-    const detailsRow = document.createElement("div");
-    detailsRow.className = "file-item-details";
-    detailsRow.innerHTML = `<span class="item-sub">${details}</span>`;
-    row.appendChild(detailsRow);
-
     if (isHostRole()) {
-      const bottomRow = document.createElement("div");
-      bottomRow.className = "file-item-bottom";
       const deleteBtn = document.createElement("button");
       deleteBtn.className = "button danger button-icon-only";
       deleteBtn.title = "Delete";
       deleteBtn.setAttribute("aria-label", "Delete");
       deleteBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
       deleteBtn.onclick = () => confirmDeleteItem(item);
-      bottomRow.appendChild(deleteBtn);
-      row.appendChild(bottomRow);
+      actions.appendChild(deleteBtn);
     }
 
-    if (item.type === "folder" && isHostRole()) {
-      const shareButton = document.createElement("button");
-      shareButton.className = "button";
-      shareButton.textContent = "Share";
-      shareButton.onclick = () => openShareModal(item.path);
-      row.appendChild(shareButton);
-    }
-    if (isHostRole()) {
-      const deleteButton = document.createElement("button");
-      deleteButton.className = "button secondary";
-      deleteButton.textContent = "Delete";
-      deleteButton.onclick = async () => {
-        const label = item.type === "folder" ? "folder" : "file";
-        if (!confirm(`Delete this ${label} "${item.name}"? This cannot be undone.`)) return;
-        try {
-          const res = await apiFetch(`/api/v1/file?path=${encodeURIComponent(item.path)}`, { method: "DELETE" });
-          if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            alert(data.error || "Delete failed.");
-            return;
-          }
-          await loadFiles(state.path);
-        } catch (_) {
-          alert("Delete failed.");
-        }
-      };
-      row.appendChild(deleteButton);
-    }
+    topRow.appendChild(main);
+    topRow.appendChild(actions);
+    body.appendChild(topRow);
+
+    const meta = document.createElement("div");
+    meta.className = "file-card-meta";
+
+    const makeMetaItem = (label, value, extraClass) => {
+      const wrap = document.createElement("div");
+      wrap.className = "file-card-meta-item" + (extraClass ? " " + extraClass : "");
+      const l = document.createElement("div");
+      l.className = "file-card-meta-label";
+      l.textContent = label;
+      const v = document.createElement("div");
+      v.className = "file-card-meta-value";
+      v.textContent = value || "—";
+      v.title = value || "";
+      wrap.appendChild(l);
+      wrap.appendChild(v);
+      return wrap;
+    };
+
+    meta.appendChild(makeMetaItem("Type", String(typeLabel || ""), "file-card-meta-type"));
+    meta.appendChild(makeMetaItem("Size", String(sizeLabel || ""), "file-card-meta-size"));
+    meta.appendChild(makeMetaItem("Modified", String(modifiedLabel || ""), "file-card-meta-modified"));
+    meta.appendChild(makeMetaItem("Recent", String(activityLabel || ""), "file-card-meta-activity"));
+    body.appendChild(meta);
+    // Social actions (like/dislike/comments) intentionally hidden on Files page file cards.
+    row.appendChild(visual);
+    row.appendChild(body);
+
+    row.addEventListener("pointerdown", (event) => {
+      inputMode.lastPointerType = event.pointerType || "mouse";
+    });
+    row.addEventListener("click", (event) => {
+      if (event.target && event.target.closest(".file-card-actions, .badge-stop, .file-card-select")) return;
+      handleCardPrimaryOpen(item, event);
+    });
+    row.addEventListener("dblclick", (event) => {
+      if (event.target && event.target.closest(".file-card-actions, .badge-stop, .file-card-select")) return;
+      event.__isDoubleIntent = true;
+      handleCardPrimaryOpen(item, event);
+    });
+
     els.fileList.appendChild(row);
   });
   refreshRemoteUploadUi();
+  updateFileSelectionButtons();
 }
 
 function renderShares() {
@@ -767,24 +1450,44 @@ function renderShares() {
     els.revokeSelected.disabled = state.selectedShares.size === 0;
   };
   const activeShares = state.shares.filter((share) => share.status === "active");
-  if (!activeShares.length) {
+  const isPublicTab = stateShareTab.current === "public";
+  const filteredShares = activeShares.filter((share) => {
+    const scope = String(share.scope || "local");
+    const isPublicScope = scope === "public";
+    return isPublicTab ? isPublicScope : !isPublicScope;
+  });
+  if (!filteredShares.length) {
     state.selectedShares.clear();
     updateBulkButtons();
     els.shareList.innerHTML = '<div class="empty-state"><div class="empty-state-title">No active shares</div><div class="empty-state-sub">No shares created yet</div></div>';
     return;
   }
-  const activeIds = new Set(activeShares.map((share) => share.shareId));
+  const activeIds = new Set(filteredShares.map((share) => share.shareId));
   state.selectedShares = new Set(Array.from(state.selectedShares).filter((id) => activeIds.has(id)));
   updateBulkButtons();
-  activeShares.forEach((share) => {
+  filteredShares.forEach((share) => {
     const row = document.createElement("div");
     row.className = "item";
-    const shareUrl = share.urlIp || share.url || `${stateMeta.lanBaseUrl}/share/${share.shareId}`;
+    const localUrl = share.urlIp || share.url || `${stateMeta.lanBaseUrl}/share/${share.shareId}`;
+    const publicUrl = share.publicUrl || null;
+    const scope = String(share.scope || "local");
+    const isPublicScope = scope === "public";
+    // Public shares should never display the local URL in the Shares list.
+    const displayUrl = isPublicScope
+      ? (publicUrl || share.tunnelCandidateUrl || "Provisioning…")
+      : localUrl;
+    // Copy/QR should only use an actual URL.
+    const actionUrl = isPublicScope
+      ? (publicUrl || share.tunnelCandidateUrl || "")
+      : localUrl;
     row.innerHTML = `
       <div style="flex:1;min-width:0">
         <div class="item-title">${escapeHtml(share.path)}</div>
-        <div class="item-sub">${share.permission} · expires ${new Date(share.expiresAt).toLocaleString()}</div>
-        <div class="share-link-box" style="margin-top:8px;padding:8px 10px;border:1px solid var(--stroke);border-radius:6px;background:var(--bg);font-size:12px;font-family:ui-monospace,monospace;word-break:break-all">${escapeHtml(shareUrl)}</div>
+        <div class="item-sub">${share.permission} · expires ${(() => {
+          const d = share.expiresAt != null && share.expiresAt !== "" ? new Date(share.expiresAt) : null;
+          return d && Number.isFinite(d.getTime()) ? d.toLocaleString() : "—";
+        })()}</div>
+        <div class="share-link-box" style="margin-top:8px;padding:8px 10px;border:1px solid var(--stroke);border-radius:6px;background:var(--bg);font-size:12px;font-family:ui-monospace,monospace;word-break:break-all">${escapeHtml(displayUrl)}</div>
       </div>
       <span class="badge badge-active">Active</span>
     `;
@@ -803,31 +1506,41 @@ function renderShares() {
       row.appendChild(checkboxWrap);
     }
     const copyButton = document.createElement("button");
-    copyButton.className = "button secondary";
-    copyButton.textContent = "Copy Link";
+    copyButton.className = "button secondary button-icon-only";
+    copyButton.title = "Copy link";
+    copyButton.setAttribute("aria-label", "Copy link");
+    copyButton.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>';
     copyButton.onclick = async () => {
-      const ok = await copyToClipboard(shareUrl);
+      if (!actionUrl) return;
+      const ok = await copyToClipboard(actionUrl);
       if (ok) {
-        copyButton.textContent = "Copied!";
-        setTimeout(() => (copyButton.textContent = "Copy Link"), 2000);
+        copyButton.style.opacity = "0.7";
+        setTimeout(() => (copyButton.style.opacity = ""), 1200);
       } else {
-        showCopyFallback(shareUrl, copyButton);
+        showCopyFallback(actionUrl, copyButton);
       }
     };
     row.appendChild(copyButton);
     const qrBtn = document.createElement("button");
-    qrBtn.className = "button secondary";
-    qrBtn.textContent = "QR";
-    qrBtn.onclick = () => showShareQrModal(shareUrl);
+    qrBtn.className = "button secondary button-icon-only";
+    qrBtn.title = "Show QR";
+    qrBtn.setAttribute("aria-label", "Show QR");
+    qrBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 3h8v8H3V3zm2 2v4h4V5H5zm8-2h8v8h-8V3zm2 2v4h4V5h-4zM3 13h8v8H3v-8zm2 2v4h4v-4H5zm10-2h2v2h-2v-2zm-2 2h2v2h-2v-2zm4 0h2v2h-2v-2zm2 2h2v2h-2v-2zm-4 0h2v2h-2v-2zm0 2h2v2h-2v-2zm2 0h2v2h-2v-2z"/></svg>';
+    qrBtn.onclick = () => {
+      if (!actionUrl) return;
+      showShareQrModal(actionUrl);
+    };
     row.appendChild(qrBtn);
 
     if (isHostRole()) {
       const revokeButton = document.createElement("button");
-      revokeButton.className = "button danger";
-      revokeButton.textContent = "Revoke";
+      revokeButton.className = "button danger button-icon-only";
+      revokeButton.title = "Revoke";
+      revokeButton.setAttribute("aria-label", "Revoke");
+      revokeButton.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
       revokeButton.onclick = async () => {
         revokeButton.disabled = true;
-        revokeButton.textContent = "Revoking...";
+        revokeButton.style.opacity = "0.6";
         await revokeShare(share.shareId);
       };
       row.appendChild(revokeButton);
@@ -858,12 +1571,16 @@ function renderNetwork() {
   els.networkList.innerHTML = '<div class="empty-state"><div class="empty-state-title">Coming Soon</div><div class="empty-state-sub">Network discovery will be available in a future release.</div></div>';
 }
 
+const previewDrawerState = {
+  items: [],
+  currentIndex: 0,
+  galleryOpen: true,
+  selectionMode: false,
+  selected: new Set(),
+};
+
 function closePreviewModal() {
-  if (!els.previewModal) return;
-  els.previewModal.classList.remove("active");
-  if (els.previewBody) {
-    els.previewBody.innerHTML = "";
-  }
+  closePreviewDrawer();
 }
 
 function showShareQrModal(url) {
@@ -889,15 +1606,27 @@ function closeShareQrModal() {
   if (els.shareQrModal) els.shareQrModal.classList.remove("active");
 }
 
-async function confirmDeleteItem(item) {
-  const name = item.name || item.path || "item";
-  const typeLabel = item.type === "folder" ? "folder" : "file";
-  const msg = item.type === "folder"
-    ? `Permanently delete the folder "${name}" and all its contents?`
-    : `Permanently delete "${name}"?`;
-  if (!confirm(msg)) return;
+async function stopSharesForPath(pathValue) {
+  const normalizedPath = String(pathValue || "");
+  const activeForPath = (state.shares || []).filter(
+    (s) => s && s.status === "active" && String(s.path || "") === normalizedPath
+  );
+  for (const share of activeForPath) {
+    try {
+      await revokeShare(share.shareId);
+    } catch (_) {}
+  }
   try {
-    const res = await apiFetch(`/api/v1/file?path=${encodeURIComponent(item.path)}`, { method: "DELETE" });
+    await loadShares();
+  } catch (_) {}
+  try {
+    await loadGroupShares();
+  } catch (_) {}
+}
+
+async function deletePathAfterStopSharing(pathValue) {
+  try {
+    const res = await apiFetch(`/api/v1/file?path=${encodeURIComponent(pathValue)}`, { method: "DELETE" });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.error || "Delete failed");
@@ -909,29 +1638,428 @@ async function confirmDeleteItem(item) {
   }
 }
 
-function openPreviewModal(item) {
-  if (!item || item.type !== "file" || !isPreviewableName(item.name)) return;
-  if (!els.previewModal || !els.previewBody || !els.previewTitle) return;
-  const params = new URLSearchParams({
-    path: item.path,
-    fp: stateMeta.fingerprint,
-  });
-  if (stateMeta.sessionToken) {
-    params.set("token", stateMeta.sessionToken);
-  }
-  const previewUrl = `/api/v1/file/content?${params.toString()}`;
-  const lower = String(item.name || "").toLowerCase();
-  els.previewTitle.textContent = `Preview: ${item.name}`;
-  if (/\.(png|jpe?g|gif|webp|svg)$/i.test(lower)) {
-    els.previewBody.innerHTML = `<img src="${previewUrl}" alt="${item.name}" class="preview-image" />`;
-  } else if (/\.pdf$/i.test(lower)) {
-    els.previewBody.innerHTML = `<object data="${previewUrl}" type="application/pdf" class="preview-frame"><iframe src="${previewUrl}" class="preview-frame" title="${item.name}"></iframe></object>`;
-  } else if (/\.(mp4|webm|mov|m4v)$/i.test(lower)) {
-    els.previewBody.innerHTML = `<video controls class="preview-video" src="${previewUrl}"></video>`;
-  } else {
+async function confirmDeleteItem(item) {
+  const name = item.name || item.path || "item";
+  const typeLabel = item.type === "folder" ? "folder" : "file";
+  const msg = item.type === "folder"
+    ? `Permanently delete the folder "${name}" and all its contents?`
+    : `Permanently delete "${name}"?`;
+
+  const normalizedPath = String(item.path || "");
+  const activeSharesForItem = (state.shares || []).filter(
+    (s) => s && s.status === "active" && String(s.path || "") === normalizedPath
+  );
+
+  if (!activeSharesForItem.length || !els.deleteSharedItemModal) {
+    if (!confirm(msg)) return;
+    try {
+      const res = await apiFetch(`/api/v1/file?path=${encodeURIComponent(item.path)}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Delete failed");
+      }
+      await loadFiles(state.path);
+      await loadLogs();
+    } catch (err) {
+      alert(err.message || "Delete failed");
+    }
     return;
   }
-  els.previewModal.classList.add("active");
+
+  els.deleteSharedItemModal.dataset.path = normalizedPath;
+  els.deleteSharedItemModal.dataset.type = typeLabel;
+  els.deleteSharedItemModal.dataset.name = name;
+  els.deleteSharedItemModal.classList.add("active");
+  if (els.deleteSharedItemTitle) {
+    els.deleteSharedItemTitle.textContent =
+      typeLabel === "folder"
+        ? "This folder is currently shared"
+        : "This file is currently shared";
+  }
+  if (els.deleteSharedItemDescription) {
+    els.deleteSharedItemDescription.textContent =
+      "Stop sharing first, or stop sharing and delete in one step. Shares will stop working immediately after revocation.";
+  }
+  if (els.deleteSharedItemPath) {
+    els.deleteSharedItemPath.textContent = normalizedPath;
+  }
+}
+
+async function createFolderAtCurrentPath() {
+  const name = String(prompt("Folder name") || "").trim();
+  if (!name) return;
+  const res = await apiFetch("/api/v1/folder", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path: state.path || "/", name }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    alert(data.error || "Create folder failed");
+    return;
+  }
+  await loadFiles(state.path);
+  await loadGroupShares();
+}
+
+async function deleteSelectedItems() {
+  const paths = Array.from(stateFileSelection.selected);
+  if (!paths.length) return;
+  if (!confirm(`Delete ${paths.length} selected item(s)?`)) return;
+  const res = await apiFetch("/api/v1/files/bulk-delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paths }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    alert(data.error || "Bulk delete failed");
+    return;
+  }
+  stateFileSelection.selected = new Set();
+  await loadFiles(state.path);
+  renderFiles();
+}
+
+async function shareSelectedItems() {
+  const paths = Array.from(stateFileSelection.selected);
+  if (!paths.length) return;
+  if (!els.groupShareModal) return;
+  els.groupShareModal.dataset.paths = JSON.stringify(paths);
+  if (els.groupShareName) {
+    const idx = Number(stateShare.nextGroupNameIndex || 1);
+    els.groupShareName.value = `Group ${Number.isFinite(idx) && idx > 0 ? idx : 1}`;
+    stateShare.nextGroupNameIndex = (Number.isFinite(idx) && idx > 0 ? idx : 1) + 1;
+  }
+  if (els.groupShareResult) els.groupShareResult.innerHTML = "";
+  // Group share Public scope uses the same Remote Access requirement as single-share Public.
+  try {
+    const statusRes = await apiFetch("/api/public-access/status");
+    const statusData = await statusRes.json().catch(() => ({}));
+    stateShare.publicAccessActive = statusData.status === "active" && !!statusData.publicUrl;
+  } catch (_) {
+    stateShare.publicAccessActive = false;
+  }
+  if (els.groupShareScopePublic) els.groupShareScopePublic.disabled = !stateShare.publicAccessActive;
+  if (els.groupShareScopePublicHint) {
+    els.groupShareScopePublicHint.style.display = stateShare.publicAccessActive ? "none" : "block";
+  }
+  setGroupPublicEnableUi({ visible: !stateShare.publicAccessActive, loading: false, message: "" });
+  els.groupShareModal.classList.add("active");
+  requestAnimationFrame(function () {
+    try {
+      if (els.groupShareName) {
+        els.groupShareName.focus();
+        els.groupShareName.select();
+      }
+    } catch (_e) {}
+  });
+}
+
+async function submitGroupShareModal() {
+  if (!els.groupShareModal) return;
+  const paths = JSON.parse(String(els.groupShareModal.dataset.paths || "[]"));
+  const scopeInput = document.querySelector('input[name="group-share-scope"]:checked');
+  const scope = scopeInput ? String(scopeInput.value || "local") : "local";
+  if (scope === "public" && !stateShare.publicAccessActive) {
+    if (els.groupShareScopePublicHint) els.groupShareScopePublicHint.style.display = "block";
+    setGroupPublicEnableUi({ visible: true, loading: false, message: "" });
+    return;
+  }
+  const name = String(els.groupShareName?.value || "").trim() || `Group ${new Date().toLocaleDateString()}`;
+  if (els.groupShareResult) {
+    els.groupShareResult.innerHTML = `<div class="usage-section-loader" style="padding:10px 0;">
+      <span class="usage-section-spinner" aria-hidden="true"></span>
+      <span>Creating group share…</span>
+    </div>`;
+  }
+  const res = await apiFetch("/api/v1/share-groups", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      paths,
+      name,
+      scope,
+      capabilities: { allowDownload: true, allowPreview: true, allowUpload: false, allowDelete: false },
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    if (els.groupShareResult) {
+      if (data && data.error === "public_access_inactive") {
+        els.groupShareResult.textContent = data.message || "Enable Remote Access to create public group shares.";
+        setGroupPublicEnableUi({ visible: true, loading: false, message: "" });
+      } else {
+        els.groupShareResult.textContent = data.error || "Share group failed";
+      }
+    }
+    return;
+  }
+  const base = stateMeta.lanBaseUrl || window.location.origin;
+  const url = `${base}${data.url || ""}`;
+  const publicUrl = data.publicUrl ? String(data.publicUrl) : "";
+  if (els.groupShareResult) {
+    const showPublic = scope === "public" && publicUrl;
+    els.groupShareResult.innerHTML = `<div style="margin-top:6px;display:flex;flex-direction:column;gap:10px;">
+      <div>
+        <div class="value" style="font-size:12px; font-weight:600;">Local:</div>
+        <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(url)}</span>
+        <button type="button" class="button secondary" id="group-share-copy-btn" style="margin-top:6px;">Copy</button>
+        <button type="button" class="button secondary" id="group-share-open-btn" style="margin-top:6px;margin-left:6px;">Open</button>
+      </div>
+      ${showPublic ? `<div>
+        <div class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Public:</div>
+        <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(publicUrl)}</span>
+        <button type="button" class="button secondary" id="group-share-copy-public-btn" style="margin-top:6px;">Copy</button>
+        <button type="button" class="button secondary" id="group-share-open-public-btn" style="margin-top:6px;margin-left:6px;">Open</button>
+      </div>` : ``}
+    </div>`;
+    const copyBtn = document.getElementById("group-share-copy-btn");
+    if (copyBtn) {
+      copyBtn.onclick = async () => {
+        const ok = await copyToClipboard(url);
+        if (ok) {
+          copyBtn.textContent = "Copied!";
+          setTimeout(() => (copyBtn.textContent = "Copy"), 1800);
+        } else {
+          showCopyFallback(url, els.groupShareResult);
+        }
+      };
+    }
+    const openBtn = document.getElementById("group-share-open-btn");
+    if (openBtn) openBtn.onclick = () => window.open(url, "_blank");
+    const copyPublicBtn = document.getElementById("group-share-copy-public-btn");
+    if (copyPublicBtn && publicUrl) {
+      copyPublicBtn.onclick = async () => {
+        const ok = await copyToClipboard(publicUrl);
+        if (ok) {
+          copyPublicBtn.textContent = "Copied!";
+          setTimeout(() => (copyPublicBtn.textContent = "Copy"), 1800);
+        } else {
+          showCopyFallback(publicUrl, els.groupShareResult);
+        }
+      };
+    }
+    const openPublicBtn = document.getElementById("group-share-open-public-btn");
+    if (openPublicBtn && publicUrl) openPublicBtn.onclick = () => window.open(publicUrl, "_blank");
+  }
+  stateShare.lastGroupId = data.groupId || null;
+  await loadGroupShares();
+}
+
+function closeGroupShareModal() {
+  if (!els.groupShareModal) return;
+  els.groupShareModal.classList.remove("active");
+}
+
+async function loadGroupShares() {
+  if (!els.groupShareList) return;
+  const res = await apiFetch("/api/v1/share-groups");
+  if (!res.ok) return;
+  const data = await res.json().catch(() => ({}));
+  const groups = Array.isArray(data.groups) ? data.groups : [];
+  if (!groups.length) {
+    els.groupShareList.innerHTML = "";
+    return;
+  }
+  els.groupShareList.innerHTML = groups
+    .map((group) => {
+      const base = stateMeta.lanBaseUrl || window.location.origin;
+      const link = `${base}/share-group/${group.groupId}`;
+      const isActive = stateShare.lastGroupId && String(stateShare.lastGroupId) === String(group.groupId);
+      return `<div class="group-share-item${isActive ? " group-share-item-active" : ""}"><div class="group-share-main"><div class="group-share-name">${escapeHtml(group.name || "Group")}</div><div class="group-share-meta">${escapeHtml(group.scope || "local")} · ${Array.isArray(group.paths) ? group.paths.length : 0} items</div><div class="group-share-link mono">${escapeHtml(link)}</div></div><div class="group-share-actions"><button class="button secondary button-compact" data-group-copy="${escapeHtml(group.groupId)}">Copy</button><button class="button danger button-compact" data-group-stop="${escapeHtml(group.groupId)}">Stop</button></div></div>`;
+    })
+    .join("");
+  els.groupShareList.querySelectorAll("[data-group-copy]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.getAttribute("data-group-copy");
+      const base = stateMeta.lanBaseUrl || window.location.origin;
+      const link = `${base}/share-group/${id}`;
+      await copyToClipboard(link);
+      btn.textContent = "Copied";
+      setTimeout(() => (btn.textContent = "Copy"), 1200);
+    });
+  });
+  els.groupShareList.querySelectorAll("[data-group-stop]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.getAttribute("data-group-stop");
+      await apiFetch(`/api/v1/share-groups/${encodeURIComponent(id)}`, { method: "DELETE" });
+      await loadGroupShares();
+      await loadShares();
+      renderFiles();
+    });
+  });
+}
+
+function renderPreviewDrawerGallery() {
+  if (!els.previewDrawerGalleryList) return;
+  els.previewDrawerGalleryList.innerHTML = "";
+  previewDrawerState.items.forEach((entry, idx) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "preview-gallery-item" + (idx === previewDrawerState.currentIndex ? " active" : "");
+    row.innerHTML = `
+      <span class="preview-gallery-thumb">${getFileThumbMarkup(entry)}</span>
+      <span class="preview-gallery-meta">
+        <span class="preview-gallery-name">${escapeHtml(entry.name || "File")}</span>
+        <span class="preview-gallery-path mono">${escapeHtml(entry.path || "")}</span>
+      </span>
+    `;
+    row.onclick = () => {
+      previewDrawerState.currentIndex = idx;
+      renderPreviewDrawerStage();
+    };
+    row.ondblclick = () => {
+      previewDrawerState.currentIndex = idx;
+      renderPreviewDrawerStage();
+    };
+    if (previewDrawerState.selectionMode) {
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.className = "preview-gallery-check";
+      checkbox.checked = previewDrawerState.selected.has(entry.path);
+      checkbox.onclick = (e) => e.stopPropagation();
+      checkbox.onchange = () => {
+        if (checkbox.checked) previewDrawerState.selected.add(entry.path);
+        else previewDrawerState.selected.delete(entry.path);
+        renderPreviewDrawerSelectionState();
+      };
+      row.appendChild(checkbox);
+    }
+    els.previewDrawerGalleryList.appendChild(row);
+  });
+}
+
+function scrollPreviewGalleryActiveIntoView() {
+  if (!els.previewDrawerGalleryList) return;
+  const active = els.previewDrawerGalleryList.querySelector(".preview-gallery-item.active");
+  if (active && typeof active.scrollIntoView === "function") {
+    active.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+}
+
+function renderPreviewDrawerSelectionState() {
+  if (!els.previewDownloadSelected || !els.previewSelectionToggle) return;
+  const count = previewDrawerState.selected.size;
+  els.previewDownloadSelected.style.display = previewDrawerState.selectionMode ? "inline-flex" : "none";
+  els.previewDownloadSelected.textContent = `Download Selected (${count})`;
+  els.previewSelectionToggle.textContent = previewDrawerState.selectionMode ? "Cancel Selection" : "Selection";
+}
+
+function renderPreviewDrawerStage() {
+  if (!els.previewDrawerStage || !previewDrawerState.items.length) return;
+  const current = previewDrawerState.items[previewDrawerState.currentIndex];
+  if (!current) return;
+  const kind = getFilePreviewKind(current.name);
+  const previewUrl = buildFileContentUrl(current.path, false);
+  const safeName = escapeHtml(current.name || "File");
+  touchFileActivity(current.path, "preview");
+  if (els.previewDrawerTitle) {
+    els.previewDrawerTitle.textContent = String(current.name || "File");
+  }
+  if (kind === "image") {
+    els.previewDrawerStage.innerHTML = `<img src="${previewUrl}" alt="${safeName}" class="preview-image preview-fit-media" />`;
+  } else if (kind === "pdf") {
+    els.previewDrawerStage.innerHTML = `<object data="${previewUrl}" type="application/pdf" class="preview-frame preview-fullwidth-doc"><iframe src="${previewUrl}" class="preview-frame preview-fullwidth-doc" title="${safeName}"></iframe></object>`;
+  } else if (kind === "csv") {
+    els.previewDrawerStage.innerHTML = `<div class="preview-fullwidth-doc" style="width:100%;height:100%;overflow:auto;padding:12px;">
+      <div class="value-muted" style="margin-bottom:8px;">CSV preview (first lines)</div>
+      <pre class="mono" id="preview-csv-pre" style="white-space:pre;overflow:auto;margin:0;border:1px solid var(--stroke);border-radius:10px;padding:12px;background:rgba(255,255,255,0.03);">${safeName}\nLoading…</pre>
+    </div>`;
+    const pre = document.getElementById("preview-csv-pre");
+    fetch(previewUrl)
+      .then((r) => {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.text();
+      })
+      .then((text) => {
+        const lines = String(text || "").split(/\r?\n/).slice(0, 200).join("\n");
+        pre.textContent = lines || "Preview unavailable";
+      })
+      .catch(() => {
+        pre.textContent = "Preview unavailable";
+      });
+  } else if (kind === "excel") {
+    els.previewDrawerStage.innerHTML = `<div class="preview-drawer-fallback"><div class="preview-drawer-fallback-icon">${getFileIcon(current)}</div><div class="preview-drawer-fallback-text">Preview unavailable</div></div>`;
+  } else if (kind === "video") {
+    els.previewDrawerStage.innerHTML = `<video controls autoplay class="preview-video preview-fit-media" src="${previewUrl}"></video>`;
+  } else {
+    els.previewDrawerStage.innerHTML = `<div class="preview-drawer-fallback"><div class="preview-drawer-fallback-icon">${getFileIcon(current)}</div><div class="preview-drawer-fallback-text">Preview unavailable</div></div>`;
+  }
+  if (els.previewPrev) els.previewPrev.disabled = previewDrawerState.currentIndex <= 0;
+  if (els.previewNext) els.previewNext.disabled = previewDrawerState.currentIndex >= previewDrawerState.items.length - 1;
+  renderPreviewDrawerGallery();
+  scrollPreviewGalleryActiveIntoView();
+  renderPreviewDrawerSelectionState();
+}
+
+function triggerDownloadForPath(pathValue, fileName) {
+  const link = document.createElement("a");
+  link.href = buildFileContentUrl(pathValue, true);
+  if (fileName) link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function closePreviewDrawer() {
+  if (!els.previewDrawer) return;
+  els.previewDrawer.classList.remove("active");
+  els.previewDrawer.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("preview-drawer-open");
+  if (els.previewDrawerStage) els.previewDrawerStage.innerHTML = "";
+}
+
+function openPreviewDrawer(item, sourceItems) {
+  if (!item || item.type !== "file") return;
+  if (!els.previewDrawer) return;
+  const files = (sourceItems || state.items || []).filter((x) => x && x.type === "file");
+  if (!files.length) return;
+  let idx = files.findIndex((x) => String(x.path || "") === String(item.path || ""));
+  if (idx < 0) idx = 0;
+  previewDrawerState.items = files;
+  previewDrawerState.currentIndex = idx;
+  previewDrawerState.selected = new Set();
+  previewDrawerState.selectionMode = false;
+  previewDrawerState.galleryOpen = true;
+  if (els.previewDrawerGallery) els.previewDrawerGallery.classList.remove("collapsed");
+  els.previewDrawer.classList.add("active");
+  els.previewDrawer.setAttribute("aria-hidden", "false");
+  document.body.classList.add("preview-drawer-open");
+  renderPreviewDrawerStage();
+}
+
+function initPreviewDrawerSwipe() {
+  if (!els.previewDrawerStage) return;
+  let touchStartX = 0;
+  els.previewDrawerStage.addEventListener(
+    "touchstart",
+    (e) => {
+      touchStartX = e.touches && e.touches[0] ? e.touches[0].clientX : 0;
+    },
+    { passive: true }
+  );
+  els.previewDrawerStage.addEventListener(
+    "touchend",
+    (e) => {
+      if (!els.previewDrawer || !els.previewDrawer.classList.contains("active")) return;
+      const endX = e.changedTouches && e.changedTouches[0] ? e.changedTouches[0].clientX : touchStartX;
+      const delta = endX - touchStartX;
+      if (Math.abs(delta) < 40) return;
+      if (delta < 0 && previewDrawerState.currentIndex < previewDrawerState.items.length - 1) {
+        previewDrawerState.currentIndex += 1;
+        renderPreviewDrawerStage();
+      } else if (delta > 0 && previewDrawerState.currentIndex > 0) {
+        previewDrawerState.currentIndex -= 1;
+        renderPreviewDrawerStage();
+      }
+    },
+    { passive: true }
+  );
+}
+
+function openPreviewModal(item) {
+  openPreviewDrawer(item, state.items.filter((x) => x.type === "file"));
 }
 
 function shortenFingerprint(value) {
@@ -1132,10 +2260,16 @@ async function loadBuildInfo() {
         els.buildId.textContent = `Build ${stateMeta.buildId || "unknown"}`;
       }
     }
-    if (diagRes?.ok && els.uptimeDisplay) {
+    if (diagRes?.ok) {
       const diag = await diagRes.json();
-      const sec = Number(diag.uptime_seconds) || 0;
-      if (sec > 0) els.uptimeDisplay.textContent = `Uptime: ${formatUptime(sec)}`;
+      if (els.uptimeDisplay) {
+        const sec = Number(diag.uptime_seconds) || 0;
+        if (sec > 0) els.uptimeDisplay.textContent = `Uptime: ${formatUptime(sec)}`;
+      }
+      if (els.aboutPlatform) {
+        const label = diag.platform_label || diag.platform || "";
+        els.aboutPlatform.textContent = label ? String(label) : "Desktop app";
+      }
     }
   } catch (_error) {
     if (els.buildId) els.buildId.textContent = "BUILD: unavailable";
@@ -1145,8 +2279,12 @@ async function loadBuildInfo() {
 async function loadControlPlaneConfig() {
   try {
     const res = await fetch("/api/v1/control-plane-config");
-    if (!res.ok) return;
+    if (!res.ok) {
+      markServerRequestResult(false);
+      return;
+    }
     const data = await res.json();
+    markServerRequestResult(true);
     console.log("[loadControlPlaneConfig] received:", JSON.stringify({ is_authenticated: data.is_authenticated, license: data.license }, null, 2));
     state.licenseState = data.license?.state || null;
     state.licenseGraceEndsAt = data.license?.grace_ends_at ?? null;
@@ -1184,6 +2322,8 @@ async function loadControlPlaneConfig() {
     try { updateActivationGateTrialText(); } catch (_) {}
     try { updateButtonStates(); } catch (_) {}
     try { scheduleExpiryRefresh(); } catch (_) {}
+    // Reset TTL so usage is always fresh after a config load (e.g. plan upgrade via socket)
+    _usageBarsLastFetchMs = 0;
     try { renderUsageBars().catch(function() {}); } catch (_) {}
   } catch (_) {}
 }
@@ -1217,7 +2357,7 @@ function startDevCountdown() {
       bannerText.textContent = "Dev mode: trial has expired. Upgrade to keep using JoinCloud.";
       graceBanner.classList.add("grace-banner-warning");
       stopDevCountdown();
-      loadControlPlaneConfig().catch(function() {});
+      // License state will be pushed via socket.io → no need to poll here
       return;
     }
     var mins = Math.floor(remaining / 60);
@@ -1249,17 +2389,15 @@ function scheduleExpiryRefresh() {
   // Only arm the timer if expiry is within the look-ahead window.
   var windowMs = state.devMode ? 2 * 60 * 1000 : 24 * 60 * 60 * 1000;
   if (msLeft > windowMs) return;
-  expiryRefreshTimer = setTimeout(async () => {
+  expiryRefreshTimer = setTimeout(() => {
     expiryRefreshTimer = null;
-    try {
-      await loadControlPlaneConfig();
-      updateAppGate();
-      updateGraceBanner();
-      updateSubscriptionSection();
-      updateTeamsLockedState();
-      renderUsageBars().catch(() => {});
-    } catch (_) {}
-  }, msLeft + 500); // 500 ms buffer so the server has registered the expiry
+    // Update UI based on current cached state — socket.io pushes real changes
+    updateAppGate();
+    updateGraceBanner();
+    updateSubscriptionSection();
+    updateTeamsLockedState();
+    renderUsageBars().catch(() => {});
+  }, msLeft + 500); // 500 ms buffer
 }
 
 /** Update button states based on license status */
@@ -1553,7 +2691,43 @@ function setUsageBar(id, used, limit) {
   label.textContent = (limit == null || limit >= 999999) ? (used + " (unlimited)") : (used + " / " + limit);
 }
 
+function markServerRequestResult(ok) {
+  const now = Date.now();
+  if (ok) {
+    state.lastServerSuccessAt = now;
+    state.serverFailureStreak = 0;
+    state.serverStatus = "online";
+  } else {
+    state.serverFailureStreak = (state.serverFailureStreak || 0) + 1;
+    // If we haven't had a success in the last 30s or we have repeated failures, mark offline
+    const stale = !state.lastServerSuccessAt || (now - state.lastServerSuccessAt > 30000);
+    if (stale || state.serverFailureStreak >= 2) {
+      state.serverStatus = "offline";
+    }
+  }
+  updateServerStatusIndicator();
+}
+
+function updateServerStatusIndicator() {
+  const el = els.settingsServerStatus;
+  if (!el) return;
+  const status = state.serverStatus || "online";
+  if (status === "offline") {
+    el.textContent = "Server Inactive";
+    el.classList.remove("server-status-online");
+    el.classList.add("server-status-offline");
+  } else {
+    el.textContent = "Server Active";
+    el.classList.remove("server-status-offline");
+    el.classList.add("server-status-online");
+  }
+}
+
+var _usageBarsLastFetchMs = 0;
 async function renderUsageBars() {
+  var now = Date.now();
+  if (now - _usageBarsLastFetchMs < 15000) return; // skip if fetched within last 15 s
+  _usageBarsLastFetchMs = now;
   var section = document.getElementById("usage-bars-section");
   var loader = document.getElementById("usage-bars-loader");
   var errorEl = document.getElementById("usage-bars-error");
@@ -1580,6 +2754,12 @@ async function renderUsageBars() {
     if (loader) loader.style.display = "none";
     if (errorEl) errorEl.style.display = "none";
     if (content) content.style.display = "block";
+
+    var headingEl = document.getElementById("usage-bars-heading");
+    if (headingEl) {
+      headingEl.textContent = "Plan usage this month";
+      headingEl.removeAttribute("title");
+    }
 
     if (section) {
       var tier = (state.licenseTier || "").toLowerCase();
@@ -1827,7 +3007,9 @@ function updateSubscriptionSection() {
   }
 
   if (!els.subscriptionCard) return;
-  els.subscriptionCard.style.display = "block";
+  // Subscription & Billing block is intentionally hidden in Settings UI.
+  els.subscriptionCard.style.display = "none";
+  return;
   const plan = (state.licenseTier || (state.licenseState === "UNREGISTERED" ? "free" : "trial")).replace(/^./, (c) => c.toUpperCase());
   if (els.subscriptionPlan) els.subscriptionPlan.textContent = plan;
   const rawSubStatus = state.licenseState === "UNREGISTERED" ? "Trial ended" : (state.subscription?.status || state.licenseState || "-");
@@ -2131,6 +3313,8 @@ async function loadShares() {
     const res = await apiFetch("/api/shares");
     state.shares = await res.json();
     renderShares();
+    // Keep file badges in sync with active shares.
+    try { renderFiles(); } catch (_) {}
   } finally {
     setRefreshLoading(els.refreshShares, false);
   }
@@ -2179,22 +3363,195 @@ async function updateTelemetrySettings(enabled) {
 async function loadTechnicalConfig() {
   if (!els.technicalConfigContent || !isHostRole()) return;
   try {
-    const res = await apiFetch("/api/v1/technical-config");
-    if (!res.ok) {
+    const [cfgRes, debugRes] = await Promise.all([
+      apiFetch("/api/v1/technical-config"),
+      apiFetch("/api/v1/license/local-usage-debug").catch(() => null),
+    ]);
+    if (!cfgRes.ok) {
       els.technicalConfigContent.textContent = "Available on host only.";
       return;
     }
-    const data = await res.json();
+    const cfg = await cfgRes.json();
     const lines = [
-      `Host ID: ${data.host_id || "-"}`,
-      `Local IPs: ${(data.local_ips || []).join(", ") || "-"}`,
-      `Port: ${data.port || "-"}`,
-      `App version: ${data.app_version || "-"}`,
+      `Host ID: ${cfg.host_id || "-"}`,
+      `Local IPs: ${(cfg.local_ips || []).join(", ") || "-"}`,
+      `Port: ${cfg.port || "-"}`,
+      `App version: ${cfg.app_version || "-"}`,
+      `License state: ${cfg.license_state || "-"}`,
     ];
+    if (debugRes && debugRes.ok) {
+      try {
+        const dbg = await debugRes.json();
+        lines.push(
+          "",
+          "[Local usage diagnostics]",
+          `Shares used (local): ${dbg.local_shares_used}`,
+          `Shares limit (local): ${dbg.local_shares_limit ?? "-"}`,
+          `Shares remaining (local): ${dbg.local_shares_remaining ?? "-"}`,
+          `Usage signature valid: ${dbg.usage_signature_valid === null ? "unknown" : String(dbg.usage_signature_valid)}`,
+          `Entitlements present: ${dbg.entitlements_present ? "yes" : "no"}`,
+          `Admin capped shares this month: ${dbg.admin_capped_shares_this_month}`,
+          `Admin capped shares limit: ${dbg.admin_capped_shares_limit ?? "-"}`,
+        );
+      } catch (_) {}
+    }
     els.technicalConfigContent.textContent = lines.join("\n");
   } catch (_err) {
     els.technicalConfigContent.textContent = "Failed to load.";
   }
+}
+
+async function loadPublicAccessStatus() {
+  if (!els.remoteAccessNotConfigured || !els.remoteAccessConfiguredWrap) return;
+  try {
+    const res = await apiFetch("/api/public-access/status");
+    const data = await res.json();
+    const notConfigured = data.status === "failed" && data.reason === "not_configured";
+    if (notConfigured) {
+      els.remoteAccessNotConfigured.style.display = "block";
+      els.remoteAccessConfiguredWrap.style.display = "none";
+      if (els.remoteAccessSetupWrap) els.remoteAccessSetupWrap.style.display = "block";
+      if (els.remoteAccessSetupSpinner) els.remoteAccessSetupSpinner.style.display = "none";
+      if (els.remoteAccessSetupError) els.remoteAccessSetupError.style.display = "none";
+      return;
+    }
+    els.remoteAccessNotConfigured.style.display = "none";
+    els.remoteAccessConfiguredWrap.style.display = "block";
+    if (els.remoteAccessToggle) {
+      els.remoteAccessToggle.checked = data.status === "active" || data.status === "starting";
+      els.remoteAccessToggle.disabled = false;
+    }
+    if (els.remoteAccessStarting) els.remoteAccessStarting.style.display = data.status === "starting" ? "flex" : "none";
+    if (els.remoteAccessActive) {
+      const hasUrl = data.status === "active" && data.publicUrl;
+      const placeholder = document.getElementById("remote-access-unavailable");
+      if (placeholder) {
+        placeholder.style.display = hasUrl ? "none" : "block";
+        const titleEl = placeholder.querySelector(".remote-access-placeholder-title");
+        const subEl = placeholder.querySelector(".remote-access-placeholder-sub");
+        if (data.status === "starting") {
+          if (titleEl) titleEl.textContent = "Starting Remote Access…";
+          if (subEl) subEl.textContent = "We’re provisioning your public URL. This usually takes a few seconds.";
+        } else if (data.status === "failed") {
+          if (titleEl) titleEl.textContent = "Remote Access is inactive";
+          if (subEl) subEl.textContent = "Turn it on to generate a public URL. If it keeps failing, check your internet connection and try again.";
+        } else {
+          if (titleEl) titleEl.textContent = "Public URL not available yet";
+          if (subEl) subEl.textContent = "Turn on Remote Access and wait a few seconds. Once active, your URL and QR code will appear here.";
+        }
+      }
+
+      els.remoteAccessActive.style.display = hasUrl ? "block" : "none";
+      if (els.remoteAccessCopy) els.remoteAccessCopy.disabled = !hasUrl;
+      if (els.remoteAccessOpen) els.remoteAccessOpen.disabled = !hasUrl;
+
+      if (hasUrl && els.remoteAccessUrl) {
+        els.remoteAccessUrl.href = data.publicUrl;
+        els.remoteAccessUrl.textContent = data.publicUrl;
+        if (window.QRious && els.remoteAccessQr) {
+          new QRious({ element: els.remoteAccessQr, value: data.publicUrl, size: 180 });
+        }
+      } else if (els.remoteAccessUrl) {
+        els.remoteAccessUrl.href = "#";
+        els.remoteAccessUrl.textContent = "";
+        if (els.remoteAccessQr) {
+          const ctx = els.remoteAccessQr.getContext("2d");
+          if (ctx) ctx.clearRect(0, 0, els.remoteAccessQr.width, els.remoteAccessQr.height);
+        }
+      }
+    }
+    // Home → Public File Sharing status
+    const isActive = data.status === "active" && data.publicUrl;
+    const isEnabled = data.status === "active" || data.status === "starting";
+    if (els.homeRemoteAccessToggle) {
+      els.homeRemoteAccessToggle.checked = isEnabled;
+      els.homeRemoteAccessToggle.disabled = false;
+    }
+    if (els.remoteCloudUrlInput) {
+      els.remoteCloudUrlInput.value = isActive ? data.publicUrl : "";
+    }
+    if (els.remoteCloudCopy) {
+      els.remoteCloudCopy.disabled = !isActive;
+    }
+    if (els.remoteCloudActiveWrap) {
+      els.remoteCloudActiveWrap.style.display = isActive ? "block" : "none";
+    }
+    if (els.remoteCloudSetupCta) {
+      els.remoteCloudSetupCta.style.display = isActive ? "none" : "block";
+    }
+    if (els.remoteCloudUrlQr) {
+      if (window.QRious && isActive) {
+        new QRious({
+          element: els.remoteCloudUrlQr,
+          value: data.publicUrl,
+          size: 220,
+        });
+      } else {
+        const ctx = els.remoteCloudUrlQr.getContext("2d");
+        if (ctx) {
+          ctx.clearRect(0, 0, els.remoteCloudUrlQr.width, els.remoteCloudUrlQr.height);
+        }
+      }
+    }
+    if (els.remoteCloudQrWrap) {
+      els.remoteCloudQrWrap.style.display = isActive ? "flex" : "none";
+    }
+    if (els.publicStatus) {
+      if (data.status === "active" && data.publicUrl) {
+        els.publicStatus.className = "value";
+        els.publicStatus.innerHTML = `Active: <a class="link mono" href="${escapeHtml(
+          data.publicUrl
+        )}" target="_blank" rel="noopener noreferrer">${escapeHtml(data.publicUrl)}</a>`;
+      } else if (data.status === "starting") {
+        els.publicStatus.className = "value value-muted";
+        els.publicStatus.textContent = "Starting…";
+      } else if (data.status === "failed") {
+        els.publicStatus.className = "value value-muted";
+        els.publicStatus.textContent = "Inactive";
+      } else {
+        els.publicStatus.className = "value value-muted";
+        els.publicStatus.textContent = "Inactive";
+      }
+    }
+  } catch (_) {
+    els.remoteAccessNotConfigured.style.display = "block";
+    els.remoteAccessConfiguredWrap.style.display = "none";
+    if (els.homeRemoteAccessToggle) {
+      els.homeRemoteAccessToggle.checked = false;
+      els.homeRemoteAccessToggle.disabled = true;
+    }
+    if (els.remoteCloudCopy) els.remoteCloudCopy.disabled = true;
+    if (els.remoteCloudSetupCta) els.remoteCloudSetupCta.style.display = "block";
+    if (els.remoteCloudActiveWrap) els.remoteCloudActiveWrap.style.display = "none";
+    if (els.remoteCloudQrWrap) els.remoteCloudQrWrap.style.display = "none";
+    if (els.publicStatus) {
+      els.publicStatus.className = "value value-muted";
+      els.publicStatus.textContent = "Inactive";
+    }
+  }
+}
+
+async function pollUntilActive() {
+  const pollIntervalMs = 2000;
+  const timeoutMs = 30000;
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const res = await apiFetch("/api/public-access/status");
+      const data = await res.json();
+      if (data.status === "active") {
+        await loadPublicAccessStatus();
+        return;
+      }
+      if (data.status === "failed") {
+        await loadPublicAccessStatus();
+        return;
+      }
+    } catch (_) {}
+    await new Promise((r) => setTimeout(r, pollIntervalMs));
+  }
+  await loadPublicAccessStatus();
+  if (typeof showUploadBanner === "function") showUploadBanner("Tunnel failed to start", "error");
 }
 
 async function loadNetworkSettings() {
@@ -2652,13 +4009,219 @@ async function saveNetworkName() {
   els.networkNameSuffix.value = displayNameToSuffix(savedName);
 }
 
-const stateShare = { lastShareUrl: null, lastShareId: null, lastPath: null };
+const stateShare = {
+  lastShareUrl: null,
+  lastShareId: null,
+  lastPath: null,
+  publicAccessActive: false,
+  nextGroupNameIndex: 1,
+};
 
-function openShareModal(pathValue) {
+function setShareModalLoading(message) {
+  if (!els.shareResult) return;
+  const msg = escapeHtml(message || "Loading…");
+  els.shareResult.innerHTML = `<div class="usage-section-loader" style="padding:10px 0;">
+    <span class="usage-section-spinner" aria-hidden="true"></span>
+    <span>${msg}</span>
+  </div>`;
+}
+
+function setPublicEnableUi(opts) {
+  const visible = !!opts?.visible;
+  const loading = !!opts?.loading;
+  const message = String(opts?.message || "");
+  if (els.sharePublicEnableRow) els.sharePublicEnableRow.style.display = visible ? "flex" : "none";
+  if (els.shareEnableRemoteAccess) els.shareEnableRemoteAccess.disabled = !!loading;
+  if (els.sharePublicEnableStatus) {
+    els.sharePublicEnableStatus.innerHTML = "";
+    if (message) {
+      if (loading) {
+        els.sharePublicEnableStatus.innerHTML =
+          `<span class="usage-section-spinner" aria-hidden="true"></span>` + `<span>${escapeHtml(message)}</span>`;
+      } else {
+        els.sharePublicEnableStatus.textContent = message;
+      }
+    }
+  }
+}
+
+function setGroupPublicEnableUi(opts) {
+  const visible = !!opts?.visible;
+  const loading = !!opts?.loading;
+  const message = String(opts?.message || "");
+  if (els.groupSharePublicEnableRow) els.groupSharePublicEnableRow.style.display = visible ? "flex" : "none";
+  if (els.groupShareEnableRemoteAccess) els.groupShareEnableRemoteAccess.disabled = !!loading;
+  if (els.groupSharePublicEnableStatus) {
+    els.groupSharePublicEnableStatus.innerHTML = "";
+    if (message) {
+      if (loading) {
+        els.groupSharePublicEnableStatus.innerHTML =
+          `<span class="usage-section-spinner" aria-hidden="true"></span>` + `<span>${escapeHtml(message)}</span>`;
+      } else {
+        els.groupSharePublicEnableStatus.textContent = message;
+      }
+    }
+  }
+}
+
+async function ensurePublicAccessActive(opts) {
+  try {
+    const statusRes = await apiFetch("/api/public-access/status");
+    const statusData = await statusRes.json().catch(() => ({}));
+    if (statusData.status === "active" && statusData.publicUrl) {
+      stateShare.publicAccessActive = true;
+      if (els.shareScopePublic) els.shareScopePublic.disabled = false;
+      if (els.shareScopePublicHint) els.shareScopePublicHint.style.display = "none";
+      return true;
+    }
+  } catch (_) {}
+
+  if (!opts || !opts.silent) setShareModalLoading("Starting public sharing…");
+  try {
+    await apiFetch("/api/public-access/start", { method: "POST" });
+  } catch (_) {}
+
+  const deadline = Date.now() + 45_000;
+  while (Date.now() < deadline) {
+    try {
+      const res = await apiFetch("/api/public-access/status");
+      const data = await res.json().catch(() => ({}));
+      const active = data.status === "active" && data.publicUrl;
+      if (active) {
+        stateShare.publicAccessActive = true;
+        if (els.shareScopePublic) els.shareScopePublic.disabled = false;
+        if (els.shareScopePublicHint) els.shareScopePublicHint.style.display = "none";
+        return true;
+      }
+    } catch (_) {}
+    await new Promise((r) => setTimeout(r, 1200));
+  }
+
+  stateShare.publicAccessActive = false;
+  if (els.shareScopePublic) els.shareScopePublic.disabled = true;
+  if (els.shareScopePublicHint) els.shareScopePublicHint.style.display = "block";
+  if ((!opts || !opts.silent) && els.shareResult) {
+    els.shareResult.textContent = "Public sharing could not be started. Check your internet connection and try again.";
+  }
+  return false;
+}
+
+async function ensurePublicAccessActiveInline() {
+  // Inline enable (Share modal) — show loader near Public option, not in share-result.
+  setPublicEnableUi({ visible: true, loading: true, message: "Enabling Remote Access…" });
+  try {
+    const ok = await ensurePublicAccessActive({ silent: true });
+    if (!ok) {
+      setPublicEnableUi({ visible: true, loading: false, message: "Could not enable. Check internet and try again." });
+      return false;
+    }
+    setPublicEnableUi({ visible: false, loading: false, message: "" });
+    return true;
+  } catch (_e) {
+    setPublicEnableUi({ visible: true, loading: false, message: "Could not enable. Try again." });
+    return false;
+  }
+}
+
+async function ensurePublicAccessActiveGroupInline() {
+  setGroupPublicEnableUi({ visible: true, loading: true, message: "Enabling Remote Access…" });
+  try {
+    const ok = await ensurePublicAccessActive({ silent: true });
+    if (!ok) {
+      setGroupPublicEnableUi({ visible: true, loading: false, message: "Could not enable. Check internet and try again." });
+      return false;
+    }
+    setGroupPublicEnableUi({ visible: false, loading: false, message: "" });
+    return true;
+  } catch (_e) {
+    setGroupPublicEnableUi({ visible: true, loading: false, message: "Could not enable. Try again." });
+    return false;
+  }
+}
+
+async function openShareModal(pathValue) {
+  touchFileActivity(pathValue, "share-open");
   els.shareResult.textContent = "";
   if (els.shareExtraActions) els.shareExtraActions.style.display = "none";
   if (els.copyShare) els.copyShare.style.display = "none";
+  // Ensure we have the latest active shares so badges/links are immediate.
+  try { await loadShares(); } catch (_) {}
+  // Reset scope selection and enable radios for a fresh share
+  document.querySelectorAll('input[name="share-scope"]').forEach((radio) => {
+    radio.disabled = false;
+    if (radio.value === "local") {
+      radio.checked = true;
+    }
+  });
   els.sharePath.value = pathValue;
+  // If this path already has an active share for a scope, disable that scope option.
+  const existingLocal = getActiveShareForPathAndScope(pathValue, "local");
+  const existingPublic = getActiveShareForPathAndScope(pathValue, "public");
+  if (existingLocal || existingPublic) {
+    const radios = Array.from(document.querySelectorAll('input[name="share-scope"]'));
+    radios.forEach((radio) => {
+      if (radio.value === "local" && existingLocal) radio.disabled = true;
+      if (radio.value === "public" && existingPublic) radio.disabled = true;
+    });
+    // If local is disabled but public is available, default to public
+    const localRadio = radios.find((r) => r.value === "local");
+    const publicRadio = radios.find((r) => r.value === "public");
+    if (localRadio && localRadio.disabled && publicRadio && !publicRadio.disabled) {
+      publicRadio.checked = true;
+    }
+    const hints = [];
+    if (existingLocal) hints.push("Local");
+    if (existingPublic) hints.push("Public");
+    const localUrl = existingLocal ? (existingLocal.urlIp || existingLocal.url || `${stateMeta.lanBaseUrl}/share/${existingLocal.shareId}`) : null;
+    const publicUrl = existingPublic ? (existingPublic.publicUrl || null) : null;
+    const publicCandidate = existingPublic && !publicUrl ? (existingPublic.tunnelCandidateUrl || null) : null;
+    const publicLabel = publicUrl ? publicUrl : (publicCandidate ? publicCandidate : "Provisioning…");
+    els.shareResult.innerHTML = `<div>Already shared for: ${escapeHtml(hints.join(" & "))}.</div>
+<div style="margin-top:10px;display:flex;flex-direction:column;gap:10px;">
+  ${localUrl ? `<div>
+    <span class="value" style="font-size:12px; font-weight:600;">Local:</span>
+    <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(localUrl)}</span>
+    <button type="button" class="button secondary" id="share-copy-existing-local-btn" style="margin-top:4px;">Copy</button>
+    <button type="button" class="button secondary" id="share-open-existing-local-btn" style="margin-top:4px;margin-left:6px;">Open</button>
+  </div>` : ""}
+  ${existingPublic ? `<div>
+    <span class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Public:</span>
+    <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(publicLabel)}</span>
+    ${publicUrl ? `<button type="button" class="button secondary" id="share-copy-existing-public-btn" style="margin-top:4px;">Copy</button>
+    <button type="button" class="button secondary" id="share-open-existing-public-btn" style="margin-top:4px;margin-left:6px;">Open</button>` : `<div class="value value-muted" style="font-size:11px; margin-top:6px;">Public URL will appear once provisioning completes.</div>`}
+  </div>` : ""}
+</div>`;
+
+    const copyLocalBtn = document.getElementById("share-copy-existing-local-btn");
+    if (copyLocalBtn && localUrl) {
+      copyLocalBtn.onclick = async () => {
+        const ok = await copyToClipboard(localUrl);
+        if (ok) {
+          copyLocalBtn.textContent = "Copied!";
+          setTimeout(() => (copyLocalBtn.textContent = "Copy"), 2000);
+        } else {
+          showCopyFallback(localUrl, els.shareResult);
+        }
+      };
+    }
+    const openLocalBtn = document.getElementById("share-open-existing-local-btn");
+    if (openLocalBtn && localUrl) openLocalBtn.onclick = () => window.open(localUrl, "_blank");
+
+    const copyPublicBtn = document.getElementById("share-copy-existing-public-btn");
+    if (copyPublicBtn && publicUrl) {
+      copyPublicBtn.onclick = async () => {
+        const ok = await copyToClipboard(publicUrl);
+        if (ok) {
+          copyPublicBtn.textContent = "Copied!";
+          setTimeout(() => (copyPublicBtn.textContent = "Copy"), 2000);
+        } else {
+          showCopyFallback(publicUrl, els.shareResult);
+        }
+      };
+    }
+    const openPublicBtn = document.getElementById("share-open-existing-public-btn");
+    if (openPublicBtn && publicUrl) openPublicBtn.onclick = () => window.open(publicUrl, "_blank");
+  }
   const needActivation = !canAddDeviceOrCreateShare();
   if (els.activationBlock) {
     els.activationBlock.style.display = needActivation ? "block" : "none";
@@ -2670,6 +4233,23 @@ function openShareModal(pathValue) {
   }
   if (els.activationUpgradeLink && upgradeUrl) {
     els.activationUpgradeLink.href = upgradeUrl;
+  }
+  try {
+    const statusRes = await apiFetch("/api/public-access/status");
+    const statusData = await statusRes.json();
+    stateShare.publicAccessActive = statusData.status === "active";
+    if (els.shareScopePublic) {
+      els.shareScopePublic.disabled = !stateShare.publicAccessActive;
+    }
+    if (els.shareScopePublicHint) {
+      els.shareScopePublicHint.style.display = stateShare.publicAccessActive ? "none" : "block";
+    }
+    setPublicEnableUi({ visible: !stateShare.publicAccessActive, loading: false, message: "" });
+  } catch (_) {
+    stateShare.publicAccessActive = false;
+    if (els.shareScopePublic) els.shareScopePublic.disabled = true;
+    if (els.shareScopePublicHint) els.shareScopePublicHint.style.display = "block";
+    setPublicEnableUi({ visible: true, loading: false, message: "" });
   }
   els.shareModal.classList.add("active");
 }
@@ -2770,23 +4350,84 @@ async function createShare() {
     els.shareResult.textContent = "Enter expiry in minutes.";
     return;
   }
+  const scope = document.querySelector('input[name="share-scope"]:checked')?.value || "local";
+  if (scope === "public" && !stateShare.publicAccessActive) {
+    if (els.shareScopePublicHint) els.shareScopePublicHint.style.display = "block";
+    return;
+  }
+  if (scope === "public") {
+    setShareModalLoading("Creating public link…");
+  } else {
+    setShareModalLoading("Creating share…");
+  }
   const ttlMs = ttlSelection === "custom" ? Number(els.shareTtlCustom.value) * 60 * 1000 : Number(ttlSelection);
   const res = await apiFetch("/api/share", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: pathValue, permission: els.sharePermission.value, ttlMs, scope: "local" }),
+    body: JSON.stringify({ path: pathValue, permission: els.sharePermission.value, ttlMs, scope }),
   });
   const data = await res.json();
   if (!res.ok) {
+    if (data && data.error === "offline") {
+      els.shareResult.textContent = data.message || "Public sharing requires an internet connection.";
+      return;
+    }
+    if (res.status === 409 && data && data.existingShare) {
+      const existing = data.existingShare;
+      const existingScope = existing.scope || scope;
+      const shareUrl = existing.urlIp || existing.url || `${stateMeta.lanBaseUrl}/share/${existing.shareId}`;
+      const publicUrl = existing.publicUrl || null;
+      const primaryUrl = existingScope === "public" && publicUrl ? publicUrl : shareUrl;
+      stateShare.lastShareUrl = primaryUrl;
+      stateShare.lastShareId = existing.shareId;
+      stateShare.lastPath = pathValue;
+      touchFileActivity(pathValue, "share-existing");
+
+      els.shareResult.innerHTML = `<div>Already shared (${escapeHtml(existingScope)}).</div>
+<div style="margin-top:10px;">
+  <span class="share-link-box share-url-secondary" style="display:block;">${escapeHtml(primaryUrl)}</span>
+  <button type="button" class="button secondary" id="share-copy-existing-btn" style="margin-top:6px;">Copy</button>
+  <button type="button" class="button secondary" id="share-open-existing-btn" style="margin-top:6px;margin-left:6px;">Open</button>
+</div>`;
+      const copyBtn = document.getElementById("share-copy-existing-btn");
+      if (copyBtn) {
+        copyBtn.onclick = async () => {
+          const ok = await copyToClipboard(primaryUrl);
+          if (ok) {
+            copyBtn.textContent = "Copied!";
+            setTimeout(() => (copyBtn.textContent = "Copy"), 1800);
+          } else {
+            showCopyFallback(primaryUrl, copyBtn);
+          }
+        };
+      }
+      const openBtn = document.getElementById("share-open-existing-btn");
+      if (openBtn) openBtn.onclick = () => window.open(primaryUrl, "_blank");
+
+      document.querySelectorAll('input[name="share-scope"]').forEach((radio) => {
+        radio.disabled = true;
+        radio.checked = radio.value === existingScope;
+      });
+      if (els.copyShare) els.copyShare.style.display = "none";
+      if (els.shareExtraActions) els.shareExtraActions.style.display = "none";
+      return;
+    }
     if (data.error === "share_limit_reached" || res.status === 403) {
-      const inferredUsed = (typeof data.limit === "number" && typeof data.remaining === "number")
-        ? Math.max(0, data.limit - data.remaining)
-        : (typeof data.limit === "number" ? data.limit : state.usageSharesThisMonth);
+      const limit = typeof data.limit === "number" ? data.limit : null;
+      const usedFromServer = typeof data.used === "number" ? data.used : null;
+      const inferredUsed = usedFromServer !== null && usedFromServer >= 0
+        ? usedFromServer
+        : (limit !== null && typeof data.remaining === "number"
+            ? Math.max(0, limit - data.remaining)
+            : (limit !== null ? limit : state.usageSharesThisMonth));
       state.usageSharesThisMonth = inferredUsed;
       try { renderUsageBars().catch(() => {}); } catch (_) {}
-      const limitMsg = "Share limit is reached. Contact support to upgrade your share limit or device limit.";
+      let limitMsg = "Share limit is reached. Contact support to upgrade your share limit or device limit.";
+      if (limit !== null && inferredUsed >= 0) {
+        limitMsg = `Share limit reached. You used ${inferredUsed} of ${limit} allowed shares this month.`;
+      }
       els.shareResult.textContent = limitMsg;
-      // Also show a persistent grace-style banner for visibility
+      // Also show a persistent banner for visibility
       showUploadBanner(limitMsg, "error");
       setTimeout(hideUploadBanner, 5000);
     } else {
@@ -2795,25 +4436,213 @@ async function createShare() {
     return;
   }
   const shareUrl = data.urlIp || data.url || `${stateMeta.lanBaseUrl}/share/${data.shareId}`;
-  stateShare.lastShareUrl = shareUrl;
+  const publicUrl = data.publicUrl || null;
+  const primaryUrl = scope === "public" && publicUrl ? publicUrl : shareUrl;
+  stateShare.lastShareUrl = primaryUrl;
   stateShare.lastShareId = data.shareId;
   stateShare.lastPath = pathValue;
-  els.shareResult.innerHTML = `
-    <div>Share created.</div>
-    <div class="share-link-box share-url-secondary">${escapeHtml(shareUrl)}</div>
-  `;
+  touchFileActivity(pathValue, "share-created");
+  let resultHtml = "<div>Share created.</div>";
+  const isProvisioningPublic = scope === "public" && !publicUrl && data.publicStatus === "provisioning";
+  if (isProvisioningPublic) {
+    resultHtml += `<div style="margin-top:10px;display:flex;flex-direction:column;gap:10px;">
+  <div>
+    <span class="value" style="font-size:12px; font-weight:600;">Local (ready now):</span>
+    <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(shareUrl)}</span>
+    <button type="button" class="button secondary" id="share-copy-local-btn" style="margin-top:4px;">Copy</button>
+    <button type="button" class="button secondary" id="share-open-local-btn" style="margin-top:4px;margin-left:6px;">Open</button>
+  </div>
+  <div>
+    <span class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Public:</span>
+    <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">Provisioning…</span>
+    <div class="value value-muted" style="font-size:11px; margin-top:6px;">Public link is provisioning…</div>
+    <div class="value value-muted" id="public-provisioning-status" style="font-size:11px; margin-top:4px;">Waiting for public URL…</div>
+  </div>
+</div>`;
+  } else if (scope === "public" && publicUrl) {
+    resultHtml += `<div style="margin-top:10px;display:flex;flex-direction:column;gap:10px;">
+  <div>
+    <span class="value" style="font-size:12px; font-weight:600;">Local:</span>
+    <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(shareUrl)}</span>
+    <button type="button" class="button secondary" id="share-copy-local-btn" style="margin-top:4px;">Copy</button>
+    <button type="button" class="button secondary" id="share-open-local-btn" style="margin-top:4px;margin-left:6px;">Open</button>
+  </div>
+  <div>
+    <span class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Public:</span>
+    <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(publicUrl)}</span>
+    <button type="button" class="button secondary" id="share-copy-public-btn" style="margin-top:4px;">Copy</button>
+    <button type="button" class="button secondary" id="share-open-public-btn" style="margin-top:4px;margin-left:6px;">Open</button>
+    <div class="value value-muted" style="font-size:11px; margin-top:4px;">Accessible from anywhere.</div>
+  </div>
+</div>`;
+  } else {
+    resultHtml += `<div style="margin-top:10px;">
+  <span class="value" style="font-size:12px; font-weight:600;">Local:</span>
+  <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(shareUrl)}</span>
+  <button type="button" class="button secondary" id="share-copy-local-btn" style="margin-top:4px;">Copy</button>
+  <button type="button" class="button secondary" id="share-open-local-btn" style="margin-top:4px;margin-left:6px;">Open</button>
+  <div class="value value-muted" style="font-size:11px; margin-top:4px;">Access this link on devices connected to the same WiFi/Hotspot network.</div>
+</div>`;
+  }
+  els.shareResult.innerHTML = resultHtml;
+  // Lock scope after creation so the displayed URL always matches the active scope.
+  document.querySelectorAll('input[name="share-scope"]').forEach((radio) => {
+    radio.disabled = true;
+  });
+  if (isProvisioningPublic) {
+    const localBtn = document.getElementById("share-copy-local-btn");
+    if (localBtn) {
+      localBtn.onclick = async () => {
+        const ok = await copyToClipboard(shareUrl);
+        if (ok) {
+          localBtn.textContent = "Copied!";
+          setTimeout(() => (localBtn.textContent = "Copy"), 2000);
+        } else {
+          showCopyFallback(shareUrl, els.shareResult);
+        }
+      };
+    }
+    const openLocalBtn = document.getElementById("share-open-local-btn");
+    if (openLocalBtn) openLocalBtn.onclick = () => window.open(shareUrl, "_blank");
+
+    // Poll until the publicUrl is available, then update the modal contents.
+    (async () => {
+      const statusEl = document.getElementById("public-provisioning-status");
+      const shareId = data.shareId;
+      const deadlineMs = Date.now() + 45_000;
+      while (Date.now() < deadlineMs) {
+        try {
+          const r = await apiFetch(`/api/share/${encodeURIComponent(shareId)}`);
+          if (r.ok) {
+            const s = await r.json();
+            if (s && s.publicUrl) {
+              const publicUrlNow = s.publicUrl;
+              stateShare.lastShareUrl = publicUrlNow;
+
+              els.shareResult.innerHTML = `<div>Public link is ready.</div>
+<div style="margin-top:10px;">
+  <span class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Public:</span>
+  <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(publicUrlNow)}</span>
+  <button type="button" class="button secondary" id="share-copy-public-btn" style="margin-top:4px;">Copy</button>
+  <button type="button" class="button secondary" id="share-open-public-btn" style="margin-top:4px;margin-left:6px;">Open</button>
+  <div class="value value-muted" style="font-size:11px; margin-top:4px;">Accessible from anywhere.</div>
+</div>`;
+              // Also keep local link available in the modal.
+              try {
+                const localExisting = getActiveShareForPathAndScope(pathValue, "local");
+                const localUrl =
+                  localExisting
+                    ? (localExisting.urlIp || localExisting.url || `${stateMeta.lanBaseUrl}/share/${localExisting.shareId}`)
+                    : shareUrl;
+                els.shareResult.innerHTML += `<div style="margin-top:10px;">
+  <span class="value" style="font-size:12px; font-weight:600;">Local:</span>
+  <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(localUrl)}</span>
+  <button type="button" class="button secondary" id="share-copy-local-btn" style="margin-top:4px;">Copy</button>
+  <button type="button" class="button secondary" id="share-open-local-btn" style="margin-top:4px;margin-left:6px;">Open</button>
+</div>`;
+                const copyLocalBtn = document.getElementById("share-copy-local-btn");
+                if (copyLocalBtn) {
+                  copyLocalBtn.onclick = async () => {
+                    const ok = await copyToClipboard(localUrl);
+                    if (ok) {
+                      copyLocalBtn.textContent = "Copied!";
+                      setTimeout(() => (copyLocalBtn.textContent = "Copy"), 2000);
+                    } else {
+                      showCopyFallback(localUrl, els.shareResult);
+                    }
+                  };
+                }
+                const openLocalBtn = document.getElementById("share-open-local-btn");
+                if (openLocalBtn) openLocalBtn.onclick = () => window.open(localUrl, "_blank");
+              } catch (_) {}
+              const copyBtn = document.getElementById("share-copy-public-btn");
+              if (copyBtn) {
+                copyBtn.onclick = async () => {
+                  const ok = await copyToClipboard(publicUrlNow);
+                  if (ok) {
+                    copyBtn.textContent = "Copied!";
+                    setTimeout(() => (copyBtn.textContent = "Copy"), 2000);
+                  } else {
+                    showCopyFallback(publicUrlNow, els.shareResult);
+                  }
+                };
+              }
+              const openBtn = document.getElementById("share-open-public-btn");
+              if (openBtn) openBtn.onclick = () => window.open(publicUrlNow, "_blank");
+
+              try { await loadShares(); } catch (_) {}
+              try { renderFiles(); } catch (_) {}
+              return;
+            }
+          }
+        } catch (_) {}
+        if (statusEl) statusEl.textContent = "Provisioning…";
+        await new Promise((rr) => setTimeout(rr, 2000));
+      }
+      if (statusEl) statusEl.textContent = "Still provisioning. You can use the local link for now.";
+    })();
+  } else if (scope === "public" && publicUrl) {
+    const publicBtn = document.getElementById("share-copy-public-btn");
+    if (publicBtn) {
+      publicBtn.onclick = async () => {
+        const ok = await copyToClipboard(publicUrl);
+        if (ok) {
+          publicBtn.textContent = "Copied!";
+          setTimeout(() => (publicBtn.textContent = "Copy"), 2000);
+        } else {
+          showCopyFallback(publicUrl, els.shareResult);
+        }
+      };
+    }
+    const openPublicBtn = document.getElementById("share-open-public-btn");
+    if (openPublicBtn) openPublicBtn.onclick = () => window.open(publicUrl, "_blank");
+    const copyLocalBtn = document.getElementById("share-copy-local-btn");
+    if (copyLocalBtn) {
+      copyLocalBtn.onclick = async () => {
+        const ok = await copyToClipboard(shareUrl);
+        if (ok) {
+          copyLocalBtn.textContent = "Copied!";
+          setTimeout(() => (copyLocalBtn.textContent = "Copy"), 2000);
+        } else {
+          showCopyFallback(shareUrl, els.shareResult);
+        }
+      };
+    }
+    const openLocalBtn = document.getElementById("share-open-local-btn");
+    if (openLocalBtn) openLocalBtn.onclick = () => window.open(shareUrl, "_blank");
+  } else {
+    const localBtn = document.getElementById("share-copy-local-btn");
+    if (localBtn) {
+      localBtn.onclick = async () => {
+        const ok = await copyToClipboard(shareUrl);
+        if (ok) {
+          localBtn.textContent = "Copied!";
+          setTimeout(() => (localBtn.textContent = "Copy"), 2000);
+        } else {
+          showCopyFallback(shareUrl, els.shareResult);
+        }
+      };
+    }
+    const openLocalBtn = document.getElementById("share-open-local-btn");
+    if (openLocalBtn) openLocalBtn.onclick = () => window.open(shareUrl, "_blank");
+  }
   if (els.shareExtraActions) els.shareExtraActions.style.display = "flex";
   if (els.copyShare) {
-    els.copyShare.style.display = "inline-flex";
-    els.copyShare.onclick = async () => {
-      const ok = await copyToClipboard(shareUrl);
-      if (ok) {
-        els.copyShare.textContent = "Copied!";
-        setTimeout(() => (els.copyShare.textContent = "Copy Link"), 2000);
-      } else {
-        showCopyFallback(shareUrl, els.shareResult);
-      }
-    };
+    // When only a local URL is shown, keep the generic Copy Link button wired to the local URL.
+    const shouldShowGenericCopy = !(scope === "public" && publicUrl);
+    els.copyShare.style.display = shouldShowGenericCopy ? "inline-flex" : "none";
+    if (shouldShowGenericCopy) {
+      els.copyShare.textContent = "Copy Link";
+      els.copyShare.onclick = async () => {
+        const ok = await copyToClipboard(shareUrl);
+        if (ok) {
+          els.copyShare.textContent = "Copied!";
+          setTimeout(() => (els.copyShare.textContent = "Copy Link"), 2000);
+        } else {
+          showCopyFallback(shareUrl, els.shareResult);
+        }
+      };
+    }
   }
   // Keep usage bars fresh without waiting for next poll.
   state.usageSharesThisMonth = Number(state.usageSharesThisMonth || 0) + 1;
@@ -3018,36 +4847,58 @@ async function addFileViaNativePicker() {
 
 async function uploadFiles(files) {
   if (!files || files.length === 0) return;
+  if (typeof ChunkUploadController === "undefined") {
+    showUploadBanner("Upload module failed to load. Refresh the app.", "error");
+    return;
+  }
   const fileList = Array.from(files);
-  const count = fileList.length;
-  const label = count === 1 ? fileList[0].name : `${count} files`;
-  showUploadBanner(`Uploading ${label}...`, "loading");
-
-  const formData = new FormData();
-  fileList.forEach((file) => formData.append("files", file));
   const uploadPath = state.path;
-  formData.append("path", uploadPath);
-
-  try {
-    const res = await apiFetch("/api/upload", { method: "POST", body: formData });
-    const payload = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const reason = payload.error || "Upload failed.";
-      showUploadBanner(reason, "error");
-      if (els.uploadScopeHint) {
-        els.uploadScopeHint.textContent = reason;
+  for (let i = 0; i < fileList.length; i++) {
+    const file = fileList[i];
+    const id = `upload-${i}-${file.name}-${Date.now()}`;
+    hostTransferController = new ChunkUploadController();
+    hostTransferCurrentUploadId = id;
+    hostTransferUpsert({
+      id,
+      direction: "uploading",
+      fileName: file.name,
+      percent: 0,
+      status: "active",
+      metaLine: formatBytesShortHost(file.size),
+      speedLabel: "",
+      etaLabel: "",
+    });
+    try {
+      await hostTransferController.upload(file, uploadPath, {
+        request: transferRequest,
+        onProgress: (p) => {
+          hostTransferUpdate(id, {
+            percent: p.percent,
+            speedLabel: formatHostSpeed(p.speedBps),
+            etaLabel: formatHostEta(p.etaSeconds),
+            chunkLabel:
+              p.totalChunks > 0 ? `${p.chunkIndex + 1} / ${p.totalChunks} chunks` : "",
+          });
+        },
+      });
+      hostTransferUpdate(id, { status: "complete", percent: 100 });
+      touchFileActivity(joinOwnerPath(uploadPath, file.name), "upload");
+      setTimeout(() => hostTransferRemove(id), 2000);
+      await loadFiles(uploadPath);
+      await loadLogs();
+    } catch (err) {
+      const msg = err && err.message ? err.message : "Upload failed";
+      if (msg === "Upload cancelled") {
+        hostTransferRemove(id);
+      } else {
+        hostTransferUpdate(id, { status: "error", error: msg });
+        showUploadBanner(msg, "error");
+        if (els.uploadScopeHint) els.uploadScopeHint.textContent = msg;
+        break;
       }
-      return;
-    }
-    const savedTo = String(payload.saved_to || uploadPath || "/");
-    showUploadBanner("Upload complete", "success");
-    setTimeout(hideUploadBanner, 2500);
-    await loadFiles(savedTo);
-    await loadLogs();
-  } catch (err) {
-    showUploadBanner(err.message || "Upload failed", "error");
-    if (els.uploadScopeHint) {
-      els.uploadScopeHint.textContent = err.message || "Upload failed";
+    } finally {
+      hostTransferController = null;
+      hostTransferCurrentUploadId = null;
     }
   }
 }
@@ -3168,29 +5019,40 @@ async function loadApprovedDevices() {
   els.approvedDevicesList.innerHTML = "";
   devices.forEach((device) => {
     const row = document.createElement("div");
-    row.className = "pending-item";
+    row.className = "device-card";
     row.innerHTML = `
-      <div class="pending-item-meta">
-        <div class="item-title">${device.device_name || "Unknown Device"}</div>
-        <div class="item-sub mono" title="${device.fingerprint}">${shortenFingerprint(device.fingerprint)}</div>
-        <div class="item-sub mono">Folder: ${device.device_folder_rel || "-"}</div>
-        <div class="item-sub">Approved: ${device.approved_at ? new Date(device.approved_at).toLocaleString() : "-"}</div>
-        <div class="item-sub">Last seen: ${device.last_seen_at ? new Date(device.last_seen_at).toLocaleString() : "Never"}</div>
+      <div class="device-card-main">
+        <div class="device-card-title">
+          <span class="device-card-icon" aria-hidden="true">🖥️</span>
+          <span class="device-card-name">${escapeHtml(device.device_name || "Unknown Device")}</span>
+        </div>
+        <div class="device-card-meta mono" title="${escapeHtml(device.fingerprint)}">${escapeHtml(shortenFingerprint(device.fingerprint))}</div>
+        <div class="device-card-sub">
+          <span class="device-chip" title="Device folder">📁 ${escapeHtml(device.device_folder_rel || "-")}</span>
+          <span class="device-chip" title="Approved at">✅ ${escapeHtml(device.approved_at ? new Date(device.approved_at).toLocaleString() : "-")}</span>
+          <span class="device-chip" title="Last seen">🕒 ${escapeHtml(device.last_seen_at ? new Date(device.last_seen_at).toLocaleString() : "Never")}</span>
+        </div>
       </div>
+      <div class="device-card-actions"></div>
     `;
+    const actions = row.querySelector(".device-card-actions");
     if (device.device_folder_rel) {
       const openFolderBtn = document.createElement("button");
-      openFolderBtn.className = "button secondary";
-      openFolderBtn.textContent = "Open Device Folder";
+      openFolderBtn.className = "button secondary button-icon-only";
+      openFolderBtn.title = "Open device folder";
+      openFolderBtn.setAttribute("aria-label", "Open device folder");
+      openFolderBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>';
       openFolderBtn.onclick = async () => {
         setActiveSection("files");
         await loadFiles(device.device_folder_rel);
       };
-      row.appendChild(openFolderBtn);
+      if (actions) actions.appendChild(openFolderBtn);
     }
     const removeBtn = document.createElement("button");
-    removeBtn.className = "button danger";
-    removeBtn.textContent = "Remove";
+    removeBtn.className = "button danger button-icon-only";
+    removeBtn.title = "Remove device";
+    removeBtn.setAttribute("aria-label", "Remove device");
+    removeBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
     removeBtn.onclick = async () => {
       await apiFetch("/api/v1/access/devices/remove", {
         method: "POST",
@@ -3201,7 +5063,7 @@ async function loadApprovedDevices() {
       await loadPendingAccessRequests();
       await renderUsageBars();
     };
-    row.appendChild(removeBtn);
+    if (actions) actions.appendChild(removeBtn);
     els.approvedDevicesList.appendChild(row);
   });
   } finally {
@@ -3249,10 +5111,10 @@ async function loadActivitySummary() {
   }
   drawActivityChart([
     { label: "Uploads", value: totalUploads },
-    { label: "Downloads", value: totalDownloads },
+    { label: "Device DL", value: downloadsFromDevices },
+    { label: "Link DL", value: shareDownloads },
     { label: "Shares", value: sharesCreated },
     { label: "Devices", value: connectedDevices },
-    { label: "Share DL", value: shareDownloads },
   ]);
   } finally {
     setRefreshLoading(els.refreshActivity, false);
@@ -3388,25 +5250,83 @@ async function loadSupportMessages() {
     const res = await apiFetch("/api/support/messages");
     const data = await res.json().catch(() => ({}));
     state.supportMessages = Array.isArray(data.messages) ? data.messages : [];
+    updateSupportChatState();
     renderSupportMessages();
   } catch (_) {
     state.supportMessages = [];
+    updateSupportChatState();
     renderSupportMessages();
   }
+}
+
+function updateSupportChatState() {
+  var msgs = state.supportMessages || [];
+  var startScreen = document.getElementById("support-start-screen");
+  var chatBody = document.getElementById("support-chat-body");
+  var resolvedScreen = document.getElementById("support-resolved-screen");
+  var pendingBanner = document.getElementById("support-pending-banner");
+  if (!startScreen || !chatBody) return;
+
+  if (state.supportResolved) {
+    // Resolved: hide everything else, show resolved screen
+    startScreen.style.display = "none";
+    chatBody.style.display = "none";
+    if (resolvedScreen) resolvedScreen.style.display = "flex";
+    return;
+  }
+
+  if (resolvedScreen) resolvedScreen.style.display = "none";
+
+  if (msgs.length === 0) {
+    // Empty: show start screen
+    startScreen.style.display = "flex";
+    chatBody.style.display = "none";
+    return;
+  }
+
+  // Has messages: show chat body
+  startScreen.style.display = "none";
+  chatBody.style.display = "flex";
+
+  // Pending: only device messages so far
+  var hasAdminReply = msgs.some(function(m) { return (m.sender || "").toLowerCase() === "admin"; });
+  if (pendingBanner) pendingBanner.style.display = hasAdminReply ? "none" : "flex";
 }
 
 function renderSupportMessages() {
   if (!els.supportMessages) return;
   const list = state.supportMessages || [];
-  els.supportMessages.innerHTML = list.length === 0
-    ? "<div class=\"value value-muted\">No messages yet. Send a message to start the conversation.</div>"
-    : list.map((m) => {
-        const isDevice = (m.sender || "").toLowerCase() === "device";
-        const label = isDevice ? "You" : "Support";
-        const cls = isDevice ? "support-message device" : "support-message admin";
-        const time = m.timestamp ? new Date(m.timestamp).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "";
-        return `<div class="${cls}"><span class="value value-muted" style="font-size:11px">${label} ${time}</span><br/>${escapeHtml(m.text || "")}</div>`;
-      }).join("");
+  if (!list.length) {
+    els.supportMessages.innerHTML = "";
+    return;
+  }
+  var html = "";
+  var lastDateStr = "";
+  list.forEach(function(m) {
+    var isDevice = (m.sender || "").toLowerCase() === "device";
+    var ts = m.timestamp ? new Date(m.timestamp) : new Date();
+    var today = new Date();
+    var yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+    var dateStr = ts.toDateString();
+    var dateLabel = dateStr === today.toDateString() ? "Today"
+      : dateStr === yesterday.toDateString() ? "Yesterday"
+      : ts.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    if (dateStr !== lastDateStr) {
+      html += '<div class="sc-date-divider">' + dateLabel + '</div>';
+      lastDateStr = dateStr;
+    }
+    var time = ts.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+    var msgCls = isDevice ? "sc-msg device" : "sc-msg admin";
+    var avatarText = isDevice ? "You" : "S";
+    html += '<div class="' + msgCls + '">'
+      + '<div class="sc-msg-avatar">' + avatarText + '</div>'
+      + '<div class="sc-msg-wrap">'
+      + '<div class="sc-msg-bubble">' + escapeHtml(m.text || "") + '</div>'
+      + '<span class="sc-msg-time">' + time + '</span>'
+      + '</div>'
+      + '</div>';
+  });
+  els.supportMessages.innerHTML = html;
   els.supportMessages.scrollTop = els.supportMessages.scrollHeight;
 }
 
@@ -3420,21 +5340,20 @@ async function sendSupportMessage() {
   if (!els.supportMessageInput) return;
   const text = (els.supportMessageInput.value || "").trim();
   if (!text) return;
+  // Optimistically add message
+  if (!Array.isArray(state.supportMessages)) state.supportMessages = [];
+  state.supportMessages.push({ sender: "device", text: text, timestamp: new Date().toISOString() });
+  els.supportMessageInput.value = "";
+  updateSupportChatState();
+  renderSupportMessages();
   try {
-    const res = await apiFetch("/api/support/send", {
+    await apiFetch("/api/support/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
     });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      alert(data.message || "Failed to send message.");
-      return;
-    }
-    els.supportMessageInput.value = "";
-    await loadSupportMessages();
   } catch (_) {
-    alert("Network error. Try again.");
+    // Best-effort; local state already shows message
   }
 }
 
@@ -3530,6 +5449,9 @@ async function bootstrapApp() {
     await loadShares();
   } catch (_) {}
   try {
+    await loadGroupShares();
+  } catch (_) {}
+  try {
     await loadLogs();
   } catch (_) {}
   try {
@@ -3543,6 +5465,9 @@ async function bootstrapApp() {
   } catch (_) {}
   try {
     await loadTechnicalConfig();
+  } catch (_) {}
+  try {
+    await loadPublicAccessStatus();
   } catch (_) {}
   try {
     await loadPrivacyPolicy();
@@ -3564,9 +5489,7 @@ async function bootstrapApp() {
   } catch (_) {}
   updateMuteButton();
 
-  setInterval(() => {
-    if (document.querySelector(".section.active")?.dataset.section === "support") loadSupportMessages();
-  }, 8000);
+  // Support messages are now delivered in real-time via SSE; no polling needed.
 }
 
 async function continueBootstrapAfterActivation() {
@@ -3599,6 +5522,9 @@ async function continueBootstrapAfterActivation() {
     await loadNetworkSettings();
   } catch (_) {}
   try {
+    await loadPublicAccessStatus();
+  } catch (_) {}
+  try {
     await loadPrivacyPolicy();
   } catch (_) {}
   try {
@@ -3617,9 +5543,7 @@ async function continueBootstrapAfterActivation() {
     await loadNotifications();
   } catch (_) {}
   updateMuteButton();
-  setInterval(() => {
-    if (document.querySelector(".section.active")?.dataset.section === "support") loadSupportMessages();
-  }, 8000);
+  // Support messages are now delivered in real-time via SSE; no polling needed.
 }
 
 function setActiveSection(sectionId) {
@@ -3631,10 +5555,26 @@ function setActiveSection(sectionId) {
   if (window.location.hash !== `#${safeSection}`) window.location.hash = safeSection;
   els.sections.forEach((section) => section.classList.toggle("active", section.dataset.section === safeSection));
   els.navButtons.forEach((button) => button.classList.toggle("active", button.dataset.section === safeSection));
-  if (safeSection === "support") loadSupportMessages();
+  if (safeSection === "support") {
+    // Clear unread badge when support tab is opened
+    var badge = document.getElementById("support-nav-badge");
+    if (badge) badge.classList.remove("visible");
+    state.supportUnreadCount = 0;
+    // Request notification permission for future messages
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      Notification.requestPermission().catch(function() {});
+    }
+    loadSupportMessages();
+  }
   if (safeSection === "network") loadNetwork();
   if (safeSection === "teams") loadTeams();
-  if (safeSection === "settings") renderUsageBars().catch(() => {});
+  if (safeSection === "settings") {
+    renderUsageBars().catch(() => {});
+    loadPublicAccessStatus().catch(() => {});
+    if (typeof window.updater !== "undefined") {
+      loadUpdatesPanel().catch(() => {});
+    }
+  }
 }
 
 function updateAdminUi() {
@@ -3781,6 +5721,113 @@ els.copyCloudUrl.addEventListener("click", async () => {
     showCopyFallback(`${stateMeta.cloudUrl}?pair=1`, els.copyCloudUrl);
   }
 });
+
+if (els.remoteCloudCopy) {
+  els.remoteCloudCopy.addEventListener("click", async () => {
+    const url = els.remoteCloudUrlInput && els.remoteCloudUrlInput.value;
+    if (!url) return;
+    const ok = await copyToClipboard(url);
+    if (ok) {
+      els.remoteCloudCopy.textContent = "Copied!";
+      setTimeout(() => (els.remoteCloudCopy.textContent = "Copy"), 2000);
+    } else {
+      showCopyFallback(url, els.remoteCloudCopy);
+    }
+  });
+}
+if (els.remoteCloudSetupBtn) {
+  els.remoteCloudSetupBtn.addEventListener("click", () => {
+    // Bring user to Settings → Remote Access and start setup.
+    setActiveSection("settings");
+    const section = document.getElementById("remote-access-section");
+    if (section && typeof section.scrollIntoView === "function") {
+      section.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    if (els.remoteAccessNotConfigured) els.remoteAccessNotConfigured.style.display = "block";
+    if (els.remoteAccessConfiguredWrap) els.remoteAccessConfiguredWrap.style.display = "none";
+    if (els.remoteAccessSetupBtn) els.remoteAccessSetupBtn.click();
+  });
+}
+
+function hideDeleteSharedItemModal() {
+  if (els.deleteSharedItemModal) {
+    els.deleteSharedItemModal.classList.remove("active");
+    delete els.deleteSharedItemModal.dataset.path;
+    delete els.deleteSharedItemModal.dataset.type;
+    delete els.deleteSharedItemModal.dataset.name;
+  }
+}
+
+if (els.deleteSharedItemCancelTop) {
+  els.deleteSharedItemCancelTop.addEventListener("click", hideDeleteSharedItemModal);
+}
+if (els.deleteSharedItemCancel) {
+  els.deleteSharedItemCancel.addEventListener("click", hideDeleteSharedItemModal);
+}
+if (els.deleteSharedItemStopOnly) {
+  els.deleteSharedItemStopOnly.addEventListener("click", async () => {
+    const pathValue = els.deleteSharedItemModal && els.deleteSharedItemModal.dataset.path;
+    hideDeleteSharedItemModal();
+    if (!pathValue) return;
+    await stopSharesForPath(pathValue);
+    try { await loadFiles(state.path); } catch (_) {}
+    try { await loadLogs(); } catch (_) {}
+  });
+}
+if (els.deleteSharedItemStopAndDelete) {
+  els.deleteSharedItemStopAndDelete.addEventListener("click", async () => {
+    const pathValue = els.deleteSharedItemModal && els.deleteSharedItemModal.dataset.path;
+    hideDeleteSharedItemModal();
+    if (!pathValue) return;
+    await stopSharesForPath(pathValue);
+    await deletePathAfterStopSharing(pathValue);
+  });
+}
+
+if (els.homeRemoteAccessSettings) {
+  els.homeRemoteAccessSettings.addEventListener("click", () => {
+    setActiveSection("settings");
+    const section = document.getElementById("remote-access-section");
+    if (section && typeof section.scrollIntoView === "function") {
+      section.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+}
+
+async function setHomeRemoteAccessEnabled(enabled) {
+  if (!els.homeRemoteAccessToggle) return;
+  els.homeRemoteAccessToggle.disabled = true;
+  try {
+    if (enabled) {
+      const statusRes = await apiFetch("/api/public-access/status");
+      const statusData = await statusRes.json();
+      if (statusData.status === "failed" && statusData.reason === "not_configured") {
+        els.homeRemoteAccessToggle.checked = false;
+        await loadPublicAccessStatus();
+        return;
+      }
+      await apiFetch("/api/public-access/start", { method: "POST" });
+      await pollUntilActive();
+    } else {
+      await apiFetch("/api/public-access/stop", { method: "POST" });
+      await loadPublicAccessStatus();
+    }
+  } catch (_) {
+    await loadPublicAccessStatus();
+  } finally {
+    els.homeRemoteAccessToggle.disabled = false;
+  }
+}
+
+if (els.homeRemoteAccessToggle) {
+  els.homeRemoteAccessToggle.addEventListener("change", async () => {
+    await setHomeRemoteAccessEnabled(!!els.homeRemoteAccessToggle.checked);
+  });
+}
+
+function navigateToSettings() {
+  setActiveSection("settings");
+}
 
 if (els.manualConnectBtn) {
   els.manualConnectBtn.addEventListener("click", manualConnect);
@@ -3957,6 +6004,81 @@ if (els.previewModal) {
     if (event.target === els.previewModal) closePreviewModal();
   });
 }
+if (els.previewDrawerBackdrop) {
+  els.previewDrawerBackdrop.addEventListener("click", closePreviewDrawer);
+}
+if (els.previewDrawerClose) {
+  els.previewDrawerClose.addEventListener("click", closePreviewDrawer);
+}
+initPreviewDrawerSwipe();
+if (els.previewGalleryToggle && els.previewDrawerGallery) {
+  els.previewGalleryToggle.addEventListener("click", () => {
+    previewDrawerState.galleryOpen = !previewDrawerState.galleryOpen;
+    els.previewDrawerGallery.classList.toggle("collapsed", !previewDrawerState.galleryOpen);
+    if (els.previewDrawer) {
+      els.previewDrawer.classList.toggle("gallery-collapsed", !previewDrawerState.galleryOpen);
+    }
+  });
+}
+if (els.previewSelectionToggle) {
+  els.previewSelectionToggle.addEventListener("click", () => {
+    previewDrawerState.selectionMode = !previewDrawerState.selectionMode;
+    if (!previewDrawerState.selectionMode) previewDrawerState.selected = new Set();
+    renderPreviewDrawerStage();
+  });
+}
+if (els.previewPrev) {
+  els.previewPrev.addEventListener("click", () => {
+    if (previewDrawerState.currentIndex > 0) {
+      previewDrawerState.currentIndex -= 1;
+      renderPreviewDrawerStage();
+    }
+  });
+}
+if (els.previewNext) {
+  els.previewNext.addEventListener("click", () => {
+    if (previewDrawerState.currentIndex < previewDrawerState.items.length - 1) {
+      previewDrawerState.currentIndex += 1;
+      renderPreviewDrawerStage();
+    }
+  });
+}
+if (els.previewDownloadCurrent) {
+  els.previewDownloadCurrent.addEventListener("click", () => {
+    const current = previewDrawerState.items[previewDrawerState.currentIndex];
+    if (!current) return;
+    triggerDownloadForPath(current.path, current.name);
+  });
+}
+if (els.previewDownloadSelected) {
+  els.previewDownloadSelected.addEventListener("click", () => {
+    const paths = Array.from(previewDrawerState.selected);
+    if (!paths.length) return;
+    const url = `/api/v1/files/download.zip?paths=${encodeURIComponent(paths.join(","))}`;
+    window.location.href = url;
+  });
+}
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    if (els.previewDrawer && els.previewDrawer.classList.contains("active")) {
+      closePreviewDrawer();
+      return;
+    }
+    if (els.previewModal && els.previewModal.classList.contains("active")) {
+      closePreviewModal();
+      return;
+    }
+  }
+  if (els.previewDrawer && els.previewDrawer.classList.contains("active")) {
+    if (event.key === "ArrowLeft" && previewDrawerState.currentIndex > 0) {
+      previewDrawerState.currentIndex -= 1;
+      renderPreviewDrawerStage();
+    } else if (event.key === "ArrowRight" && previewDrawerState.currentIndex < previewDrawerState.items.length - 1) {
+      previewDrawerState.currentIndex += 1;
+      renderPreviewDrawerStage();
+    }
+  }
+});
 if (els.closeShareQrModal) {
   els.closeShareQrModal.addEventListener("click", closeShareQrModal);
 }
@@ -3978,6 +6100,182 @@ if (els.refreshActivity) {
 els.closeModal.onclick = closeShareModal;
 els.cancelShare.onclick = closeShareModal;
 els.createShare.onclick = createShare;
+if (els.shareEnableRemoteAccess) {
+  els.shareEnableRemoteAccess.addEventListener("click", async () => {
+    const ok = await ensurePublicAccessActiveInline();
+    if (ok) {
+      // Now allow Public to be selected and auto-select it.
+      const publicRadio = document.querySelector('input[name="share-scope"][value="public"]');
+      if (publicRadio && !publicRadio.disabled) publicRadio.checked = true;
+      if (els.shareScopePublicHint) els.shareScopePublicHint.style.display = "none";
+    }
+  });
+}
+if (els.groupShareEnableRemoteAccess) {
+  els.groupShareEnableRemoteAccess.addEventListener("click", async () => {
+    const ok = await ensurePublicAccessActiveGroupInline();
+    if (ok) {
+      if (els.groupShareScopePublic) els.groupShareScopePublic.disabled = false;
+      if (els.groupShareScopePublicHint) els.groupShareScopePublicHint.style.display = "none";
+      const publicRadio = document.querySelector('input[name="group-share-scope"][value="public"]');
+      if (publicRadio && !publicRadio.disabled) publicRadio.checked = true;
+      setGroupPublicEnableUi({ visible: false, loading: false, message: "" });
+    }
+  });
+}
+document.querySelectorAll('input[name="share-scope"]').forEach((radio) => {
+  radio.addEventListener("change", () => {
+    const isPublic = document.querySelector('input[name="share-scope"]:checked')?.value === "public";
+    if (isPublic && !stateShare.publicAccessActive) {
+      // Public is only allowed when Remote Access is active. Revert and show inline enable.
+      const localRadio = document.querySelector('input[name="share-scope"][value="local"]');
+      if (localRadio) localRadio.checked = true;
+      if (els.shareScopePublicHint) els.shareScopePublicHint.style.display = "block";
+      setPublicEnableUi({ visible: true, loading: false, message: "" });
+    }
+    if (els.shareScopePublicHint) {
+      els.shareScopePublicHint.style.display = isPublic && !stateShare.publicAccessActive ? "block" : "none";
+    }
+  });
+});
+
+document.querySelectorAll('input[name="group-share-scope"]').forEach((radio) => {
+  radio.addEventListener("change", () => {
+    const isPublic = document.querySelector('input[name="group-share-scope"]:checked')?.value === "public";
+    if (isPublic && !stateShare.publicAccessActive) {
+      const localRadio = document.querySelector('input[name="group-share-scope"][value="local"]');
+      if (localRadio) localRadio.checked = true;
+      if (els.groupShareScopePublicHint) els.groupShareScopePublicHint.style.display = "block";
+      setGroupPublicEnableUi({ visible: true, loading: false, message: "" });
+    }
+    if (els.groupShareScopePublicHint) {
+      els.groupShareScopePublicHint.style.display = isPublic && !stateShare.publicAccessActive ? "block" : "none";
+    }
+  });
+});
+// Share list tabs (Local / Public)
+document.querySelectorAll(".share-tab").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const tab = btn.getAttribute("data-share-tab") || "local";
+    stateShareTab.current = tab === "public" ? "public" : "local";
+    document.querySelectorAll(".share-tab").forEach((b) => {
+      b.classList.toggle("active", b === btn);
+    });
+    renderShares();
+  });
+});
+function setNetworkStatusBadge(status) {
+  const badge = els.networkStatusBadge;
+  if (!badge) return;
+
+  const textEl = document.getElementById("network-status-text") || badge;
+
+  badge.classList.remove("server-status-strong", "server-status-weak", "server-status-inactive");
+
+  if (status === "strong") {
+    badge.classList.add("server-status-strong");
+    textEl.textContent = "Online";
+    return;
+  }
+  if (status === "weak") {
+    badge.classList.add("server-status-strong");
+    textEl.textContent = "Online";
+    return;
+  }
+  if (status === "inactive") {
+    badge.classList.add("server-status-inactive");
+    textEl.textContent = "Server Inactive";
+    return;
+  }
+  badge.classList.add("server-status-inactive");
+  textEl.textContent = "Offline";
+}
+
+async function measureInternet() {
+  // Prefer Electron IPC bridge if available (accurate even when CORS/network policies apply)
+  try {
+    if (window.joincloud && typeof window.joincloud.checkInternet === "function") {
+      const r = await window.joincloud.checkInternet();
+      const connected = !!r && r.connected === true;
+      const latencyMs = typeof r?.latencyMs === "number" ? r.latencyMs : null;
+      return { connected, latencyMs };
+    }
+  } catch (_) {}
+
+  // Fallback for non-Electron testing
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return { connected: false, latencyMs: null };
+  }
+  const start = Date.now();
+  try {
+    // no-cors gives us timing without needing to read body
+    await fetch("https://www.google.com/favicon.ico", { mode: "no-cors", cache: "no-store" });
+    return { connected: true, latencyMs: Date.now() - start };
+  } catch (_) {
+    return { connected: false, latencyMs: null };
+  }
+}
+
+// Control Plane connection status indicator (header heart icon)
+async function checkControlPlaneStatus() {
+  const btn = document.getElementById("control-plane-status");
+  if (!btn) return;
+  // Yellow - trying
+  btn.style.color = "#EAB308";
+  btn.title = "Control Plane: Checking…";
+  try {
+    // Use same-origin API that already talks to the Control Plane
+    const res = await apiFetch("/api/public-access/status");
+    const data = await res.json().catch(() => ({}));
+    const controlPlaneReady = !!(res.ok && data && (data.status === "active" || data.status === "ready"));
+    const internet = await measureInternet();
+
+    // Navbar badge should reflect ONLY internet status (not control plane)
+    const ms = internet.latencyMs;
+    if (internet.connected && typeof ms === "number") {
+      setNetworkStatusBadge(ms < 150 ? "strong" : ms < 500 ? "weak" : "weak");
+    } else if (internet.connected) {
+      setNetworkStatusBadge("weak");
+    } else {
+      setNetworkStatusBadge("offline");
+    }
+
+    if (controlPlaneReady) {
+      btn.style.color = "#22C55E"; // green - connected / public sharing works
+      btn.title = "Control Plane: Connected — public sharing is active";
+    } else {
+      btn.style.color = "#EF4444"; // red - error / inactive
+      btn.title = "Control Plane: Unreachable or inactive — public sharing may not work";
+    }
+  } catch (_) {
+    btn.style.color = "#EF4444"; // red - not connected
+    btn.title = "Control Plane: Unreachable — public sharing may not work";
+    const internet = await measureInternet();
+    const ms = internet.latencyMs;
+    if (internet.connected && typeof ms === "number") {
+      setNetworkStatusBadge(ms < 150 ? "strong" : ms < 500 ? "weak" : "weak");
+    } else if (internet.connected) {
+      setNetworkStatusBadge("weak");
+    } else {
+      setNetworkStatusBadge("offline");
+    }
+  }
+}
+
+checkControlPlaneStatus();
+setInterval(checkControlPlaneStatus, 30000);
+
+if (typeof window !== "undefined") {
+  window.addEventListener("online", () => {
+    checkControlPlaneStatus().catch(() => {});
+  });
+  window.addEventListener("offline", () => {
+    setNetworkStatusBadge("offline");
+  });
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    setNetworkStatusBadge("offline");
+  }
+}
 if (els.shareWithUserBtn) els.shareWithUserBtn.onclick = shareWithUser;
 if (els.shareWithTeamBtn) els.shareWithTeamBtn.onclick = shareWithTeam;
 if (els.shareTeamPickerClose) els.shareTeamPickerClose.onclick = closeShareTeamPicker;
@@ -4064,6 +6362,16 @@ if (typeof window !== "undefined" && window.joincloud && window.joincloud.onLice
     }
   });
 }
+if (typeof window !== "undefined" && window.joincloud && window.joincloud.onSystemResume) {
+  window.joincloud.onSystemResume(async () => {
+    try { await loadRuntimeStatus(); } catch (_) {}
+    try { await loadFiles(state.path || "/"); } catch (_) {}
+    try { await loadShares(); } catch (_) {}
+    try { await loadLogs(); } catch (_) {}
+    showUploadBanner("System resumed. Sync refreshed.", "success");
+    setTimeout(hideUploadBanner, 1400);
+  });
+}
 if (els.subscriptionManageBtn) els.subscriptionManageBtn.onclick = openBillingPortal;
 // settingsLogout intentionally has no click handler in this build (button is hidden).
 if (els.activationGateRetry) {
@@ -4086,9 +6394,12 @@ els.fileSearch.addEventListener("input", (event) => {
   renderFiles();
 });
 els.fileSort.addEventListener("change", (event) => {
-  state.fileSort = String(event.target.value || "name_asc");
+  state.fileSort = String(event.target.value || "recent_desc");
   renderFiles();
 });
+if (els.fileSort) {
+  els.fileSort.value = state.fileSort;
+}
 els.foldersOnly.addEventListener("change", (event) => {
   state.foldersOnly = !!event.target.checked;
   renderFiles();
@@ -4123,10 +6434,73 @@ els.uploadInput.onchange = (event) => {
   uploadFiles(event.target.files);
   els.uploadInput.value = "";
 };
+if (els.newFolderBtn) {
+  els.newFolderBtn.addEventListener("click", createFolderAtCurrentPath);
+}
+if (els.selectModeBtn) {
+  els.selectModeBtn.addEventListener("click", () => setFileSelectionEnabled(!stateFileSelection.enabled));
+}
+if (els.deleteSelectedBtn) {
+  els.deleteSelectedBtn.addEventListener("click", deleteSelectedItems);
+}
+if (els.shareSelectedBtn) {
+  els.shareSelectedBtn.addEventListener("click", shareSelectedItems);
+}
+if (els.groupShareClose) {
+  els.groupShareClose.addEventListener("click", closeGroupShareModal);
+}
+if (els.groupShareCancel) {
+  els.groupShareCancel.addEventListener("click", closeGroupShareModal);
+}
+if (els.groupShareCreate) {
+  els.groupShareCreate.addEventListener("click", submitGroupShareModal);
+}
 els.dropZone.addEventListener("dragover", (event) => {
   if (els.uploadInput?.disabled) return;
   event.preventDefault();
   els.dropZone.classList.add("active");
+});
+
+let globalDragDepth = 0;
+function isFilesTabActive() {
+  return true;
+}
+function setGlobalDropOverlayVisible(visible) {
+  if (!els.dropZoneOverlay) return;
+  els.dropZoneOverlay.style.display = visible ? "flex" : "none";
+  els.dropZoneOverlay.classList.toggle("active", visible);
+}
+document.addEventListener("dragenter", (event) => {
+  if (!isFilesTabActive() || els.uploadInput?.disabled) return;
+  if (!event.dataTransfer || !Array.from(event.dataTransfer.types || []).includes("Files")) return;
+  globalDragDepth += 1;
+  setGlobalDropOverlayVisible(true);
+});
+document.addEventListener("dragleave", () => {
+  if (!isFilesTabActive()) return;
+  globalDragDepth = Math.max(0, globalDragDepth - 1);
+  if (globalDragDepth === 0) setGlobalDropOverlayVisible(false);
+});
+document.addEventListener("dragover", (event) => {
+  if (!isFilesTabActive() || els.uploadInput?.disabled) return;
+  if (!event.dataTransfer || !Array.from(event.dataTransfer.types || []).includes("Files")) return;
+  event.preventDefault();
+});
+document.addEventListener("drop", async (event) => {
+  if (!isFilesTabActive() || els.uploadInput?.disabled) return;
+  if (!event.dataTransfer || !Array.from(event.dataTransfer.types || []).includes("Files")) return;
+  event.preventDefault();
+  globalDragDepth = 0;
+  setGlobalDropOverlayVisible(false);
+  const items = event.dataTransfer.items;
+  if (items && items.length > 0) {
+    const collected = await collectFilesFromItems(items);
+    if (collected.length > 0) {
+      uploadFilesWithPaths(collected);
+      return;
+    }
+  }
+  uploadFiles(event.dataTransfer.files);
 });
 els.dropZone.addEventListener("dragleave", () => els.dropZone.classList.remove("active"));
 els.dropZone.addEventListener("drop", async (event) => {
@@ -4195,31 +6569,61 @@ async function collectFilesFromItems(items) {
 
 async function uploadFilesWithPaths(items) {
   if (!items || items.length === 0) return;
-  const label = items.length === 1 ? items[0].relativePath : `${items.length} files`;
-  showUploadBanner(`Uploading ${label}...`, "loading");
-  const formData = new FormData();
-  formData.append("path", state.path);
-  for (const { file, relativePath } of items) {
-    formData.append("fileRelPath", relativePath);
-    formData.append("files", file);
+  if (typeof ChunkUploadController === "undefined") {
+    showUploadBanner("Upload module failed to load. Refresh the app.", "error");
+    return;
   }
-  try {
-    const res = await apiFetch("/api/upload", { method: "POST", body: formData });
-    const payload = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const reason = payload.error || "Upload failed.";
-      showUploadBanner(reason, "error");
-      if (els.uploadScopeHint) els.uploadScopeHint.textContent = reason;
-      return;
+  const base = state.path;
+  for (let i = 0; i < items.length; i++) {
+    const { file, relativePath } = items[i];
+    const { fileName, targetPath } = relativeUploadTarget(base, relativePath);
+    const fileToSend =
+      file.name !== fileName ? new File([file], fileName, { type: file.type || "application/octet-stream" }) : file;
+    const id = `upload-path-${i}-${relativePath}-${Date.now()}`;
+    hostTransferController = new ChunkUploadController();
+    hostTransferCurrentUploadId = id;
+    hostTransferUpsert({
+      id,
+      direction: "uploading",
+      fileName: fileName,
+      percent: 0,
+      status: "active",
+      metaLine: formatBytesShortHost(file.size) + " · " + relativePath,
+      speedLabel: "",
+      etaLabel: "",
+    });
+    try {
+      await hostTransferController.upload(fileToSend, targetPath, {
+        request: transferRequest,
+        onProgress: (p) => {
+          hostTransferUpdate(id, {
+            percent: p.percent,
+            speedLabel: formatHostSpeed(p.speedBps),
+            etaLabel: formatHostEta(p.etaSeconds),
+            chunkLabel:
+              p.totalChunks > 0 ? `${p.chunkIndex + 1} / ${p.totalChunks} chunks` : "",
+          });
+        },
+      });
+      hostTransferUpdate(id, { status: "complete", percent: 100 });
+      touchFileActivity(joinOwnerPath(targetPath, fileName), "upload");
+      setTimeout(() => hostTransferRemove(id), 2000);
+      await loadFiles(base);
+      await loadLogs();
+    } catch (err) {
+      const msg = err && err.message ? err.message : "Upload failed";
+      if (msg === "Upload cancelled") {
+        hostTransferRemove(id);
+      } else {
+        hostTransferUpdate(id, { status: "error", error: msg });
+        showUploadBanner(msg, "error");
+        if (els.uploadScopeHint) els.uploadScopeHint.textContent = msg;
+        break;
+      }
+    } finally {
+      hostTransferController = null;
+      hostTransferCurrentUploadId = null;
     }
-    const savedTo = String(payload.saved_to || state.path || "/");
-    showUploadBanner("Upload complete", "success");
-    setTimeout(hideUploadBanner, 2500);
-    await loadFiles(savedTo);
-    await loadLogs();
-  } catch (err) {
-    showUploadBanner(err.message || "Upload failed", "error");
-    if (els.uploadScopeHint) els.uploadScopeHint.textContent = err.message || "Upload failed";
   }
 }
 els.telemetryToggle.addEventListener("change", async (event) => {
@@ -4228,6 +6632,106 @@ els.telemetryToggle.addEventListener("change", async (event) => {
 els.saveNetworkName.addEventListener("click", async () => {
   await saveNetworkName();
 });
+
+if (els.remoteAccessToggle) {
+  els.remoteAccessToggle.addEventListener("change", async () => {
+    if (!els.remoteAccessStarting) return;
+    els.remoteAccessToggle.disabled = true;
+    if (els.remoteAccessToggle.checked) {
+      try {
+        const statusRes = await apiFetch("/api/public-access/status");
+        const statusData = await statusRes.json();
+        if (statusData.status === "failed" && statusData.reason === "not_configured") {
+          els.remoteAccessToggle.checked = false;
+          await loadPublicAccessStatus();
+          els.remoteAccessToggle.disabled = false;
+          return;
+        }
+      } catch (_) {
+        els.remoteAccessToggle.disabled = false;
+        return;
+      }
+      els.remoteAccessStarting.style.display = "flex";
+      if (els.remoteAccessActive) els.remoteAccessActive.style.display = "none";
+      try {
+        await apiFetch("/api/public-access/start", { method: "POST" });
+        await pollUntilActive();
+      } catch (_) {
+        await loadPublicAccessStatus();
+      }
+    } else {
+      try {
+        await apiFetch("/api/public-access/stop", { method: "POST" });
+      } catch (_) {}
+      await loadPublicAccessStatus();
+    }
+    els.remoteAccessToggle.disabled = false;
+  });
+}
+if (els.remoteAccessCopy) {
+  els.remoteAccessCopy.addEventListener("click", async () => {
+    const url = els.remoteAccessUrl && els.remoteAccessUrl.href;
+    if (url) {
+      const ok = await copyToClipboard(url);
+      if (ok) { els.remoteAccessCopy.textContent = "Copied!"; setTimeout(() => (els.remoteAccessCopy.textContent = "Copy"), 2000); }
+    }
+  });
+}
+if (els.remoteAccessOpen) {
+  els.remoteAccessOpen.addEventListener("click", () => {
+    if (els.remoteAccessUrl && els.remoteAccessUrl.href) window.open(els.remoteAccessUrl.href, "_blank");
+  });
+}
+if (els.remoteAccessPinSave) {
+  els.remoteAccessPinSave.addEventListener("click", async () => {
+    const pin = els.remoteAccessPin ? els.remoteAccessPin.value : "";
+    try {
+      const res = await apiFetch("/api/user/remote-pin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: pin.trim() || null }),
+      });
+      if (res.ok) {
+        els.remoteAccessPinSave.textContent = "Saved";
+        setTimeout(() => (els.remoteAccessPinSave.textContent = "Save"), 2000);
+      }
+    } catch (_) {}
+  });
+}
+
+async function doRemoteAccessProvision() {
+  if (!els.remoteAccessSetupBtn) return;
+  els.remoteAccessSetupBtn.disabled = true;
+  if (els.remoteAccessSetupSpinner) els.remoteAccessSetupSpinner.style.display = "block";
+  if (els.remoteAccessSetupError) els.remoteAccessSetupError.style.display = "none";
+  try {
+    const res = await apiFetch("/api/public-access/provision", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.success) {
+      await loadPublicAccessStatus();
+    } else {
+      if (els.remoteAccessSetupErrorText) els.remoteAccessSetupErrorText.textContent = data.error || "Setup failed";
+      if (els.remoteAccessSetupError) els.remoteAccessSetupError.style.display = "block";
+    }
+  } catch (e) {
+    if (els.remoteAccessSetupErrorText) els.remoteAccessSetupErrorText.textContent = e && e.message ? e.message : "Network error";
+    if (els.remoteAccessSetupError) els.remoteAccessSetupError.style.display = "block";
+  }
+  if (els.remoteAccessSetupSpinner) els.remoteAccessSetupSpinner.style.display = "none";
+  els.remoteAccessSetupBtn.disabled = false;
+}
+
+if (els.remoteAccessSetupBtn) {
+  els.remoteAccessSetupBtn.addEventListener("click", () => doRemoteAccessProvision());
+}
+if (els.remoteAccessSetupRetry) {
+  els.remoteAccessSetupRetry.addEventListener("click", () => doRemoteAccessProvision());
+}
+
 els.copyPrivacyPolicy.addEventListener("click", async () => {
   if (!stateMeta.privacyPolicyRaw) return;
   await copyToClipboard(stateMeta.privacyPolicyRaw);
@@ -4281,32 +6785,410 @@ if (els.accessDeviceNameInput) {
   els.accessDeviceNameInput.value = getSuggestedDeviceName();
 }
 els.accessFingerprint.textContent = stateMeta.fingerprint;
+
+/* —— JoinCloud in-app updates (Electron + versions.json) —— */
+let updatesPanelInstalling = null;
+let updatesPanelProgressPct = 0;
+
+function refreshUpdatesSectionVisibility() {
+  const sec = document.getElementById("settings-updates-section");
+  if (!sec) return;
+  sec.style.display = typeof window.updater !== "undefined" ? "" : "none";
+}
+
+function escapeUpdatesVersionAttr(v) {
+  return String(v || "").replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+function renderUpdatesVersionRow(v, options) {
+  const { isInstalled, isNewer, onActionLabel, onActionClass, versionObj } = options || {};
+  const vid = escapeUpdatesVersionAttr(v.version);
+  const wrap = document.createElement("div");
+  wrap.className =
+    "updates-version-row" + (isNewer ? " updates-version-row--newer" : "") + (!isNewer && !isInstalled ? " updates-version-row--older" : "");
+  wrap.setAttribute("data-updates-version", vid);
+  const title = document.createElement("span");
+  title.className = "value";
+  title.style.fontWeight = "600";
+  title.textContent = "v" + v.version;
+  wrap.appendChild(title);
+  if (v.releaseDate) {
+    const date = document.createElement("span");
+    date.className = "value-muted";
+    date.style.fontSize = "12px";
+    date.textContent = v.releaseDate;
+    wrap.appendChild(date);
+  }
+  const summary = document.createElement("span");
+  summary.className = "value-muted";
+  summary.style.flex = "1";
+  summary.style.fontSize = "12px";
+  summary.textContent = (v.changelog && v.changelog[0]) || "";
+  wrap.appendChild(summary);
+  if (isInstalled) {
+    const badge = document.createElement("span");
+    badge.className = "updates-badge updates-badge--installed";
+    badge.textContent = "INSTALLED";
+    wrap.appendChild(badge);
+  } else if (onActionLabel && versionObj) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = onActionClass || "updates-btn-upgrade";
+    btn.textContent = onActionLabel;
+    btn.addEventListener("click", async () => {
+      if (typeof window.updater === "undefined") return;
+      updatesPanelInstalling = v.version;
+      updatesPanelProgressPct = 0;
+      syncUpdatesRowProgress(vid, 0);
+      const result = await window.updater.installVersion(versionObj);
+      updatesPanelInstalling = null;
+      syncUpdatesRowProgress(vid, 100);
+      if (result && result.error) {
+        window.alert("Install failed: " + result.error);
+      }
+    });
+    wrap.appendChild(btn);
+  }
+  const prog = document.createElement("div");
+  prog.className = "updates-row-progress";
+  prog.style.display = "none";
+  prog.setAttribute("data-updates-progress", vid);
+  const track = document.createElement("div");
+  track.className = "updates-row-progress-track";
+  const fill = document.createElement("div");
+  fill.className = "updates-row-progress-fill";
+  fill.setAttribute("data-updates-fill", vid);
+  track.appendChild(fill);
+  const pctEl = document.createElement("span");
+  pctEl.className = "value-muted";
+  pctEl.style.fontSize = "11px";
+  pctEl.setAttribute("data-updates-pct", vid);
+  pctEl.textContent = "0%";
+  prog.appendChild(track);
+  prog.appendChild(pctEl);
+  wrap.appendChild(prog);
+  return wrap;
+}
+
+function syncUpdatesRowProgress(vid, pct) {
+  const row = document.querySelector('[data-updates-version="' + vid + '"]');
+  if (!row) return;
+  const prog = row.querySelector('[data-updates-progress="' + vid + '"]');
+  const fill = row.querySelector('[data-updates-fill="' + vid + '"]');
+  const pctEl = row.querySelector('[data-updates-pct="' + vid + '"]');
+  const clamped = Math.min(100, Math.max(0, pct));
+  if (prog) prog.style.display = clamped < 100 ? "flex" : "none";
+  if (fill) fill.style.width = clamped + "%";
+  if (pctEl) pctEl.textContent = clamped + "%";
+}
+
+async function loadUpdatesPanel() {
+  // Guard against overlapping calls that can duplicate rows (e.g. auto-load + manual refresh)
+  if (typeof window.__updatesLoadSeq !== "number") window.__updatesLoadSeq = 0;
+  window.__updatesLoadSeq += 1;
+  const seq = window.__updatesLoadSeq;
+
+  refreshUpdatesSectionVisibility();
+  if (typeof window.updater === "undefined") return;
+  const newerWrap = document.getElementById("updates-newer-wrap");
+  const newerList = document.getElementById("updates-newer-list");
+  const installedRow = document.getElementById("updates-installed-row");
+  const olderList = document.getElementById("updates-older-list");
+  const upToDate = document.getElementById("updates-uptodate-msg");
+  const statusEl = document.getElementById("updates-panel-status");
+  const curEl = document.getElementById("updates-current-version");
+  const checkedEl = document.getElementById("updates-last-checked");
+  if (!newerList || !installedRow || !olderList) return;
+  let ver;
+  try {
+    ver = window.updater.getAppVersion();
+  } catch (_) {
+    ver = "—";
+  }
+  if (curEl) curEl.textContent = "v" + ver;
+  if (statusEl) {
+    statusEl.style.display = "none";
+    statusEl.textContent = "";
+  }
+  newerList.innerHTML = "";
+  installedRow.innerHTML = "";
+  olderList.innerHTML = "";
+  try {
+    const buckets = await window.updater.getVersionBuckets();
+    if (seq !== window.__updatesLoadSeq) return;
+    if (checkedEl) checkedEl.textContent = new Date().toLocaleTimeString();
+    const newer = buckets.newer || [];
+    const current = buckets.current || { version: ver, changelog: [] };
+    const older = buckets.older || [];
+    if (newerWrap) newerWrap.style.display = newer.length ? "" : "none";
+    if (upToDate) upToDate.style.display = newer.length ? "none" : "";
+    newer.forEach((v) => {
+      newerList.appendChild(
+        renderUpdatesVersionRow(v, {
+          isNewer: true,
+          onActionLabel: "Upgrade to v" + v.version,
+          onActionClass: "updates-btn-upgrade",
+          versionObj: v,
+        })
+      );
+    });
+    installedRow.appendChild(
+      renderUpdatesVersionRow(current, { isInstalled: true, versionObj: null })
+    );
+    older.forEach((v) => {
+      olderList.appendChild(
+        renderUpdatesVersionRow(v, {
+          onActionLabel: "Downgrade to v" + v.version,
+          onActionClass: "updates-btn-downgrade",
+          versionObj: v,
+        })
+      );
+    });
+    const olderDetails = document.getElementById("updates-older-details");
+    if (olderDetails) olderDetails.style.display = older.length ? "" : "none";
+    if (updatesPanelInstalling) {
+      syncUpdatesRowProgress(escapeUpdatesVersionAttr(updatesPanelInstalling), updatesPanelProgressPct);
+    }
+  } catch (e) {
+    if (statusEl) {
+      statusEl.style.display = "";
+      statusEl.textContent = "Could not fetch version list. Check your internet connection.";
+    }
+    if (checkedEl) checkedEl.textContent = "—";
+  }
+}
+
+function initJoinCloudUpdaterUi() {
+  // JoinCloud desktop uses the manual versions installer (Upgrade/Downgrade list).
+  // Keep only version install progress events; the electron-updater banner flow is disabled.
+  refreshUpdatesSectionVisibility();
+  if (typeof window.updater === "undefined") return;
+  if (!window.__joincloudVersionProgressBound) {
+    window.__joincloudVersionProgressBound = true;
+    window.updater.onVersionProgress((data) => {
+      if (!data || !data.version) return;
+      updatesPanelInstalling = data.version;
+      updatesPanelProgressPct = typeof data.pct === "number" ? data.pct : 0;
+      syncUpdatesRowProgress(escapeUpdatesVersionAttr(data.version), updatesPanelProgressPct);
+    });
+  }
+  return;
+
+  const banner = document.getElementById("update-banner");
+  const notesEl = document.getElementById("update-banner-notes");
+  let bannerDismissed = false;
+  let updateInfo = null;
+  let changelogOpen = false;
+
+  const panelAvail = document.getElementById("update-banner-available");
+  const panelDl = document.getElementById("update-banner-downloading");
+  const panelReady = document.getElementById("update-banner-ready");
+  const panelErr = document.getElementById("update-banner-error");
+
+  function hideBannerCompletely() {
+    if (!banner) return;
+    banner.classList.add("update-banner--hidden");
+    banner.style.display = "none";
+    banner.classList.remove("update-banner--ready", "update-banner--error");
+  }
+
+  function showBannerShell() {
+    if (!banner || bannerDismissed) return;
+    banner.classList.remove("update-banner--hidden");
+    banner.style.display = "block";
+  }
+
+  function hideAllBannerPanels() {
+    [panelAvail, panelDl, panelReady, panelErr].forEach((p) => {
+      if (p) p.style.display = "none";
+    });
+  }
+
+  function releaseNotesToLine(info) {
+    if (!info) return "";
+    if (info.releaseNotesLine) return String(info.releaseNotesLine);
+    const n = info.releaseNotes;
+    if (typeof n === "string") return n;
+    if (Array.isArray(n) && n.length) return typeof n[0] === "string" ? n[0] : "";
+    return "";
+  }
+
+  function fillChangelogNotes(info) {
+    if (!notesEl) return;
+    notesEl.innerHTML = "";
+    const n = info && info.releaseNotes;
+    if (Array.isArray(n)) {
+      n.forEach((line) => {
+        if (typeof line !== "string" || !line.trim()) return;
+        const li = document.createElement("li");
+        li.textContent = line;
+        notesEl.appendChild(li);
+      });
+    } else if (typeof n === "string" && n.trim()) {
+      const li = document.createElement("li");
+      li.textContent = n;
+      notesEl.appendChild(li);
+    }
+  }
+
+  function showAvailableBanner() {
+    if (!updateInfo || bannerDismissed || !banner) return;
+    showBannerShell();
+    banner.classList.remove("update-banner--ready", "update-banner--error");
+    hideAllBannerPanels();
+    if (panelAvail) panelAvail.style.display = "flex";
+    const msg = document.getElementById("update-banner-msg-available");
+    const line = releaseNotesToLine(updateInfo);
+    if (msg) {
+      msg.textContent = line
+        ? "JoinCloud v" + updateInfo.version + " is available — " + line
+        : "JoinCloud v" + updateInfo.version + " is available";
+    }
+    fillChangelogNotes(updateInfo);
+    if (notesEl) notesEl.style.display = changelogOpen ? "block" : "none";
+  }
+
+  function showDownloadingBanner(pct, bps) {
+    if (!banner) return;
+    showBannerShell();
+    banner.classList.remove("update-banner--ready", "update-banner--error");
+    hideAllBannerPanels();
+    if (panelDl) panelDl.style.display = "flex";
+    const msg = document.getElementById("update-banner-msg-download");
+    const fill = document.getElementById("update-banner-progress-fill");
+    const speed = document.getElementById("update-banner-speed");
+    if (msg && updateInfo) msg.textContent = "Downloading v" + updateInfo.version + "... " + (pct || 0) + "%";
+    if (fill) fill.style.width = (pct || 0) + "%";
+    if (speed) {
+      const kb = bps != null ? Math.round(Number(bps) / 1024) : 0;
+      speed.textContent = kb > 0 ? kb + " KB/s" : "";
+    }
+  }
+
+  function showReadyBanner() {
+    if (!banner) return;
+    showBannerShell();
+    banner.classList.add("update-banner--ready");
+    banner.classList.remove("update-banner--error");
+    hideAllBannerPanels();
+    if (panelReady) panelReady.style.display = "flex";
+    const msg = document.getElementById("update-banner-msg-ready");
+    if (msg && updateInfo) msg.textContent = "v" + updateInfo.version + " downloaded — ready to install";
+  }
+
+  function showErrorBanner() {
+    if (!banner) return;
+    showBannerShell();
+    banner.classList.add("update-banner--error");
+    banner.classList.remove("update-banner--ready");
+    hideAllBannerPanels();
+    if (panelErr) panelErr.style.display = "flex";
+    const msg = document.getElementById("update-banner-msg-error");
+    if (msg) msg.textContent = "Update failed — please try again";
+  }
+
+  window.updater.onUpdateAvailable((d) => {
+    changelogOpen = false;
+    updateInfo = d;
+    if (!bannerDismissed) {
+      showAvailableBanner();
+    }
+  });
+  window.updater.onDownloadProgress((d) => {
+    showDownloadingBanner(d.percent, d.bytesPerSecond);
+  });
+  window.updater.onUpdateDownloaded(() => {
+    showReadyBanner();
+  });
+  window.updater.onUpdateError(() => {
+    showErrorBanner();
+  });
+  window.updater.onUpdateNone(() => {});
+
+  window.updater.onVersionProgress((data) => {
+    if (!data || !data.version) return;
+    updatesPanelInstalling = data.version;
+    updatesPanelProgressPct = typeof data.pct === "number" ? data.pct : 0;
+    syncUpdatesRowProgress(escapeUpdatesVersionAttr(data.version), updatesPanelProgressPct);
+  });
+
+  const btnChangelog = document.getElementById("update-banner-btn-changelog");
+  const btnUpgrade = document.getElementById("update-banner-btn-upgrade");
+  const btnDismiss = document.getElementById("update-banner-btn-dismiss");
+  const btnInstall = document.getElementById("update-banner-btn-install");
+  const btnRetry = document.getElementById("update-banner-btn-retry");
+
+  if (btnChangelog) {
+    btnChangelog.addEventListener("click", () => {
+      changelogOpen = !changelogOpen;
+      if (notesEl) notesEl.style.display = changelogOpen ? "block" : "none";
+    });
+  }
+  if (btnUpgrade) {
+    btnUpgrade.addEventListener("click", () => {
+      try {
+        window.updater.downloadUpdate();
+      } catch (_) {}
+    });
+  }
+  if (btnDismiss) {
+    btnDismiss.addEventListener("click", () => {
+      bannerDismissed = true;
+      hideBannerCompletely();
+    });
+  }
+  if (btnInstall) {
+    btnInstall.addEventListener("click", () => {
+      try {
+        window.updater.installUpdate();
+      } catch (_) {}
+    });
+  }
+  if (btnRetry) {
+    btnRetry.addEventListener("click", () => {
+      try {
+        window.updater.downloadUpdate();
+      } catch (_) {}
+    });
+  }
+
+  const refreshUpdatesBtn = document.getElementById("updates-refresh-btn");
+  if (refreshUpdatesBtn) {
+    refreshUpdatesBtn.addEventListener("click", () => {
+      loadUpdatesPanel().catch(() => {});
+    });
+  }
+}
+
+initJoinCloudUpdaterUi();
+
 bootstrapApp();
 
-// Dynamic config poll: 10 s in dev mode, 60 s in production.
-// Self-reschedules so the interval can adapt after the first config load sets state.devMode.
-(function scheduleConfigPoll() {
-  var delay = state.devMode ? 10 * 1000 : 60 * 1000;
-  setTimeout(async () => {
-    if (els.appLayout.style.display !== "none") {
-      try {
-        await loadControlPlaneConfig();
-        updateGraceBanner();
-        updateSubscriptionSection();
-        updateHeaderProfile();
-        renderUsageBars().catch(() => {});
-      } catch (_) {}
-    }
-    scheduleConfigPoll();
-  }, delay);
-})();
 
 setInterval(async () => {
   if (els.appLayout.style.display !== "none") {
+    const _section = window.location.hash.replace("#", "") || "home";
+    // Always update header status badge and notification count
     await loadRuntimeStatus();
-    await loadLogs();
     await loadNotifications();
-    if (state.isAdmin) {
+    // Only fetch logs when the logs section is active
+    if (_section === "logs") await loadLogs();
+    // Social notifications only matter on the home/files sections
+    if (_section === "home" || _section === "files" || _section === "") {
+      try {
+        const socialRes = await apiFetch("/api/v1/files/social/notifications");
+        if (socialRes.ok) {
+          const socialData = await socialRes.json().catch(() => ({}));
+          const first = Array.isArray(socialData.notifications) ? socialData.notifications[0] : null;
+          if (first && first.type === "like") {
+            showUploadBanner(`${first.actor} liked ${first.path}`, "success");
+            setTimeout(hideUploadBanner, 1200);
+          }
+        }
+      } catch (_) {}
+    }
+    // Admin-specific fetches — skip on pages where they're not displayed
+    if (state.isAdmin && _section !== "settings" && _section !== "network" && _section !== "support") {
       await loadPendingAccessRequests();
       await loadApprovedDevices();
       await loadShareVisitSummary();
@@ -4316,3 +7198,169 @@ setInterval(async () => {
     await pollAccessStatus(state.requestId);
   }
 }, 3000);
+
+// ─── Real-time SSE client (support chat + plan/license events) ───────────────
+(function initRealtimeSSE() {
+  var sseUrl = "http://127.0.0.1:8787/api/sse/events";
+  var adminTypingTimer = null;
+  var es = null;
+
+  function getEl(id) { return document.getElementById(id); }
+
+  function setAdminActive(active) {
+    var el = getEl("support-admin-active");
+    if (!el) return;
+    el.style.display = active ? "flex" : "none";
+  }
+
+  function setAdminTyping(isTyping) {
+    var el = getEl("support-admin-typing");
+    if (!el) return;
+    el.style.display = isTyping ? "flex" : "none";
+  }
+
+  function appendRealtimeMessage(msg) {
+    if (!msg || !msg.text) return;
+    if (!Array.isArray(state.supportMessages)) state.supportMessages = [];
+    state.supportMessages.push(msg);
+    updateSupportChatState();
+    renderSupportMessages();
+
+    // Show in-app unread badge if user is NOT on support tab
+    var currentSection = window.location.hash.replace("#", "") || "home";
+    if (currentSection !== "support") {
+      var badge = getEl("support-nav-badge");
+      if (badge) badge.classList.add("visible");
+      state.supportUnreadCount = (state.supportUnreadCount || 0) + 1;
+      // Browser notification
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        try {
+          new Notification("JoinCloud Support", {
+            body: msg.text.length > 80 ? msg.text.slice(0, 80) + "…" : msg.text,
+            silent: false,
+          });
+        } catch (_) {}
+      }
+    }
+  }
+
+  function handleResolved() {
+    state.supportResolved = true;
+    var chatBody = getEl("support-chat-body");
+    var startScreen = getEl("support-start-screen");
+    var resolvedScreen = getEl("support-resolved-screen");
+    if (chatBody && chatBody.style.display !== "none") {
+      chatBody.style.transition = "opacity 0.4s ease";
+      chatBody.style.opacity = "0";
+      setTimeout(function() {
+        chatBody.style.display = "none";
+        chatBody.style.opacity = "";
+        chatBody.style.transition = "";
+        if (startScreen) startScreen.style.display = "none";
+        if (resolvedScreen) resolvedScreen.style.display = "flex";
+      }, 400);
+    } else {
+      if (startScreen) startScreen.style.display = "none";
+      if (chatBody) chatBody.style.display = "none";
+      if (resolvedScreen) resolvedScreen.style.display = "flex";
+    }
+    setAdminActive(false);
+    setAdminTyping(false);
+  }
+
+  function connect() {
+    if (es) return;
+    try {
+      es = new EventSource(sseUrl);
+
+      es.addEventListener("support:message", function(e) {
+        try {
+          var msg = JSON.parse(e.data);
+          appendRealtimeMessage(msg);
+        } catch (_) {}
+      });
+
+      es.addEventListener("support:admin_joined", function() {
+        setAdminActive(true);
+      });
+
+      es.addEventListener("support:admin_left", function() {
+        setAdminActive(false);
+        setAdminTyping(false);
+        if (adminTypingTimer) { clearTimeout(adminTypingTimer); adminTypingTimer = null; }
+      });
+
+      es.addEventListener("support:typing", function(e) {
+        try {
+          var data = JSON.parse(e.data);
+          setAdminTyping(!!data.isTyping);
+          if (adminTypingTimer) clearTimeout(adminTypingTimer);
+          if (data.isTyping) {
+            adminTypingTimer = setTimeout(function() { setAdminTyping(false); }, 3000);
+          }
+        } catch (_) {}
+      });
+
+      es.addEventListener("support:resolved", function() {
+        handleResolved();
+      });
+
+      es.onerror = function() {
+        try { es.close(); } catch (_) {}
+        es = null;
+        setTimeout(connect, 5000);
+      };
+    } catch (_) {
+      setTimeout(connect, 10000);
+    }
+  }
+
+  // Wire up typing indicator on the support input
+  var inputEl = getEl("support-message-input");
+  var typingSendTimer = null;
+  if (inputEl) {
+    inputEl.addEventListener("input", function() {
+      fetch("/api/support/typing", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isTyping: true }),
+      }).catch(function() {});
+      if (typingSendTimer) clearTimeout(typingSendTimer);
+      typingSendTimer = setTimeout(function() {
+        fetch("/api/support/typing", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isTyping: false }),
+        }).catch(function() {});
+      }, 1500);
+    });
+  }
+
+  // "Start Conversation" button
+  var startBtn = getEl("support-start-btn");
+  if (startBtn) {
+    startBtn.addEventListener("click", function() {
+      var startScreen = getEl("support-start-screen");
+      var chatBody = getEl("support-chat-body");
+      if (startScreen) startScreen.style.display = "none";
+      if (chatBody) chatBody.style.display = "flex";
+      setTimeout(function() {
+        var inp = getEl("support-message-input");
+        if (inp) inp.focus();
+      }, 50);
+    });
+  }
+
+  // "New Chat" button (after resolved)
+  var newChatBtn = getEl("support-new-chat-btn");
+  if (newChatBtn) {
+    newChatBtn.addEventListener("click", function() {
+      state.supportResolved = false;
+      state.supportMessages = [];
+      updateSupportChatState();
+      renderSupportMessages();
+    });
+  }
+
+  connect();
+})();

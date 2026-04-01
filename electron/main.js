@@ -12,12 +12,21 @@ const BrowserView = electron.BrowserView;
 const dialog = electron.dialog;
 const ipcMain = electron.ipcMain;
 const shell = electron.shell;
+const electronNet = electron.net;
+const Tray = electron.Tray;
+const Menu = electron.Menu;
+const powerMonitor = electron.powerMonitor;
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
 const net = require("net");
 const { spawn } = require("child_process");
 const http = require("http");
+
+require(path.join(__dirname, "updater", "versionFetcher"));
+require(path.join(__dirname, "updater", "versionInstaller"));
+const { initAutoUpdater } = require(path.join(__dirname, "updater", "autoUpdate"));
+const { setVersionInstallerWindow } = require(path.join(__dirname, "updater", "versionInstaller"));
 
 if (!app.isPackaged) {
   try {
@@ -44,6 +53,21 @@ let isHandlingClosePrompt = false;
 let deviceIdentity = null;
 let heartbeatTimer = null;
 let registrationSchedulerRef = null;
+let tray = null;
+let suppressMinimizeToTrayUntil = 0;
+
+function reopenMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  suppressMinimizeToTrayUntil = Date.now() + 700;
+  try {
+    mainWindow.show();
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.focus();
+  } catch (_) {}
+  return true;
+}
 
 const HEALTH_URL = "http://127.0.0.1:8787/api/v1/health";
 const BACKEND_URL = "http://127.0.0.1:8787";
@@ -236,7 +260,7 @@ function getStoragePath() {
 function startBackend() {
   if (backendProcess) return;
 
-  // Native modules used by backend that require Electron rebuilds: sqlite3.
+  // Backend runs as Node subprocess; no native modules requiring Electron rebuild.
   const backendPath = resolveBackendPaths();
   const backendScript = backendPath.script;
   const backendCwd = backendPath.cwd;
@@ -268,6 +292,9 @@ function startBackend() {
     SHARE_PORT,
     JOINCLOUD_STORAGE_ROOT: getStoragePath(),
     JOINCLOUD_USER_DATA: userDataPath,
+    JOINCLOUD_ADMIN_HOST: process.env.JOINCLOUD_ADMIN_HOST || "https://plane.joincloud.in",
+    JOINCLOUD_CONTROL_PLANE_URL: process.env.JOINCLOUD_CONTROL_PLANE_URL || "https://plane.joincloud.in",
+    JOINCLOUD_SIGNING_SECRET: process.env.JOINCLOUD_SIGNING_SECRET || "eec5b45b191de344600ffe878afa67e7a02545fec81c49413b600f1db9d662d7",
     PATH: process.env.PATH || "",
     NODE_PATH: mergedNodePath || inheritedNodePath,
   };
@@ -293,8 +320,9 @@ function startBackend() {
   backendProcess.stdout.on("data", (chunk) => {
     const text = chunk.toString().trim();
     logLine(text);
-    // Loopback callback route emits this marker after successful auth/extend verify.
-    if (text.includes("[joincloud-auth-callback] license-updated") && mainWindow && !mainWindow.isDestroyed()) {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    // Loopback callback route / socket client emits this marker after a license change.
+    if (text.includes("[joincloud-auth-callback] license-updated")) {
       mainWindow.webContents.send("license-updated");
       mainWindow.show();
       mainWindow.focus();
@@ -645,12 +673,14 @@ async function createWindow() {
       width: 1200,
       height: 800,
       icon: path.join(__dirname, "..", "assets", "icons.png"),
+      show: false,
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
         preload: path.join(__dirname, "preload.js"),
       },
     });
+    global.mainWindow = mainWindow;
     mainWindow.webContents.on("did-fail-load", (_event, code, description, url) => {
       logLine(`Renderer failed to load code=${code} url=${url} reason=${description}`);
     });
@@ -667,12 +697,21 @@ async function createWindow() {
 
     try {
       await loadRenderer(mainWindow);
+      mainWindow.show();
     } catch (error) {
       logLine(`UI load failed: ${formatError(error)}`);
       showInitFailure("Renderer URL could not be loaded", error);
       stopBackend();
       app.quit();
       return;
+    }
+    try {
+      setVersionInstallerWindow(mainWindow);
+      // The app's supported update path is the in-app versions list (manual install on click).
+      // Keep electron-updater disabled unless explicitly enabled for testing.
+      if (process.env.JOINCLOUD_ENABLE_UPDATER === "1") initAutoUpdater(mainWindow);
+    } catch (updaterErr) {
+      logLine(`Updater init: ${formatError(updaterErr)}`);
     }
     mainWindow.on("close", async (event) => {
       if (isStopping || allowWindowClose) {
@@ -701,8 +740,13 @@ async function createWindow() {
       isHandlingClosePrompt = false;
       mainWindow.hide();
     });
+    mainWindow.on("minimize", () => {
+      // Keep classic desktop behavior: minimize stays on taskbar.
+      // Background mode is entered only through explicit close choice.
+    });
     mainWindow.on("closed", () => {
       mainWindow = null;
+      global.mainWindow = null;
     });
 
     // Handle deep link passed when app was launched via joincloud:// (e.g. from web redirect when app was closed)
@@ -730,10 +774,7 @@ app.on("second-instance", (_event, argv) => {
     return;
   }
   if (mainWindow && !mainWindow.isDestroyed()) {
-    if (mainWindow.isMinimized()) {
-      mainWindow.restore();
-    }
-    mainWindow.focus();
+    reopenMainWindow();
     return;
   }
   if (app.isReady()) {
@@ -751,13 +792,66 @@ app.on("open-url", (_event, url) => {
 });
 
 if (gotLock) {
-  app.whenReady().then(createWindow);
+  app.whenReady().then(async () => {
+    try {
+      const trayIcon = path.join(__dirname, "..", "assets", "icon.ico");
+      tray = new Tray(trayIcon);
+      tray.setToolTip("JoinCloud");
+      tray.setContextMenu(
+        Menu.buildFromTemplate([
+          {
+            label: "Open JoinCloud",
+            click: () => {
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                reopenMainWindow();
+              } else if (app.isReady()) {
+                createWindow().catch(() => {});
+              }
+            },
+          },
+          {
+            label: "Quit",
+            click: () => {
+              allowWindowClose = true;
+              app.quit();
+            },
+          },
+        ])
+      );
+      tray.on("click", () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          reopenMainWindow();
+        }
+      });
+    } catch (_) {}
+    if (powerMonitor) {
+      powerMonitor.on("resume", () => {
+        checkBackend().then((healthy) => {
+          if (!healthy) {
+            scheduleBackendRestart("system resume health check");
+          } else {
+            setBackendState("healthy", "system resume");
+          }
+        }).catch(() => {
+          scheduleBackendRestart("system resume check failed");
+        });
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("system-resume");
+        }
+      });
+      powerMonitor.on("suspend", () => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("system-suspend");
+        }
+      });
+    }
+    await createWindow();
+  });
 }
 
 app.on("activate", () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.show();
-    mainWindow.focus();
+    reopenMainWindow();
     return;
   }
   if (!mainWindow && app.isReady()) {
@@ -838,6 +932,54 @@ ipcMain.handle("joincloud-open-auth-modal", async (_event, url) => {
 ipcMain.handle("joincloud-close-auth-modal", async () => {
   closeAuthView();
   return { ok: true };
+});
+
+/**
+ * Internet connectivity check using Electron's net module (Chromium stack).
+ * Returns { connected: boolean, latencyMs: number | null, strength: "strong" | "weak" | "offline" }
+ * Strength thresholds: strong < 150ms, weak 150-500ms, offline = no response.
+ */
+ipcMain.handle("joincloud-check-internet", () => {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const timeoutMs = 5000;
+    let settled = false;
+
+    function settle(result) {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    }
+
+    const timer = setTimeout(() => {
+      settle({ connected: false, latencyMs: null, strength: "offline" });
+    }, timeoutMs);
+
+    try {
+      const req = electronNet.request({
+        method: "HEAD",
+        url: "https://www.google.com",
+        redirect: "follow",
+      });
+
+      req.on("response", () => {
+        clearTimeout(timer);
+        const latencyMs = Date.now() - start;
+        const strength = latencyMs < 150 ? "strong" : latencyMs < 500 ? "weak" : "weak";
+        settle({ connected: true, latencyMs, strength });
+      });
+
+      req.on("error", () => {
+        clearTimeout(timer);
+        settle({ connected: false, latencyMs: null, strength: "offline" });
+      });
+
+      req.end();
+    } catch (err) {
+      clearTimeout(timer);
+      settle({ connected: false, latencyMs: null, strength: "offline" });
+    }
+  });
 });
 
 function closeAuthView() {
@@ -981,6 +1123,10 @@ app.on("before-quit", (event) => {
     return;
   }
   isStopping = true;
+  if (tray) {
+    try { tray.destroy(); } catch (_) {}
+    tray = null;
+  }
   stopHealthMonitor();
   if (heartbeatTimer) {
     clearInterval(heartbeatTimer);
