@@ -24,6 +24,7 @@ function createShareServer({ share, realm, telemetry, runtimeTelemetry, usageAgg
   webdavServer.beforeRequest(async (ctx, callback) => {
     const method = ctx.request.method || "";
     if (method === "GET" || method === "HEAD") {
+      ctx.response.setHeader("Accept-Ranges", "bytes");
       const resourcePath = ctx.requested.path.toString();
       const filename = path.basename(resourcePath) || path.basename(share.targetPath);
       if (filename) {
