@@ -18,6 +18,7 @@ const { detectTransferMode } = require("./transfer/TransferRouter");
 const { KeyStore } = require("./transfer/KeyStore");
 const { decryptMetadata } = require("./transfer/metaDecrypt");
 const { createDirectStreamManager, streamFileWithRange } = require("./transfer/DirectStream");
+const HlsTranscoder = require("./transfer/HlsTranscoder");
 
 const config = require("./config/default");
 const { createOwnerServer } = require("./webdav/ownerServer");
@@ -1233,6 +1234,7 @@ async function bootstrap() {
   const app = express();
   app.use((req, res, next) => {
     const origin = req.headers.origin;
+    const isTunnelRequest = req.headers["x-tunnel-source"] === "cloudflare";
     const isPrivateOrigin = origin && (
       origin.startsWith("http://127.0.0.1") ||
       origin.startsWith("http://[::1]") ||
@@ -1240,11 +1242,23 @@ async function bootstrap() {
       /^http:\/\/10\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?$/.test(origin) ||
       /^http:\/\/172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}(:\d+)?$/.test(origin)
     );
-    if (isPrivateOrigin) res.setHeader("Access-Control-Allow-Origin", origin);
+    // Allow private LAN origins and Cloudflare tunnel origins (the tunnel URL is the share page's
+    // own origin, so this is same-origin in practice, but must be explicit for preflight).
+    if (isPrivateOrigin || (isTunnelRequest && origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    }
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
     res.setHeader(
       "Access-Control-Allow-Headers",
       "Content-Type, Authorization, X-JoinCloud-Fingerprint, X-JoinCloud-Token, X-Upload-Id, X-Chunk-Index, X-Chunk-Hmac, X-Transfer-Origin, X-Paired-Device-Id, X-Host-Session-Token, Range"
+    );
+    // Expose streaming-critical response headers to JS (fetch API can't read them without this).
+    // Content-Range: lets client know byte position in file (needed for resume after connection drop).
+    // Content-Length: lets client know total bytes to download (progress bar, ETA).
+    // Accept-Ranges / X-Joincloud-Range-Support: lets client detect server range capability.
+    res.setHeader(
+      "Access-Control-Expose-Headers",
+      "Content-Range, Content-Length, Accept-Ranges, X-Joincloud-Range-Support, Content-Encoding, Vary"
     );
     if (req.method === "OPTIONS") return res.sendStatus(204);
     next();
@@ -2325,6 +2339,7 @@ async function bootstrap() {
         fileName,
         mimeType: contentType,
         download: false,
+        cacheControl: "no-store",
         onError: (err) => {
           logger.error("share preview error", { error: err.message });
         },
@@ -2333,6 +2348,94 @@ async function bootstrap() {
       res.status(400).send(error.message || "preview_failed");
     }
   });
+
+  // ── HLS adaptive streaming routes ────────────────────────────────────────
+  // Shared helper: authenticate + resolve filePath for HLS routes
+  async function resolveHlsFilePath(req, res) {
+    if (validateTunnelToken(req, res, req.params.shareId)) return null;
+    if (!sharingEnabled) { res.status(423).send("sharing_stopped"); return null; }
+    const share = shareService.getShare(req.params.shareId);
+    if (!share) { res.status(404).send("share_not_found"); return null; }
+    try {
+      let filePath = share.targetPath;
+      if ((share.targetType || "file") === "folder") {
+        const relativePath = toSafeRelative(req.query.path || "");
+        if (!relativePath) { res.status(400).send("file path required"); return null; }
+        filePath = ensureWithinShareRoot(share.targetPath, path.join(share.targetPath, relativePath));
+      }
+      const stat = await fs.stat(filePath);
+      if (!stat.isFile()) { res.status(400).send("not_a_file"); return null; }
+      return filePath;
+    } catch (e) {
+      res.status(400).send(e.message || "path_error");
+      return null;
+    }
+  }
+
+  // 1. Status / start transcoding
+  app.get("/share/:shareId/hls/status", async (req, res) => {
+    if (!HlsTranscoder.isAvailable()) {
+      console.log("[HLS] ffmpeg not available");
+      return res.json({ status: "unavailable", qualities: [], lowestReady: null });
+    }
+    const filePath = await resolveHlsFilePath(req, res);
+    if (!filePath) return;
+    console.log("[HLS] Status request for", filePath);
+    const status = HlsTranscoder.getStatus(req.params.shareId, filePath);
+    if (status.status === "not_started") {
+      console.log("[HLS] Job not started, starting now");
+      HlsTranscoder.getOrStartJob(req.params.shareId, filePath);
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.json(status);
+  });
+
+  // 2. Master playlist — triggers job, returns playlist once lowest quality is ready
+  app.get("/share/:shareId/hls/master.m3u8", async (req, res) => {
+    if (!HlsTranscoder.isAvailable()) return res.status(503).send("hls_unavailable");
+    const filePath = await resolveHlsFilePath(req, res);
+    if (!filePath) return;
+    const master = HlsTranscoder.getMasterPlaylist(req.params.shareId, filePath);
+    if (!master) return res.status(503).send("hls_not_ready");
+    res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+    res.setHeader("Cache-Control", "no-store");
+    res.send(master);
+  });
+
+  // 3. Quality-level playlist
+  app.get("/share/:shareId/hls/:quality/index.m3u8", async (req, res) => {
+    if (!HlsTranscoder.isAvailable()) return res.status(503).send("hls_unavailable");
+    const filePath = await resolveHlsFilePath(req, res);
+    if (!filePath) return;
+    const playlistPath = HlsTranscoder.getQualityPlaylistPath(req.params.shareId, filePath, req.params.quality);
+    try {
+      const content = await fs.readFile(playlistPath, "utf8");
+      res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+      res.setHeader("Cache-Control", "no-store");
+      res.send(content);
+    } catch (_) {
+      res.status(404).send("playlist_not_found");
+    }
+  });
+
+  // 4. Segment (.ts) file
+  app.get("/share/:shareId/hls/:quality/:segment", async (req, res) => {
+    if (!HlsTranscoder.isAvailable()) return res.status(503).send("hls_unavailable");
+    const segName = req.params.segment;
+    if (!/^seg\d{4}\.ts$/.test(segName)) return res.status(400).send("invalid_segment");
+    const filePath = await resolveHlsFilePath(req, res);
+    if (!filePath) return;
+    const segPath = HlsTranscoder.getSegmentPath(req.params.shareId, filePath, req.params.quality, segName);
+    try {
+      await fs.access(segPath);
+      res.setHeader("Content-Type", "video/mp2t");
+      res.setHeader("Cache-Control", "no-store");
+      fsSync.createReadStream(segPath).pipe(res);
+    } catch (_) {
+      res.status(404).send("segment_not_found");
+    }
+  });
+  // ── End HLS routes ────────────────────────────────────────────────────────
 
   app.get("/share/:shareId/download.zip", async (req, res) => {
     if (validateTunnelToken(req, res, req.params.shareId)) return;

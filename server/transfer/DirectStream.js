@@ -43,7 +43,7 @@ function parseRangeHeader(rangeHeader, fileSize) {
 }
 
 function streamFileWithRange(req, res, options) {
-  const { filePath, fileName, mimeType, download, onData, onDone, onError } = options;
+  const { filePath, fileName, mimeType, download, cacheControl, onData, onDone, onError } = options;
   const resolvedFileName = String(fileName || path.basename(filePath) || "download");
   let stat;
   try {
@@ -87,7 +87,14 @@ function streamFileWithRange(req, res, options) {
       : `inline; filename="${resolvedFileName}"; filename*=UTF-8''${encodeURIComponent(resolvedFileName)}`
   );
   res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("X-Joincloud-Range-Support", "bytes");
+  res.setHeader("Cache-Control", cacheControl || "no-store");
+  // Prevent Cloudflare / any proxy from gzip/brotli compressing a streaming byte-range response.
+  // If the proxy compresses, byte offsets shift and all subsequent Range requests return wrong data.
+  res.setHeader("Content-Encoding", "identity");
+  // Tell proxy caches that responses differ by Range header so a cached 200 is never served
+  // in response to a 206 range request.
+  res.setHeader("Vary", "Range");
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders();
   if (String(req.method || "").toUpperCase() === "HEAD") {
