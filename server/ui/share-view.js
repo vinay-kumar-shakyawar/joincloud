@@ -676,10 +676,10 @@
       '<div class="share-preview-toolbar">' +
       '<div class="share-preview-title" id="share-preview-title"></div>' +
       '<div class="share-preview-actions">' +
-      '<button class="button secondary button-icon-only" id="share-preview-toggle-gallery" title="Toggle gallery" aria-label="Toggle gallery"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5h18v4H3V5zm0 5h18v4H3v-4zm0 5h18v4H3v-4z"/></svg></button>' +
-      '<button class="button secondary" id="share-preview-toggle-selection">Selection</button>' +
-      '<button class="button secondary" id="share-preview-download"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M5 20h14v-2H5v2zm7-18-5.5 5.5h4v6h3v-6h4L12 2z"/></svg></span>Download</button>' +
-      '<button class="button secondary" id="share-preview-close">Close</button>' +
+      '<button class="button secondary button-icon-only" id="share-preview-toggle-gallery" title="Toggle gallery" aria-label="Toggle gallery"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5h18v4H3V5zm0 5h18v4H3v-4zm0 5h18v4H3v-4z"/></svg></button>' +
+      '<button class="button secondary button-icon-only" id="share-preview-toggle-selection" title="Selection mode" aria-label="Toggle selection"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg></button>' +
+      '<button class="button secondary button-icon-only" id="share-preview-download" title="Download" aria-label="Download"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M5 20h14v-2H5v2zm7-18-5.5 5.5h4v6h3v-6h4L12 2z"/></svg></button>' +
+      '<button class="button secondary button-icon-only" id="share-preview-close" title="Close" aria-label="Close"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>' +
       "</div></div>" +
       '<div class="share-preview-body">' +
       '<div class="share-preview-main">' +

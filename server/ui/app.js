@@ -1301,7 +1301,8 @@ function renderFiles() {
       const makeShareBadge = (kind, share) => {
         const wrap = document.createElement("span");
         wrap.className = "badge badge-pill " + (kind === "local" ? "badge-shared-local" : "badge-shared-public");
-        wrap.title = kind === "local" ? "Shared on local network" : "Shared publicly";
+        wrap.title = kind === "local" ? "View local share link" : "View public share link";
+        wrap.style.cursor = "pointer";
         const label = document.createElement("span");
         label.className = "badge-label";
         label.textContent = kind === "local" ? "Local" : "Public";
@@ -1323,6 +1324,14 @@ function renderFiles() {
           try { renderFiles(); } catch (_) {}
         };
         wrap.appendChild(stop);
+
+        wrap.onclick = (e) => {
+          if (e.target === stop || stop.contains(e.target)) return;
+          const url = kind === "local"
+            ? (share.urlIp || share.url || `${stateMeta.lanBaseUrl}/share/${share.shareId}`)
+            : (share.publicUrl || share.tunnelCandidateUrl || "");
+          if (url) showShareQrModal(url);
+        };
         return wrap;
       };
 
@@ -1599,6 +1608,21 @@ function showShareQrModal(url) {
     foreground: "#000000",
   });
   urlEl.textContent = url || "";
+  const openBtn = document.getElementById("share-qr-open-btn");
+  if (openBtn) openBtn.onclick = () => { if (url) window.open(url, "_blank"); };
+  const copyBtn = document.getElementById("share-qr-copy-btn");
+  if (copyBtn) {
+    copyBtn.onclick = async () => {
+      if (!url) return;
+      const ok = await copyToClipboard(url);
+      if (ok) {
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => (copyBtn.textContent = "Copy Link"), 2000);
+      } else {
+        showCopyFallback(url, els.shareQrModal);
+      }
+    };
+  }
   els.shareQrModal.classList.add("active");
 }
 
@@ -3372,6 +3396,17 @@ async function loadTechnicalConfig() {
       return;
     }
     const cfg = await cfgRes.json();
+    // Populate dedicated Host ID field
+    const hostIdEl = document.getElementById("settings-host-id");
+    const copyHostBtn = document.getElementById("copy-host-id-btn");
+    if (hostIdEl) hostIdEl.textContent = cfg.host_id || "-";
+    if (copyHostBtn && cfg.host_id) {
+      copyHostBtn.onclick = () => {
+        copyToClipboard(cfg.host_id, document.body).then((ok) => {
+          if (ok) { copyHostBtn.title = "Copied!"; setTimeout(() => { copyHostBtn.title = "Copy Host ID"; }, 1500); }
+        });
+      };
+    }
     const lines = [
       `Host ID: ${cfg.host_id || "-"}`,
       `Local IPs: ${(cfg.local_ips || []).join(", ") || "-"}`,
@@ -4445,42 +4480,32 @@ async function createShare() {
   let resultHtml = "<div>Share created.</div>";
   const isProvisioningPublic = scope === "public" && !publicUrl && data.publicStatus === "provisioning";
   if (isProvisioningPublic) {
-    resultHtml += `<div style="margin-top:10px;display:flex;flex-direction:column;gap:10px;">
-  <div>
-    <span class="value" style="font-size:12px; font-weight:600;">Local (ready now):</span>
-    <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(shareUrl)}</span>
-    <button type="button" class="button secondary" id="share-copy-local-btn" style="margin-top:4px;">Copy</button>
-    <button type="button" class="button secondary" id="share-open-local-btn" style="margin-top:4px;margin-left:6px;">Open</button>
-  </div>
-  <div>
-    <span class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Public:</span>
-    <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">Provisioning…</span>
-    <div class="value value-muted" style="font-size:11px; margin-top:6px;">Public link is provisioning…</div>
-    <div class="value value-muted" id="public-provisioning-status" style="font-size:11px; margin-top:4px;">Waiting for public URL…</div>
-  </div>
+    resultHtml += `<div style="margin-top:10px;">
+  <span class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Public:</span>
+  <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">Provisioning…</span>
+  <div class="value value-muted" style="font-size:11px; margin-top:6px;">Public link is provisioning…</div>
+  <div class="value value-muted" id="public-provisioning-status" style="font-size:11px; margin-top:4px;">Waiting for public URL…</div>
 </div>`;
   } else if (scope === "public" && publicUrl) {
-    resultHtml += `<div style="margin-top:10px;display:flex;flex-direction:column;gap:10px;">
-  <div>
-    <span class="value" style="font-size:12px; font-weight:600;">Local:</span>
-    <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(shareUrl)}</span>
-    <button type="button" class="button secondary" id="share-copy-local-btn" style="margin-top:4px;">Copy</button>
-    <button type="button" class="button secondary" id="share-open-local-btn" style="margin-top:4px;margin-left:6px;">Open</button>
+    resultHtml += `<div style="margin-top:10px;">
+  <span class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Public:</span>
+  <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(publicUrl)}</span>
+  <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+    <button type="button" class="button secondary" id="share-copy-public-btn">Copy</button>
+    <button type="button" class="button secondary" id="share-open-public-btn">Open</button>
+    <button type="button" class="button secondary button-icon-only" id="share-qr-public-btn" title="Show QR code" aria-label="Show QR code"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 3h8v8H3V3zm2 2v4h4V5H5zm8-2h8v8h-8V3zm2 2v4h4V5h-4zM3 13h8v8H3v-8zm2 2v4h4v-4H5zm10-2h2v2h-2v-2zm-2 2h2v2h-2v-2zm4 0h2v2h-2v-2zm2 2h2v2h-2v-2zm-4 0h2v2h-2v-2zm0 2h2v2h-2v-2zm2 0h2v2h-2v-2z"/></svg></button>
   </div>
-  <div>
-    <span class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Public:</span>
-    <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(publicUrl)}</span>
-    <button type="button" class="button secondary" id="share-copy-public-btn" style="margin-top:4px;">Copy</button>
-    <button type="button" class="button secondary" id="share-open-public-btn" style="margin-top:4px;margin-left:6px;">Open</button>
-    <div class="value value-muted" style="font-size:11px; margin-top:4px;">Accessible from anywhere.</div>
-  </div>
+  <div class="value value-muted" style="font-size:11px; margin-top:4px;">Accessible from anywhere.</div>
 </div>`;
   } else {
     resultHtml += `<div style="margin-top:10px;">
   <span class="value" style="font-size:12px; font-weight:600;">Local:</span>
   <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(shareUrl)}</span>
-  <button type="button" class="button secondary" id="share-copy-local-btn" style="margin-top:4px;">Copy</button>
-  <button type="button" class="button secondary" id="share-open-local-btn" style="margin-top:4px;margin-left:6px;">Open</button>
+  <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+    <button type="button" class="button secondary" id="share-copy-local-btn">Copy</button>
+    <button type="button" class="button secondary" id="share-open-local-btn">Open</button>
+    <button type="button" class="button secondary button-icon-only" id="share-qr-local-btn" title="Show QR code" aria-label="Show QR code"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 3h8v8H3V3zm2 2v4h4V5H5zm8-2h8v8h-8V3zm2 2v4h4V5h-4zM3 13h8v8H3v-8zm2 2v4h4v-4H5zm10-2h2v2h-2v-2zm-2 2h2v2h-2v-2zm4 0h2v2h-2v-2zm2 2h2v2h-2v-2zm-4 0h2v2h-2v-2zm0 2h2v2h-2v-2zm2 0h2v2h-2v-2z"/></svg></button>
+  </div>
   <div class="value value-muted" style="font-size:11px; margin-top:4px;">Access this link on devices connected to the same WiFi/Hotspot network.</div>
 </div>`;
   }
@@ -4490,21 +4515,6 @@ async function createShare() {
     radio.disabled = true;
   });
   if (isProvisioningPublic) {
-    const localBtn = document.getElementById("share-copy-local-btn");
-    if (localBtn) {
-      localBtn.onclick = async () => {
-        const ok = await copyToClipboard(shareUrl);
-        if (ok) {
-          localBtn.textContent = "Copied!";
-          setTimeout(() => (localBtn.textContent = "Copy"), 2000);
-        } else {
-          showCopyFallback(shareUrl, els.shareResult);
-        }
-      };
-    }
-    const openLocalBtn = document.getElementById("share-open-local-btn");
-    if (openLocalBtn) openLocalBtn.onclick = () => window.open(shareUrl, "_blank");
-
     // Poll until the publicUrl is available, then update the modal contents.
     (async () => {
       const statusEl = document.getElementById("public-provisioning-status");
@@ -4523,38 +4533,13 @@ async function createShare() {
 <div style="margin-top:10px;">
   <span class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Public:</span>
   <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(publicUrlNow)}</span>
-  <button type="button" class="button secondary" id="share-copy-public-btn" style="margin-top:4px;">Copy</button>
-  <button type="button" class="button secondary" id="share-open-public-btn" style="margin-top:4px;margin-left:6px;">Open</button>
+  <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+    <button type="button" class="button secondary" id="share-copy-public-btn">Copy</button>
+    <button type="button" class="button secondary" id="share-open-public-btn">Open</button>
+    <button type="button" class="button secondary button-icon-only" id="share-qr-public-btn" title="Show QR code" aria-label="Show QR code"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M3 3h8v8H3V3zm2 2v4h4V5H5zm8-2h8v8h-8V3zm2 2v4h4V5h-4zM3 13h8v8H3v-8zm2 2v4h4v-4H5zm10-2h2v2h-2v-2zm-2 2h2v2h-2v-2zm4 0h2v2h-2v-2zm2 2h2v2h-2v-2zm-4 0h2v2h-2v-2zm0 2h2v2h-2v-2zm2 0h2v2h-2v-2z"/></svg></button>
+  </div>
   <div class="value value-muted" style="font-size:11px; margin-top:4px;">Accessible from anywhere.</div>
 </div>`;
-              // Also keep local link available in the modal.
-              try {
-                const localExisting = getActiveShareForPathAndScope(pathValue, "local");
-                const localUrl =
-                  localExisting
-                    ? (localExisting.urlIp || localExisting.url || `${stateMeta.lanBaseUrl}/share/${localExisting.shareId}`)
-                    : shareUrl;
-                els.shareResult.innerHTML += `<div style="margin-top:10px;">
-  <span class="value" style="font-size:12px; font-weight:600;">Local:</span>
-  <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(localUrl)}</span>
-  <button type="button" class="button secondary" id="share-copy-local-btn" style="margin-top:4px;">Copy</button>
-  <button type="button" class="button secondary" id="share-open-local-btn" style="margin-top:4px;margin-left:6px;">Open</button>
-</div>`;
-                const copyLocalBtn = document.getElementById("share-copy-local-btn");
-                if (copyLocalBtn) {
-                  copyLocalBtn.onclick = async () => {
-                    const ok = await copyToClipboard(localUrl);
-                    if (ok) {
-                      copyLocalBtn.textContent = "Copied!";
-                      setTimeout(() => (copyLocalBtn.textContent = "Copy"), 2000);
-                    } else {
-                      showCopyFallback(localUrl, els.shareResult);
-                    }
-                  };
-                }
-                const openLocalBtn = document.getElementById("share-open-local-btn");
-                if (openLocalBtn) openLocalBtn.onclick = () => window.open(localUrl, "_blank");
-              } catch (_) {}
               const copyBtn = document.getElementById("share-copy-public-btn");
               if (copyBtn) {
                 copyBtn.onclick = async () => {
@@ -4569,6 +4554,8 @@ async function createShare() {
               }
               const openBtn = document.getElementById("share-open-public-btn");
               if (openBtn) openBtn.onclick = () => window.open(publicUrlNow, "_blank");
+              const qrBtn = document.getElementById("share-qr-public-btn");
+              if (qrBtn) qrBtn.onclick = () => showShareQrModal(publicUrlNow);
 
               try { await loadShares(); } catch (_) {}
               try { renderFiles(); } catch (_) {}
@@ -4579,7 +4566,7 @@ async function createShare() {
         if (statusEl) statusEl.textContent = "Provisioning…";
         await new Promise((rr) => setTimeout(rr, 2000));
       }
-      if (statusEl) statusEl.textContent = "Still provisioning. You can use the local link for now.";
+      if (statusEl) statusEl.textContent = "Still provisioning. The public link will appear when ready.";
     })();
   } else if (scope === "public" && publicUrl) {
     const publicBtn = document.getElementById("share-copy-public-btn");
@@ -4596,20 +4583,8 @@ async function createShare() {
     }
     const openPublicBtn = document.getElementById("share-open-public-btn");
     if (openPublicBtn) openPublicBtn.onclick = () => window.open(publicUrl, "_blank");
-    const copyLocalBtn = document.getElementById("share-copy-local-btn");
-    if (copyLocalBtn) {
-      copyLocalBtn.onclick = async () => {
-        const ok = await copyToClipboard(shareUrl);
-        if (ok) {
-          copyLocalBtn.textContent = "Copied!";
-          setTimeout(() => (copyLocalBtn.textContent = "Copy"), 2000);
-        } else {
-          showCopyFallback(shareUrl, els.shareResult);
-        }
-      };
-    }
-    const openLocalBtn = document.getElementById("share-open-local-btn");
-    if (openLocalBtn) openLocalBtn.onclick = () => window.open(shareUrl, "_blank");
+    const qrPublicBtn = document.getElementById("share-qr-public-btn");
+    if (qrPublicBtn) qrPublicBtn.onclick = () => showShareQrModal(publicUrl);
   } else {
     const localBtn = document.getElementById("share-copy-local-btn");
     if (localBtn) {
@@ -4625,6 +4600,8 @@ async function createShare() {
     }
     const openLocalBtn = document.getElementById("share-open-local-btn");
     if (openLocalBtn) openLocalBtn.onclick = () => window.open(shareUrl, "_blank");
+    const qrLocalBtn = document.getElementById("share-qr-local-btn");
+    if (qrLocalBtn) qrLocalBtn.onclick = () => showShareQrModal(shareUrl);
   }
   if (els.shareExtraActions) els.shareExtraActions.style.display = "flex";
   if (els.copyShare) {
