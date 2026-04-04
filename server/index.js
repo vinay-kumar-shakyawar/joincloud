@@ -2128,6 +2128,10 @@ async function bootstrap() {
   const SHARE_RATE_LIMIT_WINDOW_MS = Number(process.env.JOINCLOUD_SHARE_RATE_WINDOW_MS || 60_000);
   const FREE_CONCURRENT_LIMIT = Number(process.env.JOINCLOUD_CONCURRENT_LIMIT_FREE || 3);
 
+  function notifyTransferDelta(delta) {
+    if (process.send) process.send({ type: "transfer-count-delta", delta });
+  }
+
   function getShareConcurrentCount(shareId) {
     let count = 0;
     for (const transfer of activeShareTransfers.values()) {
@@ -2475,7 +2479,19 @@ async function bootstrap() {
     let lastLogAt = startTime;
 
     const clientIp = getClientIp(req);
+    const zipTransferId = `zip-${req.params.shareId}-${Date.now()}`;
+    activeShareTransfers.set(zipTransferId, { shareId: req.params.shareId, startTime: Date.now(), bytesSent: 0, ip: clientIp });
+    if (activeShareTransfers.size === 1) notifyTransferDelta(1);
+    let zipTransferEnded = false;
+    function endZipTransfer() {
+      if (zipTransferEnded) return;
+      zipTransferEnded = true;
+      activeShareTransfers.delete(zipTransferId);
+      if (activeShareTransfers.size === 0) notifyTransferDelta(-1);
+    }
+
     req.on("aborted", () => {
+      endZipTransfer();
       try {
         if (typeof archive.abort === "function") archive.abort();
         else archive.destroy();
@@ -2502,6 +2518,7 @@ async function bootstrap() {
     });
 
     archive.on("error", (err) => {
+      endZipTransfer();
       logger.error("zip archive error", { error: err?.message });
       if (!res.headersSent) {
         res.status(500).end("zip_failed");
@@ -2534,10 +2551,12 @@ async function bootstrap() {
         }
       }
       await archive.finalize();
+      endZipTransfer();
       const durationMs = Date.now() - startTime;
       const mbPerSec = durationMs > 0 ? bytesWritten / (1024 * 1024) / (durationMs / 1000) : 0;
       logger.info("zip download complete", { bytes_written: bytesWritten, duration_ms: durationMs, mb_per_sec: mbPerSec.toFixed(2), client_ip: clientIp });
     } catch (err) {
+      endZipTransfer();
       logger.error("zip download error", { error: err?.message });
       if (!res.headersSent) res.status(500).end("zip_failed");
       else if (!res.destroyed) res.destroy();
@@ -2602,6 +2621,7 @@ async function bootstrap() {
         bytesSent: 0,
         ip: getClientIp(req),
       });
+      if (activeShareTransfers.size === 1) notifyTransferDelta(1);
 
       const clientIp = getClientIp(req);
       const startTime = Date.now();
@@ -2618,6 +2638,7 @@ async function bootstrap() {
         },
         onDone: (bytesSent, _contentLength, totalBytes, aborted) => {
           activeShareTransfers.delete(transferId);
+          if (activeShareTransfers.size === 0) notifyTransferDelta(-1);
           if (aborted) {
             logger.info("share download aborted", { client_ip: clientIp, bytes_sent: bytesSent });
             return;
@@ -2633,6 +2654,7 @@ async function bootstrap() {
         },
         onError: (err) => {
           activeShareTransfers.delete(transferId);
+          if (activeShareTransfers.size === 0) notifyTransferDelta(-1);
           logger.error("share download error", { error: err.message });
         },
       });
@@ -2859,6 +2881,59 @@ async function bootstrap() {
       });
     });
   }
+
+  // ── Performance Benchmark ────────────────────────────────────────────────
+  app.get("/api/perf/benchmark", async (_req, res) => {
+    try {
+      const TEST_SIZE = 5 * 1024 * 1024; // 5 MB
+      const tmpPath = path.join(os.tmpdir(), `.jc_perf_${Date.now()}_${Math.random().toString(36).slice(2)}.bin`);
+      const testBuf = Buffer.allocUnsafe(TEST_SIZE);
+      // Touch every 4KB page so we measure real I/O, not just allocation
+      for (let i = 0; i < TEST_SIZE; i += 4096) testBuf[i] = i & 0xff;
+
+      const wStart = process.hrtime.bigint();
+      await fs.promises.writeFile(tmpPath, testBuf);
+      const rStart = process.hrtime.bigint();
+      await fs.promises.readFile(tmpPath);
+      const rEnd = process.hrtime.bigint();
+      await fs.promises.unlink(tmpPath).catch(() => {});
+
+      const writeSec = Number(rStart - wStart) / 1e9;
+      const readSec = Number(rEnd - rStart) / 1e9;
+      const diskReadMBps = TEST_SIZE / (1024 * 1024) / readSec;
+      const diskWriteMBps = TEST_SIZE / (1024 * 1024) / writeSec;
+
+      const cpus = os.cpus();
+      const loadavg1 = os.loadavg()[0];
+      const cpuLoadPct = Math.min(100, (loadavg1 / Math.max(1, cpus.length)) * 100);
+      const cpuAvailPct = Math.max(0, 100 - cpuLoadPct);
+
+      const ramTotal = os.totalmem();
+      const ramFree = os.freemem();
+      const ramAvailPct = (ramFree / ramTotal) * 100;
+
+      res.json({
+        ok: true,
+        disk: {
+          readMBps: Math.round(diskReadMBps * 10) / 10,
+          writeMBps: Math.round(diskWriteMBps * 10) / 10,
+        },
+        cpu: {
+          availPct: Math.round(cpuAvailPct * 10) / 10,
+          loadavg: Math.round(loadavg1 * 100) / 100,
+          cores: cpus.length,
+          model: cpus[0]?.model || "Unknown",
+        },
+        ram: {
+          availPct: Math.round(ramAvailPct * 10) / 10,
+          freeMB: Math.round(ramFree / 1024 / 1024),
+          totalMB: Math.round(ramTotal / 1024 / 1024),
+        },
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
 
   app.get("/api/status", async (_req, res) => {
     const displayName = userConfig?.display_name || "Join";

@@ -16,6 +16,7 @@ const electronNet = electron.net;
 const Tray = electron.Tray;
 const Menu = electron.Menu;
 const powerMonitor = electron.powerMonitor;
+const powerSaveBlocker = electron.powerSaveBlocker;
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -47,6 +48,8 @@ let consecutiveHealthFailures = 0;
 let restartHistory = [];
 let backendState = "healthy";
 let isStopping = false;
+let _wakeLockId = null;
+let _activeTransferCount = 0;
 let isCreatingWindow = false;
 let allowWindowClose = false;
 let isHandlingClosePrompt = false;
@@ -257,6 +260,23 @@ function getStoragePath() {
   return path.join(app.getPath("userData"), "storage");
 }
 
+function acquireWakeLock() {
+  if (!powerSaveBlocker) return;
+  if (_wakeLockId === null || !powerSaveBlocker.isStarted(_wakeLockId)) {
+    _wakeLockId = powerSaveBlocker.start("prevent-app-suspension");
+    log.info("[wake-lock] acquired, id:", _wakeLockId);
+  }
+}
+
+function releaseWakeLock() {
+  if (!powerSaveBlocker) return;
+  if (_wakeLockId !== null && powerSaveBlocker.isStarted(_wakeLockId)) {
+    powerSaveBlocker.stop(_wakeLockId);
+    log.info("[wake-lock] released");
+    _wakeLockId = null;
+  }
+}
+
 function startBackend() {
   if (backendProcess) return;
 
@@ -313,7 +333,7 @@ function startBackend() {
   backendProcess = spawn(process.execPath, [backendScript], {
     env,
     cwd: backendCwd,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
   });
   logLine(`Backend pid ${backendProcess.pid}`);
 
@@ -326,6 +346,16 @@ function startBackend() {
       mainWindow.webContents.send("license-updated");
       mainWindow.show();
       mainWindow.focus();
+    }
+  });
+
+  backendProcess.on("message", (msg) => {
+    if (!msg || msg.type !== "transfer-count-delta") return;
+    _activeTransferCount = Math.max(0, _activeTransferCount + (msg.delta || 0));
+    if (_activeTransferCount > 0) {
+      acquireWakeLock();
+    } else {
+      releaseWakeLock();
     }
   });
 
@@ -835,11 +865,13 @@ if (gotLock) {
         }).catch(() => {
           scheduleBackendRestart("system resume check failed");
         });
+        if (_activeTransferCount > 0) acquireWakeLock();
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send("system-resume");
         }
       });
       powerMonitor.on("suspend", () => {
+        releaseWakeLock();
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send("system-suspend");
         }
@@ -848,6 +880,10 @@ if (gotLock) {
     await createWindow();
   });
 }
+
+app.on("before-quit", () => {
+  releaseWakeLock();
+});
 
 app.on("activate", () => {
   if (mainWindow && !mainWindow.isDestroyed()) {

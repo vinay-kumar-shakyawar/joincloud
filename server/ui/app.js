@@ -5465,8 +5465,8 @@ async function bootstrapApp() {
     await loadNotifications();
   } catch (_) {}
   updateMuteButton();
-
   // Support messages are now delivered in real-time via SSE; no polling needed.
+  setTimeout(() => { runPerfBenchmark(true).catch(() => {}); }, 3500);
 }
 
 async function continueBootstrapAfterActivation() {
@@ -5521,6 +5521,8 @@ async function continueBootstrapAfterActivation() {
   } catch (_) {}
   updateMuteButton();
   // Support messages are now delivered in real-time via SSE; no polling needed.
+  // Run performance benchmark silently in background after everything else loads.
+  setTimeout(() => { runPerfBenchmark(true).catch(() => {}); }, 3500);
 }
 
 function setActiveSection(sectionId) {
@@ -5551,6 +5553,9 @@ function setActiveSection(sectionId) {
     if (typeof window.updater !== "undefined") {
       loadUpdatesPanel().catch(() => {});
     }
+  }
+  if (safeSection === "performance") {
+    initPerfSection();
   }
 }
 
@@ -7341,3 +7346,269 @@ setInterval(async () => {
 
   connect();
 })();
+
+/* ═══════════════════════════════════════════════ PERFORMANCE BENCHMARK MODULE */
+(function() {
+  "use strict";
+
+  // ── Rating thresholds → 0-100 score ─────────────────────────────────────
+  const RATINGS = [
+    { label: "Poor",     min: 0,  max: 20,  color: "#EF4444" },
+    { label: "Fair",     min: 20, max: 40,  color: "#F59E0B" },
+    { label: "Moderate", min: 40, max: 60,  color: "#EAB308" },
+    { label: "Good",     min: 60, max: 80,  color: "#22C55E" },
+    { label: "Excellent",min: 80, max: 100, color: "#2FB7FF" },
+  ];
+
+  function getRating(score) {
+    for (var i = RATINGS.length - 1; i >= 0; i--) {
+      if (score >= RATINGS[i].min) return RATINGS[i];
+    }
+    return RATINGS[0];
+  }
+
+  // ── Metric → score conversion ────────────────────────────────────────────
+  function diskScore(mbps) {
+    // Poor <20, Fair 20-60, Moderate 60-150, Good 150-350, Excellent >350
+    if (mbps >= 350) return 100;
+    if (mbps >= 150) return 60 + ((mbps - 150) / 200) * 20;
+    if (mbps >= 60)  return 40 + ((mbps - 60)  / 90)  * 20;
+    if (mbps >= 20)  return 20 + ((mbps - 20)  / 40)  * 20;
+    return (mbps / 20) * 20;
+  }
+
+  function netScore(pingMs) {
+    // Lower is better: Poor >100, Fair 50-100, Mod 15-50, Good 4-15, Excellent <4
+    if (pingMs <= 4)   return 100;
+    if (pingMs <= 15)  return 80 + ((15 - pingMs) / 11) * 20;
+    if (pingMs <= 50)  return 60 + ((50 - pingMs) / 35) * 20;
+    if (pingMs <= 100) return 40 + ((100 - pingMs) / 50) * 20;
+    if (pingMs <= 200) return 20 + ((200 - pingMs) / 100) * 20;
+    return Math.max(0, 20 - ((pingMs - 200) / 200) * 20);
+  }
+
+  function cpuScore(availPct) {
+    // Direct: available CPU % maps linearly
+    return Math.min(100, Math.max(0, availPct));
+  }
+
+  function ramScore(availPct) {
+    return Math.min(100, Math.max(0, availPct));
+  }
+
+  function overallScore(scores) {
+    return scores.disk * 0.35 + scores.net * 0.30 + scores.cpu * 0.20 + scores.ram * 0.15;
+  }
+
+  // ── SVG gauge math (r=44 → C≈276.5, arc270≈207.4; r=62 → C≈389.6, arc270≈292.2) ──
+  var GAUGE_SM  = { r: 44, C: 2 * Math.PI * 44 };
+  var GAUGE_LG  = { r: 62, C: 2 * Math.PI * 62 };
+  function arcDash(g, pct) {
+    var arc270 = g.C * 0.75;
+    var filled = arc270 * (Math.min(100, Math.max(0, pct)) / 100);
+    return filled.toFixed(2) + " " + (g.C - filled).toFixed(2);
+  }
+
+  // ── DOM helpers ──────────────────────────────────────────────────────────
+  function $id(id) { return document.getElementById(id); }
+
+  function setGauge(key, pct, rating) {
+    var isMain = (key === "overall");
+    var g      = isMain ? GAUGE_LG : GAUGE_SM;
+    var arcEl  = $id("perf-arc-"  + key);
+    var pctEl  = $id("perf-pct-"  + key);
+    var wordEl = isMain ? $id("perf-rating-" + key) : $id("perf-word-" + key);
+    if (arcEl) {
+      arcEl.style.strokeDasharray = arcDash(g, pct);
+      arcEl.style.stroke  = rating.color;
+      if (pct >= 80) {
+        arcEl.style.filter = "url(#perf-glow-" + key + ") drop-shadow(0 0 6px " + rating.color + "88)";
+      } else {
+        arcEl.style.filter = "";
+      }
+    }
+    if (pctEl) {
+      // Animate number count-up
+      animateCount(pctEl, Math.round(pct));
+    }
+    if (wordEl) {
+      wordEl.textContent = rating.label;
+      wordEl.style.fill  = rating.color;
+    }
+  }
+
+  function animateCount(el, target) {
+    var start   = 0;
+    var current = parseInt(el.textContent, 10);
+    if (!isNaN(current)) start = current;
+    var startTime = null;
+    var DURATION  = 1200;
+    function step(ts) {
+      if (!startTime) startTime = ts;
+      var progress = Math.min(1, (ts - startTime) / DURATION);
+      var ease     = 1 - Math.pow(1 - progress, 3); // ease-out-cubic
+      el.textContent = Math.round(start + (target - start) * ease);
+      if (progress < 1) requestAnimationFrame(step);
+    }
+    requestAnimationFrame(step);
+  }
+
+  function setStatus(text, state) {
+    var dot  = $id("perf-status-dot");
+    var txt  = $id("perf-status-text");
+    if (txt) txt.textContent = text;
+    if (dot) {
+      dot.className = "perf-status-dot" + (state ? " " + state : "");
+    }
+  }
+
+  function setCardChecking(key, on) {
+    var card = $id("perf-card-" + key);
+    if (card) card.classList.toggle("checking", on);
+  }
+  function setCardResult(key) {
+    var card = $id("perf-card-" + key);
+    if (card) { card.classList.remove("checking"); card.classList.add("has-result"); }
+  }
+
+  function setDetail(key, text) {
+    var el = $id("perf-detail-" + key);
+    if (el) el.textContent = text;
+  }
+
+  // ── Network latency (renderer-side ping) ─────────────────────────────────
+  async function measureNetworkPing(samples) {
+    samples = samples || 6;
+    var times = [];
+    for (var i = 0; i < samples; i++) {
+      var t0 = performance.now();
+      try {
+        await fetch("/api/meta?_perf=" + Date.now(), { cache: "no-store" });
+      } catch (_) {}
+      times.push(performance.now() - t0);
+    }
+    times.sort(function(a, b) { return a - b; });
+    // Discard fastest (cache) and slowest (spike), take median of remaining
+    var trimmed = times.slice(1, times.length - 1);
+    var median  = trimmed[Math.floor(trimmed.length / 2)] || times[0];
+    return Math.round(median * 10) / 10;
+  }
+
+  // ── Main benchmark runner ─────────────────────────────────────────────────
+  var _perfRunning = false;
+  var _perfLastRun = null;
+  var _perfLastResult = null;
+
+  window.runPerfBenchmark = async function runPerfBenchmark(silent) {
+    if (_perfRunning) return;
+    _perfRunning = true;
+
+    var runBtn   = $id("perf-run-btn");
+    var pulse    = $id("perf-pulse-ring");
+    var lastRunEl = $id("perf-last-run");
+
+    // Update button state
+    if (runBtn && !silent) {
+      runBtn.disabled = true;
+      runBtn.innerHTML =
+        '<svg class="perf-run-btn-spinner" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg> Running…';
+    }
+    if (pulse) pulse.classList.add("active");
+    setStatus("Running benchmark…", "running");
+
+    var scores = {};
+
+    // ── 1. Network ping ───────────────────────────────────────────────────
+    ["disk","net","cpu","ram"].forEach(function(k) { setCardChecking(k, true); });
+    try {
+      var pingMs = await measureNetworkPing(6);
+      var nScore = netScore(pingMs);
+      scores.net = nScore;
+      setGauge("net", nScore, getRating(nScore));
+      setDetail("net", pingMs + " ms");
+      setCardResult("net");
+    } catch (_) {
+      scores.net = 0;
+      setCardResult("net");
+    }
+    setStatus("Measuring disk speed…", "running");
+
+    // ── 2. Server benchmark (disk + cpu + ram) ────────────────────────────
+    try {
+      var r   = await apiFetch("/api/perf/benchmark");
+      var data = r.ok ? await r.json() : null;
+      if (data && data.ok) {
+        // Disk
+        var dScore = diskScore(data.disk.readMBps);
+        scores.disk = dScore;
+        setGauge("disk", dScore, getRating(dScore));
+        setDetail("disk", data.disk.readMBps + " MB/s read");
+        setCardResult("disk");
+        setStatus("Measuring CPU & memory…", "running");
+
+        // CPU
+        var cScore = cpuScore(data.cpu.availPct);
+        scores.cpu = cScore;
+        setGauge("cpu", cScore, getRating(cScore));
+        setDetail("cpu", data.cpu.availPct.toFixed(0) + "% free · " + data.cpu.cores + " cores");
+        setCardResult("cpu");
+
+        // RAM
+        var rScore = ramScore(data.ram.availPct);
+        scores.ram = rScore;
+        setGauge("ram", rScore, getRating(rScore));
+        setDetail("ram", data.ram.freeMB + " MB free / " + data.ram.totalMB + " MB");
+        setCardResult("ram");
+      } else {
+        ["disk","cpu","ram"].forEach(function(k) { scores[k] = 0; setCardResult(k); });
+      }
+    } catch (_) {
+      ["disk","cpu","ram"].forEach(function(k) { scores[k] = 0; setCardResult(k); });
+    }
+
+    // ── Overall ───────────────────────────────────────────────────────────
+    var total   = overallScore({ disk: scores.disk || 0, net: scores.net || 0, cpu: scores.cpu || 0, ram: scores.ram || 0 });
+    var overall = getRating(total);
+    _perfLastResult = { scores: scores, total: total, rating: overall };
+    _perfLastRun    = new Date();
+
+    setGauge("overall", total, overall);
+    if (lastRunEl) lastRunEl.textContent = "Last run: " + _perfLastRun.toLocaleTimeString();
+    if (pulse) pulse.classList.remove("active");
+
+    setStatus("✓ " + overall.label + " — " + Math.round(total) + "/100 transfer capability score", "done");
+
+    if (runBtn) {
+      runBtn.disabled = false;
+      runBtn.innerHTML =
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg> Run Benchmark';
+    }
+    _perfRunning = false;
+  };
+
+  // ── Section init (called when tab opens) ─────────────────────────────────
+  window.initPerfSection = function initPerfSection() {
+    var runBtn = $id("perf-run-btn");
+    if (runBtn && !runBtn._perfWired) {
+      runBtn._perfWired = true;
+      runBtn.addEventListener("click", function() {
+        window.runPerfBenchmark(false);
+      });
+    }
+    // If a previous result exists (from background run), re-render it
+    if (_perfLastResult) {
+      var r = _perfLastResult;
+      setGauge("overall", r.total, r.rating);
+      var metricKeys = ["disk", "net", "cpu", "ram"];
+      metricKeys.forEach(function(k) {
+        var s = r.scores[k] || 0;
+        setGauge(k, s, getRating(s));
+        var card = $id("perf-card-" + k);
+        if (card) card.classList.add("has-result");
+      });
+      var lastRunEl = $id("perf-last-run");
+      if (lastRunEl && _perfLastRun) lastRunEl.textContent = "Last run: " + _perfLastRun.toLocaleTimeString();
+      setStatus("✓ " + r.rating.label + " — " + Math.round(r.total) + "/100 transfer capability score", "done");
+    }
+  };
+}());

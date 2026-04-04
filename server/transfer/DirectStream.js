@@ -135,6 +135,10 @@ function createDirectStreamManager(options = {}) {
   const activeTransfers = new Map();
   const rateState = new Map();
   const tokenTtlMs = Number(options.tokenTtlMs || 3_600_000);
+
+  function notifyTransferDelta(delta) {
+    if (process.send) process.send({ type: "transfer-count-delta", delta });
+  }
   const concurrentLimit = Number(options.concurrentLimit || DEFAULT_CONCURRENT_LIMIT);
   const rateWindowMs = Number(options.rateWindowMs || DEFAULT_RATE_WINDOW_MS);
   const rateMax = Number(options.rateMax || DEFAULT_RATE_MAX);
@@ -228,6 +232,7 @@ function createDirectStreamManager(options = {}) {
       bytesSent: 0,
       ip: req.ip,
     });
+    if (activeTransfers.size === 1) notifyTransferDelta(1);
 
     streamFileWithRange(req, res, {
       filePath: record.filePath,
@@ -244,9 +249,11 @@ function createDirectStreamManager(options = {}) {
       },
       onDone: () => {
         activeTransfers.delete(transferId);
+        if (activeTransfers.size === 0) notifyTransferDelta(-1);
       },
       onError: (error) => {
         activeTransfers.delete(transferId);
+        if (activeTransfers.size === 0) notifyTransferDelta(-1);
         if (logger) logger.error("direct stream error", { token, error: error?.message });
       },
     });
