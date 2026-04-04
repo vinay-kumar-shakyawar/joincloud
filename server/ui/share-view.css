@@ -438,12 +438,15 @@ iframe.preview-frame {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex: 1;
 }
 
 .share-preview-actions {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
 }
 
 .share-preview-body {
@@ -840,6 +843,20 @@ body.share-preview-open {
   }
   .share-preview-toolbar {
     padding: calc(8px + env(safe-area-inset-top)) 8px 8px;
+    flex-wrap: nowrap;
+    min-width: 0;
+  }
+  .share-preview-title {
+    font-size: 13px;
+    max-width: 50vw;
+  }
+  .share-preview-actions {
+    gap: 6px;
+  }
+  .share-preview-actions button,
+  .share-preview-actions a {
+    padding: 6px 8px;
+    font-size: 12px;
   }
   .share-preview-main {
     flex: 1;

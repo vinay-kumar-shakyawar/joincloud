@@ -2900,13 +2900,26 @@ async function bootstrap() {
 
       const writeSec = Number(rStart - wStart) / 1e9;
       const readSec = Number(rEnd - rStart) / 1e9;
-      const diskReadMBps = TEST_SIZE / (1024 * 1024) / readSec;
-      const diskWriteMBps = TEST_SIZE / (1024 * 1024) / writeSec;
+      // Clamp to avoid Infinity on fast NVMe/SSD where timing resolution is ~0
+      const diskReadMBps = readSec > 0.0005 ? Math.min(10000, (TEST_SIZE / (1024 * 1024)) / readSec) : 10000;
+      const diskWriteMBps = writeSec > 0.0005 ? Math.min(10000, (TEST_SIZE / (1024 * 1024)) / writeSec) : 10000;
 
+      // CPU availability via two-sample os.cpus() idle ratio (non-blocking, works on Windows)
+      function cpuSample() {
+        let idle = 0, total = 0;
+        for (const cpu of os.cpus()) {
+          for (const t of Object.values(cpu.times)) total += t;
+          idle += cpu.times.idle;
+        }
+        return { idle, total };
+      }
       const cpus = os.cpus();
-      const loadavg1 = os.loadavg()[0];
-      const cpuLoadPct = Math.min(100, (loadavg1 / Math.max(1, cpus.length)) * 100);
-      const cpuAvailPct = Math.max(0, 100 - cpuLoadPct);
+      const s1 = cpuSample();
+      await new Promise(r => setTimeout(r, 300)); // non-blocking pause
+      const s2 = cpuSample();
+      const dIdle  = s2.idle  - s1.idle;
+      const dTotal = s2.total - s1.total;
+      const cpuAvailPct = dTotal > 0 ? Math.round((dIdle / dTotal) * 100) : 50;
 
       const ramTotal = os.totalmem();
       const ramFree = os.freemem();
@@ -2919,8 +2932,7 @@ async function bootstrap() {
           writeMBps: Math.round(diskWriteMBps * 10) / 10,
         },
         cpu: {
-          availPct: Math.round(cpuAvailPct * 10) / 10,
-          loadavg: Math.round(loadavg1 * 100) / 100,
+          availPct: cpuAvailPct,
           cores: cpus.length,
           model: cpus[0]?.model || "Unknown",
         },

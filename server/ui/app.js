@@ -1326,6 +1326,7 @@ function renderFiles() {
         wrap.appendChild(stop);
 
         wrap.onclick = (e) => {
+          e.stopPropagation(); // prevent card click from also opening preview carousel
           if (e.target === stop || stop.contains(e.target)) return;
           const url = kind === "local"
             ? (share.urlIp || share.url || `${stateMeta.lanBaseUrl}/share/${share.shareId}`)
@@ -2709,10 +2710,14 @@ function setUsageBar(id, used, limit) {
   var label = el.querySelector(".usage-bar-label");
   if (!fill || !label) return;
   var pct = (limit != null && limit > 0) ? Math.min(100, Math.round((used / limit) * 100)) : 0;
-  fill.style.width = pct + "%";
   fill.classList.toggle("usage-bar-warning", pct >= 80 && pct < 100);
   fill.classList.toggle("usage-bar-critical", pct >= 100);
   label.textContent = (limit == null || limit >= 999999) ? (used + " (unlimited)") : (used + " / " + limit);
+  // Animate from 0 → pct so the CSS transition fires visibly
+  fill.style.width = "0%";
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => { fill.style.width = pct + "%"; });
+  });
 }
 
 function markServerRequestResult(ok) {
@@ -2996,6 +3001,24 @@ function updateSubscriptionSection() {
       expiryDisplay = "Never";
     }
     if (els.settingsProfileExpiry) els.settingsProfileExpiry.textContent = expiryDisplay;
+
+    // Show Host ID row in profile card (always, for easy copying)
+    const profileHostIdRow = document.getElementById("settings-profile-hostid-row");
+    const profileHostIdValue = document.getElementById("settings-profile-hostid-value");
+    const profileCopyHostId = document.getElementById("settings-profile-copy-hostid");
+    if (profileHostIdRow && deviceIdForDisplay) {
+      profileHostIdRow.style.display = "block";
+      if (profileHostIdValue) profileHostIdValue.textContent = deviceIdForDisplay;
+      if (profileCopyHostId) {
+        profileCopyHostId.onclick = () => {
+          copyToClipboard(deviceIdForDisplay, document.body).then((ok) => {
+            if (ok) { profileCopyHostId.title = "Copied!"; setTimeout(() => { profileCopyHostId.title = "Copy Host ID"; }, 1500); }
+          });
+        };
+      }
+    } else if (profileHostIdRow) {
+      profileHostIdRow.style.display = "none";
+    }
   }
 
   // Banner: show when user cannot use app (signed out + no trial, or paid plan requires sign-in)
@@ -3396,19 +3419,22 @@ async function loadTechnicalConfig() {
       return;
     }
     const cfg = await cfgRes.json();
+    // Prefer the live device identity from state over the API response,
+    // which can return a fixed placeholder value in some production builds.
+    const dynamicId = state.hostUuidFromConfig || state.deviceId || cfg.host_id || "-";
     // Populate dedicated Host ID field
     const hostIdEl = document.getElementById("settings-host-id");
     const copyHostBtn = document.getElementById("copy-host-id-btn");
-    if (hostIdEl) hostIdEl.textContent = cfg.host_id || "-";
-    if (copyHostBtn && cfg.host_id) {
+    if (hostIdEl) hostIdEl.textContent = dynamicId;
+    if (copyHostBtn && dynamicId !== "-") {
       copyHostBtn.onclick = () => {
-        copyToClipboard(cfg.host_id, document.body).then((ok) => {
+        copyToClipboard(dynamicId, document.body).then((ok) => {
           if (ok) { copyHostBtn.title = "Copied!"; setTimeout(() => { copyHostBtn.title = "Copy Host ID"; }, 1500); }
         });
       };
     }
     const lines = [
-      `Host ID: ${cfg.host_id || "-"}`,
+      `Host ID: ${dynamicId}`,
       `Local IPs: ${(cfg.local_ips || []).join(", ") || "-"}`,
       `Port: ${cfg.port || "-"}`,
       `App version: ${cfg.app_version || "-"}`,
@@ -5465,7 +5491,10 @@ async function bootstrapApp() {
     await loadNotifications();
   } catch (_) {}
   updateMuteButton();
-  // Support messages are now delivered in real-time via SSE; no polling needed.
+  // Check for updates once on startup so banner shows without opening Settings
+  if (typeof window.updater !== "undefined") {
+    setTimeout(() => { loadUpdatesPanel().catch(() => {}); }, 2000);
+  }
   setTimeout(() => { runPerfBenchmark(true).catch(() => {}); }, 3500);
 }
 
@@ -5520,7 +5549,10 @@ async function continueBootstrapAfterActivation() {
     await loadNotifications();
   } catch (_) {}
   updateMuteButton();
-  // Support messages are now delivered in real-time via SSE; no polling needed.
+  // Check for updates once on startup so banner shows without opening Settings
+  if (typeof window.updater !== "undefined") {
+    setTimeout(() => { loadUpdatesPanel().catch(() => {}); }, 2000);
+  }
   // Run performance benchmark silently in background after everything else loads.
   setTimeout(() => { runPerfBenchmark(true).catch(() => {}); }, 3500);
 }
@@ -5550,6 +5582,7 @@ function setActiveSection(sectionId) {
   if (safeSection === "settings") {
     renderUsageBars().catch(() => {});
     loadPublicAccessStatus().catch(() => {});
+    // loadUpdatesPanel has its own session guard; manual refresh passes force=true
     if (typeof window.updater !== "undefined") {
       loadUpdatesPanel().catch(() => {});
     }
@@ -6827,6 +6860,11 @@ function renderUpdatesVersionRow(v, options) {
       syncUpdatesRowProgress(vid, 100);
       if (result && result.error) {
         window.alert("Install failed: " + result.error);
+      } else if (result && result.success) {
+        // Installer has launched — quit the old version so the installer can replace it
+        if (typeof window.joincloud !== "undefined" && window.joincloud.quitApp) {
+          setTimeout(() => window.joincloud.quitApp(), 1500);
+        }
       }
     });
     wrap.appendChild(btn);
@@ -6864,7 +6902,10 @@ function syncUpdatesRowProgress(vid, pct) {
   if (pctEl) pctEl.textContent = clamped + "%";
 }
 
-async function loadUpdatesPanel() {
+async function loadUpdatesPanel(force) {
+  // Guard: only auto-fetch once per session unless forced (manual refresh button)
+  if (!force && sessionStorage.getItem("jc_update_checked") === "done") return;
+  sessionStorage.setItem("jc_update_checked", "done");
   // Guard against overlapping calls that can duplicate rows (e.g. auto-load + manual refresh)
   if (typeof window.__updatesLoadSeq !== "number") window.__updatesLoadSeq = 0;
   window.__updatesLoadSeq += 1;
@@ -6888,6 +6929,9 @@ async function loadUpdatesPanel() {
     ver = "—";
   }
   if (curEl) curEl.textContent = "v" + ver;
+  // Sync version to About section so it always matches package.json
+  var aboutBuildIdEl = document.getElementById("build-id");
+  if (aboutBuildIdEl && ver && ver !== "—") aboutBuildIdEl.textContent = "v" + ver;
   if (statusEl) {
     statusEl.style.display = "none";
     statusEl.textContent = "";
@@ -6930,6 +6974,34 @@ async function loadUpdatesPanel() {
     if (olderDetails) olderDetails.style.display = older.length ? "" : "none";
     if (updatesPanelInstalling) {
       syncUpdatesRowProgress(escapeUpdatesVersionAttr(updatesPanelInstalling), updatesPanelProgressPct);
+    }
+    // Sidebar update banner
+    const sidebarBanner = document.getElementById("sidebar-update-banner");
+    const sidebarBannerTitle = document.getElementById("sidebar-update-banner-title");
+    const sidebarBannerDesc = document.getElementById("sidebar-update-banner-desc");
+    const sidebarBannerBtn = document.getElementById("sidebar-update-banner-btn");
+    if (sidebarBanner) {
+      if (newer.length > 0) {
+        const latestNew = newer[0];
+        if (sidebarBannerTitle) sidebarBannerTitle.textContent = "v" + latestNew.version + " available";
+        if (sidebarBannerDesc) {
+          const note = (latestNew.changelog && latestNew.changelog[0]) || "A new version of JoinCloud is ready.";
+          sidebarBannerDesc.textContent = note.length > 80 ? note.slice(0, 80) + "…" : note;
+        }
+        if (sidebarBannerBtn) {
+          sidebarBannerBtn.onclick = () => {
+            const settingsNavBtn = document.querySelector('.nav-button[data-section="settings"]');
+            if (settingsNavBtn) settingsNavBtn.click();
+            setTimeout(() => {
+              const updatesSection = document.getElementById("settings-updates-section");
+              if (updatesSection) updatesSection.scrollIntoView({ behavior: "smooth" });
+            }, 150);
+          };
+        }
+        sidebarBanner.style.display = "block";
+      } else {
+        sidebarBanner.style.display = "none";
+      }
     }
   } catch (e) {
     if (statusEl) {
@@ -7137,7 +7209,7 @@ function initJoinCloudUpdaterUi() {
   const refreshUpdatesBtn = document.getElementById("updates-refresh-btn");
   if (refreshUpdatesBtn) {
     refreshUpdatesBtn.addEventListener("click", () => {
-      loadUpdatesPanel().catch(() => {});
+      loadUpdatesPanel(true).catch(() => {}); // force = bypass session guard
     });
   }
 }
@@ -7353,11 +7425,11 @@ setInterval(async () => {
 
   // ── Rating thresholds → 0-100 score ─────────────────────────────────────
   const RATINGS = [
-    { label: "Poor",     min: 0,  max: 20,  color: "#EF4444" },
-    { label: "Fair",     min: 20, max: 40,  color: "#F59E0B" },
-    { label: "Moderate", min: 40, max: 60,  color: "#EAB308" },
-    { label: "Good",     min: 60, max: 80,  color: "#22C55E" },
-    { label: "Excellent",min: 80, max: 100, color: "#2FB7FF" },
+    { label: "Poor",     min: 0,  max: 25,  color: "#EF4444" },
+    { label: "Fair",     min: 25, max: 45,  color: "#F59E0B" },
+    { label: "Moderate", min: 45, max: 65,  color: "#EAB308" },
+    { label: "Good",     min: 65, max: 85,  color: "#22C55E" },
+    { label: "Excellent",min: 85, max: 100, color: "#2FB7FF" },
   ];
 
   function getRating(score) {
@@ -7369,27 +7441,32 @@ setInterval(async () => {
 
   // ── Metric → score conversion ────────────────────────────────────────────
   function diskScore(mbps) {
-    // Poor <20, Fair 20-60, Moderate 60-150, Good 150-350, Excellent >350
-    if (mbps >= 350) return 100;
-    if (mbps >= 150) return 60 + ((mbps - 150) / 200) * 20;
-    if (mbps >= 60)  return 40 + ((mbps - 60)  / 90)  * 20;
-    if (mbps >= 20)  return 20 + ((mbps - 20)  / 40)  * 20;
-    return (mbps / 20) * 20;
+    // Tiers: <80 HDD → 0-25, 80-180 SATA SSD → 25-45, 180-400 fast SSD → 45-65, 400-1200 NVMe → 65-85, 1200+ → 85-100
+    if (mbps == null || isNaN(mbps)) return 0;
+    if (mbps >= 1200) return 85 + Math.min(15, ((mbps - 1200) / 800) * 15);
+    if (mbps >= 400)  return 65 + ((mbps - 400)  / 800)  * 20;
+    if (mbps >= 180)  return 45 + ((mbps - 180)  / 220)  * 20;
+    if (mbps >= 80)   return 25 + ((mbps - 80)   / 100)  * 20;
+    return Math.max(0, (mbps / 80) * 25);
   }
 
-  function netScore(pingMs) {
-    // Lower is better: Poor >100, Fair 50-100, Mod 15-50, Good 4-15, Excellent <4
-    if (pingMs <= 4)   return 100;
-    if (pingMs <= 15)  return 80 + ((15 - pingMs) / 11) * 20;
-    if (pingMs <= 50)  return 60 + ((50 - pingMs) / 35) * 20;
-    if (pingMs <= 100) return 40 + ((100 - pingMs) / 50) * 20;
-    if (pingMs <= 200) return 20 + ((200 - pingMs) / 100) * 20;
-    return Math.max(0, 20 - ((pingMs - 200) / 200) * 20);
+  function netScore(pingMs, jitterMs) {
+    // Lower ping is better; aligned to new rating bands
+    var base;
+    if (pingMs <= 3)   base = 100;
+    else if (pingMs <= 10)  base = 85 + ((10 - pingMs)  / 7)   * 15;
+    else if (pingMs <= 30)  base = 65 + ((30 - pingMs)  / 20)  * 20;
+    else if (pingMs <= 80)  base = 45 + ((80 - pingMs)  / 50)  * 20;
+    else if (pingMs <= 150) base = 25 + ((150 - pingMs) / 70)  * 20;
+    else base = Math.max(0, 25 - ((pingMs - 150) / 150) * 25);
+    // Jitter penalty: each 10ms of jitter reduces score by up to 10 points
+    var jitterPenalty = Math.min(20, (jitterMs || 0) / 10 * 10);
+    return Math.max(0, Math.round(base - jitterPenalty));
   }
 
   function cpuScore(availPct) {
-    // Direct: available CPU % maps linearly
-    return Math.min(100, Math.max(0, availPct));
+    // CPU available % maps directly to score: 100% free = 100, 0% free = 0
+    return Math.min(100, Math.max(0, availPct || 0));
   }
 
   function ramScore(availPct) {
@@ -7397,7 +7474,7 @@ setInterval(async () => {
   }
 
   function overallScore(scores) {
-    return scores.disk * 0.35 + scores.net * 0.30 + scores.cpu * 0.20 + scores.ram * 0.15;
+    return scores.disk * 0.30 + scores.net * 0.40 + scores.cpu * 0.20 + scores.ram * 0.10;
   }
 
   // ── SVG gauge math (r=44 → C≈276.5, arc270≈207.4; r=62 → C≈389.6, arc270≈292.2) ──
@@ -7476,7 +7553,7 @@ setInterval(async () => {
     if (el) el.textContent = text;
   }
 
-  // ── Network latency (renderer-side ping) ─────────────────────────────────
+  // ── Network latency + jitter (renderer-side ping) ────────────────────────
   async function measureNetworkPing(samples) {
     samples = samples || 6;
     var times = [];
@@ -7484,14 +7561,16 @@ setInterval(async () => {
       var t0 = performance.now();
       try {
         await fetch("/api/meta?_perf=" + Date.now(), { cache: "no-store" });
-      } catch (_) {}
+      } catch (_) { times.push(9999); continue; }
       times.push(performance.now() - t0);
     }
     times.sort(function(a, b) { return a - b; });
-    // Discard fastest (cache) and slowest (spike), take median of remaining
+    // Discard fastest (cache hit) and slowest (spike), take median of remaining
     var trimmed = times.slice(1, times.length - 1);
     var median  = trimmed[Math.floor(trimmed.length / 2)] || times[0];
-    return Math.round(median * 10) / 10;
+    // Jitter = avg deviation from median
+    var jitter = trimmed.reduce(function(s, v) { return s + Math.abs(v - median); }, 0) / (trimmed.length || 1);
+    return { pingMs: Math.round(median * 10) / 10, jitterMs: Math.round(jitter * 10) / 10 };
   }
 
   // ── Main benchmark runner ─────────────────────────────────────────────────
@@ -7517,15 +7596,17 @@ setInterval(async () => {
     setStatus("Running benchmark…", "running");
 
     var scores = {};
+    var details = {};
 
     // ── 1. Network ping ───────────────────────────────────────────────────
     ["disk","net","cpu","ram"].forEach(function(k) { setCardChecking(k, true); });
     try {
-      var pingMs = await measureNetworkPing(6);
-      var nScore = netScore(pingMs);
+      var netResult = await measureNetworkPing(6);
+      var nScore = netScore(netResult.pingMs, netResult.jitterMs);
       scores.net = nScore;
+      details.net = netResult.pingMs + " ms · ±" + netResult.jitterMs + " ms jitter";
       setGauge("net", nScore, getRating(nScore));
-      setDetail("net", pingMs + " ms");
+      setDetail("net", details.net);
       setCardResult("net");
     } catch (_) {
       scores.net = 0;
@@ -7541,23 +7622,26 @@ setInterval(async () => {
         // Disk
         var dScore = diskScore(data.disk.readMBps);
         scores.disk = dScore;
+        details.disk = data.disk.readMBps + " MB/s read";
         setGauge("disk", dScore, getRating(dScore));
-        setDetail("disk", data.disk.readMBps + " MB/s read");
+        setDetail("disk", details.disk);
         setCardResult("disk");
         setStatus("Measuring CPU & memory…", "running");
 
         // CPU
         var cScore = cpuScore(data.cpu.availPct);
         scores.cpu = cScore;
+        details.cpu = data.cpu.availPct + "% free · " + data.cpu.cores + " cores";
         setGauge("cpu", cScore, getRating(cScore));
-        setDetail("cpu", data.cpu.availPct.toFixed(0) + "% free · " + data.cpu.cores + " cores");
+        setDetail("cpu", details.cpu);
         setCardResult("cpu");
 
         // RAM
         var rScore = ramScore(data.ram.availPct);
         scores.ram = rScore;
+        details.ram = data.ram.freeMB + " MB free / " + data.ram.totalMB + " MB";
         setGauge("ram", rScore, getRating(rScore));
-        setDetail("ram", data.ram.freeMB + " MB free / " + data.ram.totalMB + " MB");
+        setDetail("ram", details.ram);
         setCardResult("ram");
       } else {
         ["disk","cpu","ram"].forEach(function(k) { scores[k] = 0; setCardResult(k); });
@@ -7569,7 +7653,7 @@ setInterval(async () => {
     // ── Overall ───────────────────────────────────────────────────────────
     var total   = overallScore({ disk: scores.disk || 0, net: scores.net || 0, cpu: scores.cpu || 0, ram: scores.ram || 0 });
     var overall = getRating(total);
-    _perfLastResult = { scores: scores, total: total, rating: overall };
+    _perfLastResult = { scores: scores, details: details, total: total, rating: overall };
     _perfLastRun    = new Date();
 
     setGauge("overall", total, overall);
@@ -7603,6 +7687,7 @@ setInterval(async () => {
       metricKeys.forEach(function(k) {
         var s = r.scores[k] || 0;
         setGauge(k, s, getRating(s));
+        if (r.details && r.details[k]) setDetail(k, r.details[k]);
         var card = $id("perf-card-" + k);
         if (card) card.classList.add("has-result");
       });
