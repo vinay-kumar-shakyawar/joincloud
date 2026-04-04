@@ -2892,11 +2892,11 @@ async function bootstrap() {
       for (let i = 0; i < TEST_SIZE; i += 4096) testBuf[i] = i & 0xff;
 
       const wStart = process.hrtime.bigint();
-      await fs.promises.writeFile(tmpPath, testBuf);
+      await fs.writeFile(tmpPath, testBuf);
       const rStart = process.hrtime.bigint();
-      await fs.promises.readFile(tmpPath);
+      await fs.readFile(tmpPath);
       const rEnd = process.hrtime.bigint();
-      await fs.promises.unlink(tmpPath).catch(() => {});
+      await fs.unlink(tmpPath).catch(() => {});
 
       const writeSec = Number(rStart - wStart) / 1e9;
       const readSec = Number(rEnd - rStart) / 1e9;
