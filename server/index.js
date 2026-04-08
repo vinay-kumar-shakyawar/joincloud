@@ -3308,19 +3308,25 @@ async function bootstrap() {
 
       const clientIp = getClientIp(req);
       const startTime = Date.now();
-      logger.info("file content download start", { path: resolvedPath, size: fileSize, client_ip: clientIp });
+      // Skip verbose logging for thumbnail/preview requests to avoid log spam
+      const isPreview = req.query.preview === "1" || req.query.thumb === "1";
+      if (!isPreview) {
+        logger.info("file content download start", { path: resolvedPath, size: fileSize, client_ip: clientIp });
+      }
 
       const readStream = fsSync.createReadStream(resolvedPath, { highWaterMark: 2 * 1024 * 1024 });
       const passThrough = new stream.PassThrough({ highWaterMark: 8 * 1024 * 1024 });
 
       pipeline(readStream, passThrough, res).then(() => {
-        const durationMs = Date.now() - startTime;
-        const mbPerSec = durationMs > 0 ? (fileSize / (1024 * 1024)) / (durationMs / 1000) : 0;
-        logger.info("file content download end", {
-          bytes_sent: fileSize,
-          duration_ms: durationMs,
-          mb_per_sec: mbPerSec.toFixed(2),
-        });
+        if (!isPreview) {
+          const durationMs = Date.now() - startTime;
+          const mbPerSec = durationMs > 0 ? (fileSize / (1024 * 1024)) / (durationMs / 1000) : 0;
+          logger.info("file content download end", {
+            bytes_sent: fileSize,
+            duration_ms: durationMs,
+            mb_per_sec: mbPerSec.toFixed(2),
+          });
+        }
       }).catch((err) => {
         if (err.code !== "ERR_STREAM_PREMATURE_CLOSE" && !err.message?.includes("aborted")) {
           logger.error("file content download error", { error: err.message });
@@ -3434,7 +3440,9 @@ async function bootstrap() {
         const localLimit = getShareLimitFromLocalState();
         if (Number.isFinite(localLimit) && localLimit > 0) limit = localLimit;
       }
-      const usedForEnforcement = cpUsed != null ? cpUsed : Number(readLocalUsage().monthly_shares?.[getYearMonthKey()] || 0);
+      const localUsedCount = Number(readLocalUsage().monthly_shares?.[getYearMonthKey()] || 0);
+      // Use the higher of CP and local counts — CP can be stale if the sync hasn't completed yet.
+      const usedForEnforcement = cpUsed != null ? Math.max(cpUsed, localUsedCount) : localUsedCount;
       if (limit != null && Number.isFinite(limit) && limit > 0 && usedForEnforcement >= limit) {
         res.status(403).json({
           error: "share_limit_reached",

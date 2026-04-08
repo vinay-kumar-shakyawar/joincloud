@@ -475,7 +475,7 @@ function isPreviewableName(fileName) {
   return /\.(png|jpe?g|gif|webp|svg|pdf|csv|mp4|webm|mov|m4v)$/i.test(lower);
 }
 
-function buildFileContentUrl(pathValue, withDownload) {
+function buildFileContentUrl(pathValue, withDownload, isPreview) {
   const params = new URLSearchParams({
     path: pathValue,
     fp: stateMeta.fingerprint,
@@ -485,6 +485,9 @@ function buildFileContentUrl(pathValue, withDownload) {
   }
   if (withDownload) {
     params.set("download", "true");
+  }
+  if (isPreview) {
+    params.set("preview", "1");
   }
   return `/api/v1/file/content?${params.toString()}`;
 }
@@ -503,10 +506,10 @@ function getFileThumbMarkup(item) {
   const kind = getFilePreviewKind(item.name);
   const safeName = escapeHtml(item.name || "File");
   if (kind === "image") {
-    return `<img class="file-card-thumb-media" src="${buildFileContentUrl(item.path, false)}" alt="${safeName}" loading="lazy" />`;
+    return `<img class="file-card-thumb-media" src="${buildFileContentUrl(item.path, false, true)}" alt="${safeName}" loading="lazy" />`;
   }
   if (kind === "video") {
-    return `<video class="file-card-thumb-media" src="${buildFileContentUrl(item.path, false)}" muted preload="metadata"></video>`;
+    return `<video class="file-card-thumb-media" src="${buildFileContentUrl(item.path, false, true)}" muted preload="metadata"></video>`;
   }
   return `<div class="file-card-thumb-icon">${getFileIcon(item)}</div>`;
 }
@@ -836,6 +839,7 @@ function showAccessGate(statusText) {
   els.accessGate.style.display = "grid";
   els.accessStatus.textContent = statusText || "Waiting to request access.";
   state.accessRole = "pending";
+  if (typeof window._dismissBootLoader === "function") window._dismissBootLoader();
   updateAdminUi();
 }
 
@@ -844,6 +848,7 @@ function showActivationGate() {
   document.body.classList.add("activation-gate-active");
   els.accessGate.style.display = "none";
   els.appLayout.style.display = "none";
+  if (typeof window._dismissBootLoader === "function") window._dismissBootLoader();
   if (els.activationGate) els.activationGate.classList.add("visible");
   setActivationGateMessage("");
   updateActivationGateTrialText();
@@ -900,6 +905,7 @@ function showMainApp() {
     els.activationGate.classList.remove("visible");
   }
   els.appLayout.style.display = "grid";
+  if (typeof window._dismissBootLoader === "function") window._dismissBootLoader("Ready");
   initHostTransferUi();
 }
 
@@ -1368,7 +1374,7 @@ function renderFiles() {
         shareBtn.textContent = "Share";
         shareBtn.onclick = () => {
           touchFileActivity(item.path, "share-open");
-          openShareModal(item.path);
+          openShareModal(item.path, item.size);
         };
         actions.appendChild(shareBtn);
       }
@@ -1383,7 +1389,7 @@ function renderFiles() {
         }
         shareBtn.onclick = () => {
           touchFileActivity(item.path, "share-open");
-          openShareModal(item.path);
+          openShareModal(item.path, item.size);
         };
         actions.appendChild(shareBtn);
       }
@@ -1976,7 +1982,7 @@ function renderPreviewDrawerStage() {
   const current = previewDrawerState.items[previewDrawerState.currentIndex];
   if (!current) return;
   const kind = getFilePreviewKind(current.name);
-  const previewUrl = buildFileContentUrl(current.path, false);
+  const previewUrl = buildFileContentUrl(current.path, false, true);
   const safeName = escapeHtml(current.name || "File");
   touchFileActivity(current.path, "preview");
   if (els.previewDrawerTitle) {
@@ -2095,10 +2101,11 @@ function shortenFingerprint(value) {
 
 function renderCloudQr(url) {
   if (!window.QRious || !els.cloudUrlQr) return;
+  const qrSize = els.cloudUrlQr.width || 160;
   new window.QRious({
     element: els.cloudUrlQr,
     value: url,
-    size: 220,
+    size: qrSize,
     level: "M",
     background: "white",
     foreground: "#000000",
@@ -3360,6 +3367,7 @@ async function loadShares() {
     const res = await apiFetch("/api/shares");
     state.shares = await res.json();
     renderShares();
+    if (typeof window._updateActiveSharesStrip === 'function') window._updateActiveSharesStrip(state.shares);
     // Keep file badges in sync with active shares.
     try { renderFiles(); } catch (_) {}
   } finally {
@@ -3538,14 +3546,18 @@ async function loadPublicAccessStatus() {
       els.remoteCloudActiveWrap.style.display = isActive ? "block" : "none";
     }
     if (els.remoteCloudSetupCta) {
-      els.remoteCloudSetupCta.style.display = isActive ? "none" : "block";
+      // only show setup CTA when not active AND not starting (never configured)
+      els.remoteCloudSetupCta.style.display = (!isActive && !isEnabled) ? "block" : "none";
     }
     if (els.remoteCloudUrlQr) {
       if (window.QRious && isActive) {
+        const qrSize = els.remoteCloudUrlQr.width || 100;
         new QRious({
           element: els.remoteCloudUrlQr,
           value: data.publicUrl,
-          size: 220,
+          size: qrSize,
+          background: "white",
+          foreground: "#000000",
         });
       } else {
         const ctx = els.remoteCloudUrlQr.getContext("2d");
@@ -4200,9 +4212,10 @@ async function ensurePublicAccessActiveGroupInline() {
   }
 }
 
-async function openShareModal(pathValue) {
+async function openShareModal(pathValue, fileSizeBytes) {
   touchFileActivity(pathValue, "share-open");
   els.shareResult.textContent = "";
+  showFileSizeWarning(fileSizeBytes || 0);
   if (els.shareExtraActions) els.shareExtraActions.style.display = "none";
   if (els.copyShare) els.copyShare.style.display = "none";
   // Ensure we have the latest active shares so badges/links are immediate.
@@ -4319,6 +4332,46 @@ function closeShareModal() {
   els.shareModal.classList.remove("active");
 }
 
+/** Returns max allowed TTL in ms based on current tier entitlements; null = unlimited. */
+function getMaxLinkExpiryMs() {
+  const ent = state.entitlements;
+  if (!ent || ent.linkExpiryMaxDays === null || ent.linkExpiryMaxDays === undefined) return null;
+  return ent.linkExpiryMaxDays * 24 * 60 * 60 * 1000;
+}
+
+/** Show or hide the file size / upload speed warning in the share modal. */
+function showFileSizeWarning(fileSizeBytes) {
+  const warningEl = document.getElementById("share-size-warning");
+  if (!warningEl) return;
+  warningEl.textContent = "";
+  warningEl.style.display = "none";
+
+  if (!fileSizeBytes || fileSizeBytes <= 0) return;
+
+  const ent = state.entitlements;
+  if (ent && ent.fileSizeLimitMb !== null && ent.fileSizeLimitMb !== undefined) {
+    const limitBytes = ent.fileSizeLimitMb * 1024 * 1024;
+    if (fileSizeBytes > limitBytes) {
+      const limitLabel = ent.fileSizeLimitMb >= 1024
+        ? (ent.fileSizeLimitMb / 1024) + " GB"
+        : ent.fileSizeLimitMb + " MB";
+      warningEl.textContent = "File exceeds your plan\u2019s " + limitLabel + " limit. Upgrade to share larger files.";
+      warningEl.style.display = "block";
+      return;
+    }
+  }
+
+  const uploadMbps = state.uploadSpeedMbps;
+  if (uploadMbps && uploadMbps > 0 && fileSizeBytes > 50 * 1024 * 1024) {
+    const etaSeconds = fileSizeBytes / (uploadMbps * 125000);
+    const etaMin = Math.ceil(etaSeconds / 60);
+    if (etaMin > 2) {
+      warningEl.textContent = "Upload speed ~" + uploadMbps.toFixed(1) + " Mbps \u2014 first recipient may wait ~" + etaMin + " min for this file.";
+      warningEl.style.display = "block";
+    }
+  }
+}
+
 function setActivationMessage(msg, isError) {
   if (!els.activationMessage) return;
   els.activationMessage.textContent = msg || "";
@@ -4422,6 +4475,13 @@ async function createShare() {
     setShareModalLoading("Creating share…");
   }
   const ttlMs = ttlSelection === "custom" ? Number(els.shareTtlCustom.value) * 60 * 1000 : Number(ttlSelection);
+  const maxTtlMs = getMaxLinkExpiryMs();
+  if (maxTtlMs !== null && ttlMs > maxTtlMs) {
+    const maxDays = state.entitlements && state.entitlements.linkExpiryMaxDays;
+    const label = maxDays === 1 ? "24 hours" : maxDays + " days";
+    els.shareResult.textContent = "Your plan allows links up to " + label + ". Upgrade to set a longer expiry.";
+    return;
+  }
   const res = await apiFetch("/api/share", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -4658,6 +4718,7 @@ async function revokeShare(shareId) {
   state.shares = state.shares.filter((share) => share.shareId !== shareId);
   state.selectedShares.delete(shareId);
   renderShares();
+  if (typeof window._updateActiveSharesStrip === 'function') window._updateActiveSharesStrip(state.shares);
   await apiFetch(`/api/share/${shareId}`, { method: "DELETE" });
   await loadShares();
   await loadLogs();
@@ -5361,6 +5422,8 @@ async function sendSupportMessage() {
 }
 
 async function bootstrapApp() {
+  function _blStatus(t) { try { var s=document.getElementById('jcbl-status'); if(s) s.textContent=t; } catch(_){} }
+  _blStatus("Checking access…");
   const session = await checkSessionAccess();
   if (!session || !session.authorized) {
     state.requestId = localStorage.getItem("joincloud:request-id");
@@ -5373,9 +5436,11 @@ async function bootstrapApp() {
   }
   state.isAdmin = session.role === "admin";
   state.accessRole = state.isAdmin ? "host" : "remote";
+  _blStatus("Loading profile…");
   await loadAccessMe();
   updateAdminUi();
   await loadBuildInfo();
+  _blStatus("Loading status…");
   await fetchStatus();
 
   // Remote users accessing the shared cloud don't need license/activation checks

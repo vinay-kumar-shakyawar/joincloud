@@ -8,6 +8,743 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     BOOT LOADER — shown while app initialises, dismissed by JS
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="jc-boot-loader">
+<style>
+#jc-boot-loader {
+  position: fixed; inset: 0; z-index: 99999;
+  background: #000405;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 0;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+#jc-boot-loader.jc-boot-hiding {
+  opacity: 0;
+  transform: scale(1.03);
+  pointer-events: none;
+}
+
+/* logo ring */
+.jcbl-ring-wrap {
+  position: relative;
+  width: 100px; height: 100px;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 28px;
+}
+@keyframes jcbl-spin { to { transform: rotate(360deg); } }
+@keyframes jcbl-spin-rev { to { transform: rotate(-360deg); } }
+.jcbl-arc {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 2px solid transparent;
+}
+.jcbl-arc-1 {
+  border-top-color: #2FB7FF;
+  border-right-color: #2FB7FF22;
+  animation: jcbl-spin 1.4s linear infinite;
+}
+.jcbl-arc-2 {
+  inset: 10px;
+  border-bottom-color: #00ffd0;
+  border-left-color: #00ffd022;
+  animation: jcbl-spin-rev 2.1s linear infinite;
+}
+.jcbl-arc-3 {
+  inset: 20px;
+  border-top-color: #2FB7FF44;
+  animation: jcbl-spin 0.9s linear infinite;
+}
+.jcbl-logo {
+  width: 46px; height: 46px; z-index: 2;
+  animation: jcbl-breathe 2s ease-in-out infinite;
+  filter: drop-shadow(0 0 10px #2FB7FF66);
+}
+@keyframes jcbl-breathe {
+  0%,100% { filter: drop-shadow(0 0 6px #2FB7FF44); }
+  50%      { filter: drop-shadow(0 0 20px #2FB7FFaa); }
+}
+
+/* wordmark */
+.jcbl-wordmark {
+  height: 22px;
+  filter: brightness(1.1);
+  margin-bottom: 36px;
+  opacity: 0.85;
+}
+
+/* dots progress */
+.jcbl-dots {
+  display: flex; gap: 7px; align-items: center;
+}
+.jcbl-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: #2FB7FF33;
+  animation: jcbl-dot-pulse 1.2s ease-in-out infinite;
+}
+.jcbl-dot:nth-child(2) { animation-delay: 0.2s; }
+.jcbl-dot:nth-child(3) { animation-delay: 0.4s; }
+.jcbl-dot:nth-child(4) { animation-delay: 0.6s; }
+@keyframes jcbl-dot-pulse {
+  0%,100% { background: #2FB7FF22; transform: scale(0.8); }
+  50%     { background: #2FB7FF; transform: scale(1.2); box-shadow: 0 0 6px #2FB7FF88; }
+}
+
+/* status text */
+.jcbl-status {
+  margin-top: 16px;
+  font-size: 11px; color: #2a4455;
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.5px;
+  animation: jcbl-txt-fade 1.8s ease-in-out infinite;
+}
+@keyframes jcbl-txt-fade { 0%,100%{opacity:.4;} 50%{opacity:.9;} }
+</style>
+
+  <div class="jcbl-ring-wrap">
+    <div class="jcbl-arc jcbl-arc-1"></div>
+    <div class="jcbl-arc jcbl-arc-2"></div>
+    <div class="jcbl-arc jcbl-arc-3"></div>
+    <img src="/favicon.png" class="jcbl-logo" alt="" />
+  </div>
+  <img src="/logo.png" class="jcbl-wordmark" alt="JoinCloud" onerror="this.style.display='none'" />
+  <div class="jcbl-dots">
+    <div class="jcbl-dot"></div>
+    <div class="jcbl-dot"></div>
+    <div class="jcbl-dot"></div>
+    <div class="jcbl-dot"></div>
+  </div>
+  <div class="jcbl-status" id="jcbl-status">Starting…</div>
+</div>
+<script>
+/* Dismiss boot loader once main app or gate becomes visible */
+window._dismissBootLoader = function(statusText) {
+  var el = document.getElementById('jc-boot-loader');
+  if (!el || el._dismissed) return;
+  el._dismissed = true;
+  if (statusText) {
+    var s = document.getElementById('jcbl-status');
+    if (s) s.textContent = statusText;
+  }
+  el.classList.add('jc-boot-hiding');
+  setTimeout(function(){ el.style.display = 'none'; }, 420);
+};
+/* Safety fallback — force dismiss after 12 s in case of error */
+setTimeout(function(){
+  if (typeof window._dismissBootLoader === 'function') window._dismissBootLoader('Ready');
+}, 12000);
+</script>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     ONBOARDING OVERLAY — shown once on first install (localStorage gate)
+     ═══════════════════════════════════════════════════════════════ -->
+<div id="jc-onboarding" style="display:none">
+<style>
+#jc-onboarding {
+  position: fixed; inset: 0; z-index: 9999;
+  background: #050d1a;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  color: #e0eeff;
+  overflow: hidden;
+}
+
+/* ── starfield canvas ── */
+#ob-stars { position: absolute; inset: 0; pointer-events: none; }
+
+/* ── phase container ── */
+.ob-phase {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.7s cubic-bezier(.4,0,.2,1), transform 0.7s cubic-bezier(.4,0,.2,1);
+  transform: translateY(18px);
+  padding: 32px 24px;
+  gap: 0;
+}
+.ob-phase.ob-active {
+  opacity: 1; pointer-events: all; transform: translateY(0);
+}
+.ob-phase.ob-exit {
+  opacity: 0; transform: translateY(-18px); pointer-events: none;
+}
+
+/* ════ PHASE 0 — WELCOME ════ */
+#ob-p0 { gap: 0; }
+
+.ob-logo-wrap {
+  position: relative;
+  width: 130px; height: 130px;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 28px;
+}
+.ob-ring {
+  position: absolute; border-radius: 50%;
+  border: 1.5px solid transparent;
+}
+.ob-ring-1 {
+  inset: 0;
+  border-top-color: #2FB7FF;
+  border-right-color: #2FB7FF22;
+  animation: ob-spin 3s linear infinite;
+}
+.ob-ring-2 {
+  inset: 12px;
+  border-bottom-color: #1a6b8a;
+  border-left-color: #1a6b8a33;
+  animation: ob-spin 5s linear infinite reverse;
+}
+.ob-ring-3 {
+  inset: 24px;
+  border-top-color: #00ffd0;
+  border-right-color: transparent;
+  animation: ob-spin 2s linear infinite;
+}
+@keyframes ob-spin { to { transform: rotate(360deg); } }
+
+.ob-logo-img {
+  width: 60px; height: 60px; z-index: 2;
+  animation: ob-breathe 3s ease-in-out infinite;
+  filter: drop-shadow(0 0 14px #2FB7FF88);
+}
+@keyframes ob-breathe {
+  0%,100% { filter: drop-shadow(0 0 8px #2FB7FF55); transform: scale(1); }
+  50%      { filter: drop-shadow(0 0 24px #2FB7FFcc); transform: scale(1.04); }
+}
+
+.ob-wordmark {
+  height: 28px; margin-bottom: 12px;
+  filter: brightness(1.15);
+}
+
+.ob-tagline {
+  font-size: 14px; color: #5a8aa8; letter-spacing: 0.3px;
+  margin-bottom: 28px; text-align: center;
+}
+
+.ob-version {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #0a1628; border: 1px solid #1b3a5c;
+  border-radius: 20px; padding: 4px 14px;
+  font-size: 11px; color: #2FB7FF;
+  font-family: 'Courier New', monospace;
+  margin-bottom: 32px;
+}
+.ob-ver-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: #2FB7FF; animation: ob-blink 1.4s ease-in-out infinite;
+}
+@keyframes ob-blink { 0%,100% { opacity: 1; } 50% { opacity: 0.15; } }
+
+/* ════ PHASE 1 — SERVER BOOT ════ */
+.ob-terminal {
+  background: #060f1c;
+  border: 1px solid #1b3a5c;
+  border-radius: 12px;
+  width: 340px; max-width: 92vw;
+  overflow: hidden;
+  box-shadow: 0 24px 64px #000a;
+  margin-bottom: 28px;
+}
+.ob-term-bar {
+  background: #0a1628;
+  padding: 10px 16px;
+  display: flex; align-items: center; gap: 8px;
+  border-bottom: 1px solid #1b3a5c;
+}
+.ob-term-dot { width: 9px; height: 9px; border-radius: 50%; }
+.ob-term-body {
+  padding: 16px;
+  font-family: 'Courier New', monospace;
+  font-size: 11.5px;
+  line-height: 1.8;
+  min-height: 120px;
+}
+.ob-log {
+  opacity: 0;
+  animation: ob-fadein 0.4s ease forwards;
+  display: flex; align-items: center; gap: 8px;
+}
+.ob-log-ok  { color: #00ffd0; }
+.ob-log-run { color: #2FB7FF; }
+.ob-log-dim { color: #2a5a70; }
+@keyframes ob-fadein { to { opacity: 1; } }
+
+.ob-prog-track {
+  height: 2px; background: #0a1628;
+}
+.ob-prog-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #1a5f7a, #2FB7FF, #00ffd0);
+  width: 0%;
+  transition: width 0.3s ease;
+}
+
+/* ════ PHASE 2 — NETWORK SCENE ════ */
+.ob-scene {
+  position: relative; width: 340px; height: 190px;
+  max-width: 92vw;
+  margin-bottom: 24px;
+}
+.ob-node {
+  position: absolute;
+  background: #0a1628;
+  border: 1px solid #1b3a5c;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 11px; color: #6b8ba4;
+  font-family: 'Courier New', monospace;
+  display: flex; flex-direction: column; gap: 3px;
+  animation: ob-nodein 0.5s ease both;
+}
+@keyframes ob-nodein {
+  from { opacity: 0; transform: scale(0.85); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.ob-node-label { font-size: 10px; font-weight: 600; }
+.ob-node-sub   { font-size: 9px; color: #2a5a70; }
+
+#ob-host   { left: 0;   top: 50%; transform: translateY(-50%); border-color: #2FB7FF55; animation-delay: 0.1s; }
+#ob-cloud  {
+  left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 68px; height: 68px; border-radius: 50%;
+  border: 1.5px solid #2FB7FF;
+  background: #0a1e34;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 28px #2FB7FF33;
+  animation: ob-nodein 0.5s ease 0.3s both, ob-cloudpulse 2.5s ease-in-out infinite;
+  padding: 0;
+}
+@keyframes ob-cloudpulse {
+  0%,100% { box-shadow: 0 0 18px #2FB7FF22; }
+  50%      { box-shadow: 0 0 36px #2FB7FF55; }
+}
+#ob-rec1  { right: 0; top: 16px;   animation-delay: 0.4s; }
+#ob-rec2  { right: 0; bottom: 16px; animation-delay: 0.55s; }
+
+.ob-line {
+  position: absolute;
+  height: 1px;
+  background: linear-gradient(90deg, #2FB7FF33, #2FB7FF66);
+  animation: ob-linein 0.5s ease both;
+}
+@keyframes ob-linein { from { opacity: 0; transform: scaleX(0); } to { opacity: 1; transform: scaleX(1); } }
+#ob-line-l  { left: 108px;  width: 60px;  top: 50%; animation-delay: 0.6s; transform-origin: left; }
+#ob-line-rt { right: 108px; width: 52px;  top: 30%; transform: rotate(-16deg); transform-origin: right; animation-delay: 0.7s; }
+#ob-line-rb { right: 108px; width: 52px;  bottom: 26%; transform: rotate(16deg); transform-origin: right; animation-delay: 0.8s; }
+
+/* data packets */
+.ob-pkt {
+  position: absolute;
+  width: 7px; height: 7px; border-radius: 50%;
+  opacity: 0;
+}
+.ob-pkt-1 { background: #2FB7FF; animation: ob-pkt-lr 2.2s ease-in-out 1.2s infinite; top: 50%; left: 108px; }
+.ob-pkt-2 { background: #00ffd0; animation: ob-pkt-lr 2.2s ease-in-out 1.8s infinite; top: 50%; left: 108px; }
+.ob-pkt-3 { background: #2FB7FF; animation: ob-pkt-rl1 2s ease-in-out 1.4s infinite; top: 28%; right: 108px; }
+.ob-pkt-4 { background: #2FB7FF; animation: ob-pkt-rl2 2s ease-in-out 2s infinite;   bottom: 24%; right: 108px; }
+
+@keyframes ob-pkt-lr {
+  0%   { opacity:0; left:108px; }
+  15%  { opacity:1; }
+  85%  { opacity:1; }
+  100% { opacity:0; left:164px; }
+}
+@keyframes ob-pkt-rl1 {
+  0%   { opacity:0; right:108px; top:28%; }
+  15%  { opacity:1; }
+  85%  { opacity:1; }
+  100% { opacity:0; right:170px; top:50%; }
+}
+@keyframes ob-pkt-rl2 {
+  0%   { opacity:0; right:108px; bottom:24%; }
+  15%  { opacity:1; }
+  85%  { opacity:1; }
+  100% { opacity:0; right:170px; bottom:50%; }
+}
+
+/* ════ PHASE 3 — FEATURE CARDS ════ */
+.ob-cards-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 12px; width: 100%; max-width: 440px;
+  margin-bottom: 24px;
+}
+.ob-card {
+  background: #0a1628;
+  border: 1px solid #1b3a5c;
+  border-radius: 12px; padding: 16px;
+  cursor: default;
+  opacity: 0; transform: translateY(16px);
+  animation: ob-cardrise 0.5s ease forwards;
+  transition: border-color 0.2s, background 0.2s;
+}
+.ob-card:hover { border-color: #2FB7FF66; background: #0d1e38; }
+.ob-card:nth-child(1) { animation-delay: 0.05s; }
+.ob-card:nth-child(2) { animation-delay: 0.15s; }
+.ob-card:nth-child(3) { animation-delay: 0.25s; }
+.ob-card:nth-child(4) { animation-delay: 0.35s; }
+@keyframes ob-cardrise { to { opacity:1; transform:translateY(0); } }
+
+.ob-card-icon {
+  width: 34px; height: 34px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 10px; font-size: 17px;
+}
+.ob-card-title { font-size: 12.5px; font-weight: 600; color: #c8dff0; margin-bottom: 4px; }
+.ob-card-desc  { font-size: 11px; color: #4a6a80; line-height: 1.55; }
+.ob-card-badge {
+  display: inline-block; margin-top: 8px;
+  font-size: 9px; font-family: 'Courier New', monospace;
+  padding: 2px 8px; border-radius: 20px; font-weight: 600; letter-spacing: 0.5px;
+}
+
+/* ════ SHARED UI ════ */
+.ob-phase-title {
+  font-size: 22px; font-weight: 600; letter-spacing: -0.4px; text-align: center;
+  background: linear-gradient(135deg, #ffffff, #2FB7FF 60%, #00ffd0);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  margin-bottom: 6px;
+}
+.ob-phase-sub {
+  font-size: 13px; color: #4a6a80; text-align: center; margin-bottom: 24px;
+}
+
+/* action row */
+.ob-actions { display: flex; gap: 10px; align-items: center; }
+
+.ob-btn-primary {
+  position: relative; overflow: hidden;
+  background: linear-gradient(135deg, #1a5f7a, #2FB7FF);
+  border: none; border-radius: 9px;
+  padding: 11px 26px;
+  color: #fff; font-size: 13px; font-weight: 500;
+  cursor: pointer; letter-spacing: 0.2px;
+  transition: opacity 0.2s, transform 0.2s;
+  display: flex; align-items: center; gap: 8px;
+}
+.ob-btn-primary:hover { opacity: 0.88; transform: translateY(-1px); }
+
+/* countdown ring on primary button */
+.ob-countdown-ring {
+  position: absolute; inset: 0; pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+}
+.ob-countdown-svg {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  width: 18px; height: 18px;
+}
+.ob-cd-bg  { fill: none; stroke: #ffffff22; stroke-width: 2; }
+.ob-cd-arc { fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round;
+             stroke-dasharray: 50.27; stroke-dashoffset: 50.27;
+             transform: rotate(-90deg); transform-origin: 50% 50%;
+             transition: stroke-dashoffset 0.3s linear; }
+
+.ob-btn-skip {
+  background: transparent; border: 1px solid #1b3a5c;
+  border-radius: 9px; padding: 11px 18px;
+  color: #4a6a80; font-size: 13px; cursor: pointer;
+  transition: border-color 0.2s, color 0.2s;
+}
+.ob-btn-skip:hover { border-color: #2a5a70; color: #6b9ab8; }
+
+/* nav dots */
+.ob-dots {
+  position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 6px;
+}
+.ob-dot {
+  width: 6px; height: 6px; border-radius: 3px;
+  background: #1b3a5c; transition: all 0.35s ease;
+}
+.ob-dot.ob-dot-active { width: 20px; background: #2FB7FF; }
+</style>
+
+<!-- canvas for stars -->
+<canvas id="ob-stars"></canvas>
+
+<!-- ── Phase 0: Welcome ── -->
+<div class="ob-phase ob-active" id="ob-p0">
+  <div class="ob-logo-wrap">
+    <div class="ob-ring ob-ring-1"></div>
+    <div class="ob-ring ob-ring-2"></div>
+    <div class="ob-ring ob-ring-3"></div>
+    <img class="ob-logo-img" src="/favicon.png" alt="JoinCloud" />
+  </div>
+  <img class="ob-wordmark" src="/logo.png" alt="JOINCLOUD" />
+  <div class="ob-tagline">Your device. Your cloud. Share anything, anywhere.</div>
+ 
+  <div class="ob-actions">
+    <button class="ob-btn-primary" id="ob-p0-btn" onclick="obNext()">
+      Get Started
+      <svg class="ob-countdown-svg" viewBox="0 0 18 18">
+        <circle class="ob-cd-bg"  cx="9" cy="9" r="8"/>
+        <circle class="ob-cd-arc" id="ob-arc-0" cx="9" cy="9" r="8"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<!-- ── Phase 1: Server Boot ── -->
+<div class="ob-phase" id="ob-p1">
+  <div class="ob-phase-title" style="margin-bottom:20px">Setting up your cloud</div>
+  <div class="ob-terminal">
+    <div class="ob-term-bar">
+      <div class="ob-term-dot" style="background:#ff5f57"></div>
+      <div class="ob-term-dot" style="background:#febc2e"></div>
+      <div class="ob-term-dot" style="background:#28c840"></div>
+      <span style="margin-left:8px;font-size:10px;color:#2a5a70;font-family:'Courier New',monospace">joincloud.server</span>
+    </div>
+    <div class="ob-term-body" id="ob-term-body"></div>
+    <div class="ob-prog-track"><div class="ob-prog-fill" id="ob-prog"></div></div>
+  </div>
+  <div class="ob-actions">
+    <button class="ob-btn-skip" onclick="obGoto(2)">Skip</button>
+    <button class="ob-btn-primary" id="ob-p1-btn" onclick="obNext()" style="opacity:0.38;pointer-events:none">
+      Continue →
+      <svg class="ob-countdown-svg" viewBox="0 0 18 18">
+        <circle class="ob-cd-bg"  cx="9" cy="9" r="8"/>
+        <circle class="ob-cd-arc" id="ob-arc-1" cx="9" cy="9" r="8"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<!-- ── Phase 2: Network diagram ── -->
+<div class="ob-phase" id="ob-p2">
+  <div class="ob-phase-title">Your device is now a cloud</div>
+  <div class="ob-phase-sub">Recipients connect through JoinCloud — no port forwarding needed</div>
+  <div class="ob-scene">
+    <div class="ob-node" id="ob-host">
+      <div class="ob-node-label" style="color:#2FB7FF">YOUR DEVICE</div>
+      <div class="ob-node-sub">JoinCloud Host</div>
+      <div style="width:7px;height:7px;border-radius:50%;background:#00ffd0;box-shadow:0 0 8px #00ffd0;margin-top:4px;animation:ob-blink 1s ease-in-out infinite"></div>
+    </div>
+    <div class="ob-line" id="ob-line-l"></div>
+    <div class="ob-node" id="ob-cloud">
+      <img src="/favicon.png" style="width:30px;height:30px;filter:drop-shadow(0 0 8px #2FB7FF88)" />
+    </div>
+    <div class="ob-line" id="ob-line-rt"></div>
+    <div class="ob-line" id="ob-line-rb"></div>
+    <div class="ob-node" id="ob-rec1">
+      <div class="ob-node-label" style="color:#6b8ba4">BROWSER</div>
+      <div class="ob-node-sub">Phone · Tablet · PC</div>
+    </div>
+    <div class="ob-node" id="ob-rec2">
+      <div class="ob-node-label" style="color:#6b8ba4">BROWSER</div>
+      <div class="ob-node-sub">Any network</div>
+    </div>
+    <div class="ob-pkt ob-pkt-1"></div>
+    <div class="ob-pkt ob-pkt-2"></div>
+    <div class="ob-pkt ob-pkt-3"></div>
+    <div class="ob-pkt ob-pkt-4"></div>
+  </div>
+  <div class="ob-actions">
+    <button class="ob-btn-skip" onclick="obGoto(1)">← Back</button>
+    <button class="ob-btn-primary" id="ob-p2-btn" onclick="obNext()">
+      See Features →
+      <svg class="ob-countdown-svg" viewBox="0 0 18 18">
+        <circle class="ob-cd-bg"  cx="9" cy="9" r="8"/>
+        <circle class="ob-cd-arc" id="ob-arc-2" cx="9" cy="9" r="8"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<!-- ── Phase 3: Feature cards ── -->
+<div class="ob-phase" id="ob-p3">
+  <div class="ob-phase-title">Everything JoinCloud does</div>
+  <div class="ob-phase-sub" style="margin-bottom:20px">Your files, your server, your rules</div>
+  <div class="ob-cards-grid">
+    <div class="ob-card">
+      <div class="ob-card-icon" style="background:#0f2240">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2FB7FF" stroke-width="1.5"><rect x="2" y="14" width="6" height="6" rx="1"/><rect x="16" y="14" width="6" height="6" rx="1"/><rect x="9" y="4" width="6" height="6" rx="1"/><line x1="5" y1="14" x2="5" y2="10"/><line x1="5" y1="10" x2="12" y2="10"/><line x1="19" y1="14" x2="19" y2="10"/><line x1="19" y1="10" x2="12" y2="10"/></svg>
+      </div>
+      <div class="ob-card-title">LAN Sharing</div>
+      <div class="ob-card-desc">Instant transfer on your local network. Full speed, zero config.</div>
+      <div class="ob-card-badge" style="background:#0f2240;color:#2FB7FF">LOCAL NETWORK</div>
+    </div>
+    <div class="ob-card">
+      <div class="ob-card-icon" style="background:#0a2018">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00ffd0" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3c-4 3-4 14 0 18"/><path d="M12 3c4 3 4 14 0 18"/></svg>
+      </div>
+      <div class="ob-card-title">Public Links</div>
+      <div class="ob-card-desc">Share with anyone on the internet. No VPN, no port forwarding.</div>
+      <div class="ob-card-badge" style="background:#0a2018;color:#00ffd0">INTERNET</div>
+    </div>
+    <div class="ob-card">
+      <div class="ob-card-icon" style="background:#1a1208">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffaa44" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      </div>
+      <div class="ob-card-title">Secure Access</div>
+      <div class="ob-card-desc">Link expiry and token auth. Hosted on your own machine.</div>
+      <div class="ob-card-badge" style="background:#1a1208;color:#ffaa44">YOUR SERVER</div>
+    </div>
+    <div class="ob-card">
+      <div class="ob-card-icon" style="background:#0a1a30">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
+      </div>
+      <div class="ob-card-title">Any File Type</div>
+      <div class="ob-card-desc">Videos, folders, documents — browse and stream from any browser.</div>
+      <div class="ob-card-badge" style="background:#0a1a30;color:#a78bfa">ALL FORMATS</div>
+    </div>
+  </div>
+  <div class="ob-actions">
+    <button class="ob-btn-skip" onclick="obGoto(2)">← Back</button>
+    <button class="ob-btn-primary" onclick="obFinish()" style="background:linear-gradient(135deg,#1a5f7a,#2FB7FF,#00ffd0aa)">
+      Start Using JoinCloud →
+    </button>
+  </div>
+</div>
+
+<!-- nav dots -->
+<div class="ob-dots" id="ob-dots">
+  <div class="ob-dot ob-dot-active" id="ob-d0"></div>
+  <div class="ob-dot" id="ob-d1"></div>
+  <div class="ob-dot" id="ob-d2"></div>
+  <div class="ob-dot" id="ob-d3"></div>
+</div>
+
+<script>
+(function() {
+  /* ── Only show on first install ── */
+  if (localStorage.getItem('joincloud:onboarding-seen') === '1') return;
+  document.getElementById('jc-onboarding').style.display = 'block';
+
+  /* ── Starfield ── */
+  var cvs = document.getElementById('ob-stars');
+  var ctx2 = cvs.getContext('2d');
+  cvs.width  = window.innerWidth;
+  cvs.height = window.innerHeight;
+  var stars = Array.from({length: 90}, function() {
+    return { x: Math.random()*cvs.width, y: Math.random()*cvs.height,
+             r: Math.random()*1.3+0.2, o: Math.random()*0.4+0.1, s: Math.random()*0.3+0.05 };
+  });
+  function drawStars() {
+    ctx2.clearRect(0,0,cvs.width,cvs.height);
+    stars.forEach(function(s) {
+      s.o += Math.sin(Date.now()*s.s*0.001)*0.005;
+      ctx2.beginPath();
+      ctx2.arc(s.x,s.y,s.r,0,Math.PI*2);
+      ctx2.fillStyle='rgba(47,183,255,'+ Math.max(0.04,Math.min(0.55,s.o))+')';
+      ctx2.fill();
+    });
+    requestAnimationFrame(drawStars);
+  }
+  drawStars();
+
+  /* ── Phase state ── */
+  var cur = 0;
+  var autoTimer = null;
+  var arcTimer  = null;
+  var CIRC = 50.27; /* 2π×8 */
+
+  /* auto-advance durations (ms) for each phase; 0 = manual only */
+  var AUTO = [6000, 0, 5500, 0];
+
+  function setDot(n) {
+    for (var i=0;i<4;i++) {
+      var d=document.getElementById('ob-d'+i);
+      if(d) { d.classList.toggle('ob-dot-active', i===n); }
+    }
+  }
+
+  function runArc(phaseIdx, ms) {
+    var arc = document.getElementById('ob-arc-'+phaseIdx);
+    if (!arc) return;
+    arc.style.transition = 'none';
+    arc.style.strokeDashoffset = CIRC;
+    /* force reflow */
+    arc.getBoundingClientRect();
+    arc.style.transition = 'stroke-dashoffset '+ms+'ms linear';
+    arc.style.strokeDashoffset = '0';
+  }
+
+  function clearArc(phaseIdx) {
+    var arc = document.getElementById('ob-arc-'+phaseIdx);
+    if (arc) { arc.style.transition='none'; arc.style.strokeDashoffset=CIRC; }
+  }
+
+  window.obGoto = function(n) {
+    clearTimeout(autoTimer); clearTimeout(arcTimer);
+    var prev = document.getElementById('ob-p'+cur);
+    if (prev) { prev.classList.remove('ob-active'); prev.classList.add('ob-exit'); }
+    clearArc(cur);
+    setTimeout(function() {
+      if (prev) prev.classList.remove('ob-exit');
+    }, 700);
+    cur = n; setDot(n);
+    var next = document.getElementById('ob-p'+cur);
+    if (next) next.classList.add('ob-active');
+    scheduleAuto();
+    if (n === 1) startBoot();
+  };
+
+  window.obNext = function() { obGoto(cur+1); };
+
+  window.obFinish = function() {
+    localStorage.setItem('joincloud:onboarding-seen','1');
+    var el = document.getElementById('jc-onboarding');
+    el.style.transition = 'opacity 0.6s ease';
+    el.style.opacity = '0';
+    setTimeout(function() { el.style.display='none'; }, 650);
+  };
+
+  function scheduleAuto() {
+    clearTimeout(autoTimer);
+    var ms = AUTO[cur];
+    if (!ms) return;
+    runArc(cur, ms);
+    autoTimer = setTimeout(function() {
+      if (cur < 3) obNext(); else obFinish();
+    }, ms);
+  }
+
+  /* ── Boot animation (phase 1) ── */
+  var BOOT_LINES = [
+    { t:400,  cls:'ob-log-ok',  txt:'✓ Node server initialized on :3000' },
+    { t:1100, cls:'ob-log-run', txt:'⟳ Scanning local network interface…' },
+    { t:2000, cls:'ob-log-ok',  txt:'✓ LAN IP bound → 192.168.x.x:3000' },
+    { t:2900, cls:'ob-log-run', txt:'⟳ Registering public tunnel…' },
+    { t:3900, cls:'ob-log-ok',  txt:'✓ Tunnel active — ready for connections' },
+    { t:4600, cls:'ob-log-dim', txt:'  Cloud node online ·  waiting…' },
+  ];
+  var bootDone = false;
+  function startBoot() {
+    bootDone = false;
+    var body = document.getElementById('ob-term-body');
+    if (!body) return;
+    body.innerHTML = '';
+    var prog = document.getElementById('ob-prog');
+    if (prog) prog.style.width='0%';
+    BOOT_LINES.forEach(function(l, i) {
+      setTimeout(function() {
+        var div = document.createElement('div');
+        div.className = 'ob-log '+l.cls;
+        div.textContent = l.txt;
+        body.appendChild(div);
+        var pct = Math.round(((i+1)/BOOT_LINES.length)*100);
+        if (prog) prog.style.width = pct+'%';
+        if (i === BOOT_LINES.length-1) {
+          bootDone = true;
+          var btn = document.getElementById('ob-p1-btn');
+          if (btn) { btn.style.opacity='1'; btn.style.pointerEvents='all'; }
+          /* auto-advance 1.5s after boot finishes */
+          AUTO[1] = 1500;
+          scheduleAuto();
+        }
+      }, l.t);
+    });
+  }
+
+  /* ── Kick off ── */
+  scheduleAuto(); /* phase 0 auto-advance */
+})();
+</script>
+</div>
+
     <header class="topbar">
       <div class="brand">
         <button class="button secondary menu-toggle" id="menu-toggle" aria-label="Toggle sidebar" title="Toggle menu">☰</button>
@@ -27,6 +764,11 @@
         <span class="server-status-pill server-status-online" id="network-status-badge" style="margin-right:8px;" aria-live="polite">
           <span class="server-status-text" id="network-status-text">Online</span>
         </span>
+        <!-- Active shares indicator (shown when shares are active) -->
+        <button id="topbar-active-shares" onclick="switchSection('shares')" title="View active shares" style="display:none;align-items:center;gap:6px;background:#050a14;border:1px solid #1b3a5c;border-radius:20px;padding:4px 11px 4px 8px;cursor:pointer;font-size:11px;color:#6b9ab8;font-family:'Courier New',monospace;transition:all .2s">
+          <span style="width:6px;height:6px;border-radius:50%;background:#2FB7FF;box-shadow:0 0 5px #2FB7FF;animation:sc-pulse 1.5s ease-in-out infinite;display:inline-block"></span>
+          <span id="topbar-active-shares-label">1 active</span>
+        </button>
         <button class="button" id="add-file-header"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></span> Add File</button>
         <button class="button secondary" id="toggle-sharing">Stop</button>
         <div class="value value-muted" id="upload-destination-label"></div>
@@ -143,74 +885,952 @@
       </aside>
 
       <div class="content">
+
+      <!-- ── GLOBAL ACTIVE SHARES STRIP — visible on every section ── -->
+      <style>
+      #active-shares-strip {
+        background:#030608; border-bottom:1px solid #0e1a22;
+        padding:0; display:none; flex-direction:column;
+        font-family:'Courier New',monospace;
+        overflow-x:auto
+        
+      }
+      #asi-header {
+        display:flex; align-items:center; gap:8px;
+        padding:5px 14px; cursor:pointer; user-select:none;
+        border-bottom:1px solid transparent; transition:border-color .2s;
+      }
+      #asi-header:hover { border-bottom-color:#0e1a22; }
+      .asi-label {
+        font-size:10px; font-weight:700; color:#2a4455;
+        letter-spacing:.6px; flex:1;
+      }
+      .asi-count-badge {
+        background:#071220; border:1px solid #1b3a5c; border-radius:10px;
+        padding:2px 7px; font-size:13px; color:#2FB7FF;
+      }
+      #asi-toggle-arrow {
+        font-size:20px; color:#2FB7FF; transition:transform .25s ease; display:inline-block;
+      }
+      #asi-toggle-arrow.open { transform:rotate(180deg); }
+      #asi-close-btn {
+        background:none; border:none; color:white; cursor:pointer;
+        font-size:13px; padding:2px 4px; line-height:1; transition:color .15s;
+      }
+      #asi-close-btn:hover { color:#6b9ab8; }
+      /* collapsed row: single line no-wrap */
+      #asi-chips-collapsed {
+        display:flex; align-items:center; gap:6px; padding:3px 14px 5px;
+        overflow:hidden; flex-wrap:nowrap;
+      }
+      /* expanded: wraps */
+      #asi-chips-expanded {
+        display:none; padding:6px 14px 8px; flex-wrap:wrap; gap:6px;
+        border-top:1px solid #0e1a22;
+      }
+      #asi-chips-expanded.open { display:flex; }
+      .asi-chip {
+        display:inline-flex; align-items:center; gap:0;
+        border-radius:20px; overflow:hidden; flex-shrink:0;
+        font-size:11px; color:#6b9ab8;
+        transition:border-color .15s;
+      }
+      .asi-chip.local  { background:#060d0a; border:1px solid #00ffd044; }
+      .asi-chip.public { background:#060d18; border:1px solid #1b3a5c; }
+      .asi-chip:hover  { filter:brightness(1.2); }
+      .asi-chip-dot {
+        width:5px; height:5px; border-radius:50%;
+        animation:sc-pulse 1.5s ease-in-out infinite;
+        margin:0 7px 0 9px; flex-shrink:0;
+      }
+      .asi-chip.local  .asi-chip-dot { background:#00ffd0; box-shadow:0 0 4px #00ffd0; }
+      .asi-chip.public .asi-chip-dot { background:#2FB7FF; box-shadow:0 0 4px #2FB7FF; }
+      .asi-chip-name {
+        max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+        padding:4px 6px 4px 0;
+      }
+      .asi-chip-btn {
+        background:none; border:none; padding:4px 8px; cursor:pointer;
+        font-size:10px; display:flex; align-items:center; gap:3px;
+        transition:color .15s, background .15s; white-space:nowrap;
+      }
+      .asi-chip.local  .asi-chip-btn { border-left:1px solid #00ffd022; color:#2a6a5a; }
+      .asi-chip.public .asi-chip-btn { border-left:1px solid #1b3a5c;   color:#3a6a88; }
+      .asi-chip.local  .asi-chip-btn:hover { color:#00ffd0; background:#0a180e; }
+      .asi-chip.public .asi-chip-btn:hover { color:#2FB7FF; background:#0a1825; }
+      /* QR popup */
+      .asi-qr-popup {
+        position:fixed; z-index:9900; background:#040810; border:1px solid #1b3a5c;
+        border-radius:12px; padding:14px 14px 12px; box-shadow:0 12px 40px rgba(0,0,0,.85);
+        display:flex; flex-direction:column; align-items:center; gap:8px;
+        min-width:190px;
+      }
+      .asi-qr-title { font-size:9px; color:#334; font-family:'Courier New',monospace; letter-spacing:.5px; }
+      .asi-qr-close {
+        position:absolute; top:7px; right:10px; background:none; border:none;
+        color:#334; cursor:pointer; font-size:14px; line-height:1;
+      }
+      .asi-qr-close:hover { color:#9dd4ee; }
+      .asi-qr-url {
+        font-size:10px; color:#3a6a88; font-family:'Courier New',monospace;
+        max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+        padding-top:2px;
+      }
+      .asi-qr-frame { background:#fff; border-radius:6px; padding:6px; }
+      /* scope badge inside chip */
+      .asi-scope-badge {
+        font-size:9px; padding:1px 5px; border-radius:8px; margin-right:5px; letter-spacing:.3px;
+        white-space:nowrap;
+      }
+      .asi-scope-badge.public { background:#071220; color:#2FB7FF44; border:1px solid #1b3a5c44; }
+      .asi-scope-badge.local  { background:#071208; color:#00ffd044; border:1px solid #00ffd022; }
+      </style>
+
+      <div id="active-shares-strip">
+        <!-- collapsed header row -->
+        <div id="asi-header" onclick="asiToggle()">
+          <div class="asi-label">ACTIVE SHARES <span class="asi-count-badge" id="asi-count">0</span></div>
+          
+          <span id="asi-toggle-arrow">▼</span>
+          <button id="asi-close-btn" onclick="event.stopPropagation();asiDismiss()" title="Dismiss">✕</button>
+        </div>
+        <!-- single-line collapsed chips -->
+        <div id="asi-chips-collapsed"></div>
+        <!-- expanded chips (wrap) -->
+        <div id="asi-chips-expanded"></div>
+      </div>
+
+      <!-- QR popup (shared, rendered on demand) -->
+      <div id="asi-qr-popup" class="asi-qr-popup" style="display:none">
+        <button class="asi-qr-close" onclick="document.getElementById('asi-qr-popup').style.display='none'">✕</button>
+        <div class="asi-qr-title">SHARE QR</div>
+        <div class="asi-qr-frame"><canvas id="asi-qr-canvas" width="170" height="170" style="display:block;border-radius:4px"></canvas></div>
+        <div class="asi-qr-url" id="asi-qr-url"></div>
+      </div>
+
       <section class="card section" data-section="home">
         <h2>Home</h2>
         <p id="home-trial-notice" class="value value-muted" style="display:none; margin-bottom:16px;"></p>
-        <div class="home-grid">
-          <div class="home-section" id="home-storage-section">
-            <div class="label">Remote Cloud URL</div>
-            <div class="row" style="margin-top:10px">
-              <label class="toggle">
-                <input type="checkbox" id="home-remote-access-toggle" />
-                <span>Remote Access</span>
-              </label>
-              <button type="button" class="button secondary button-compact" id="home-remote-access-settings">Settings</button>
-            </div>
-            <div id="remote-cloud-active-wrap" style="display:none;">
-              <input class="input mono" id="remote-cloud-url-input" readonly style="margin-top:8px" />
-              <div class="row" style="margin-top:10px">
-                <button class="button secondary" id="remote-cloud-copy"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></span>Copy</button>
+        <!-- ═══ HOME GRID — redesigned v2 ═══ -->
+        <style>
+        /* grid: equal columns, fixed height so QR never pushes right card down */
+        .hg2 {
+          display:grid; grid-template-columns:1fr 1fr; gap:14px;
+          align-items:start;
+        }
+        /* Only collapse below 700px viewport (sidebar ~220px + content ~480px) */
+        @media(max-width:700px){ .hg2{ grid-template-columns:1fr; } }
+
+        /* cards are self-contained, fixed height with internal scroll if needed */
+        .server-card, .lan-card {
+          height:400px; /* fixed — both cards always same height */
+          overflow:hidden;
+        }
+
+        /* ── SERVER CARD (left) ── */
+        .server-card {
+          position:relative; border-radius:16px;
+          display:flex; flex-direction:column;
+          background:#000;
+          border:1px solid #1a1a1a;
+        }
+        /* scrolling grid lines */
+        .server-card::before {
+          content:''; position:absolute; inset:0; border-radius:16px;
+          background-image:
+            linear-gradient(rgba(47,183,255,.05) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(47,183,255,.05) 1px, transparent 1px);
+          background-size:28px 28px;
+          animation:sc-grid-scroll 12s linear infinite;
+          pointer-events:none; z-index:0;
+        }
+        @keyframes sc-grid-scroll { to{ background-position:0 28px; } }
+        .server-rack-bg {
+          position:absolute; bottom:0; left:0; right:0; height:100px;
+          background:repeating-linear-gradient(to bottom,transparent 0,transparent 17px,rgba(47,183,255,.04) 17px,rgba(47,183,255,.04) 18px);
+          pointer-events:none; border-radius:0 0 16px 16px; z-index:0;
+        }
+        .server-card::after {
+          content:''; position:absolute; bottom:0; left:5%; right:5%; height:50px;
+          background:radial-gradient(ellipse at 50% 100%,rgba(47,183,255,.12) 0%,transparent 70%);
+          pointer-events:none; z-index:0;
+        }
+        .sc-body {
+          position:relative; z-index:2; padding:18px;
+          display:flex; flex-direction:column; flex:1; gap:0;
+          height:100%; box-sizing:border-box;
+        }
+
+        /* header */
+        .sc-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+        .sc-title-wrap { display:flex; align-items:center; gap:8px; }
+        .sc-icon-box {
+          width:30px; height:30px; border-radius:8px;
+          background:#0a0a0a; border:1px solid #222;
+          display:flex; align-items:center; justify-content:center; flex-shrink:0;
+        }
+        .sc-title { font-size:12px; font-weight:600; color:#c8dff0; }
+        .sc-sub   { font-size:10px; color:#334455; margin-top:1px; }
+
+        /* ── BIG POWER BUTTON (offline state) ── */
+        .sc-power-big-wrap {
+          flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+          gap:14px;
+          color:#2FB7FF;
+        }
+        .sc-power-big {
+          width:80px; height:80px; border-radius:50%;
+          background:#0a0a0a;
+          border:2.5px solid #222;
+          display:flex; align-items:center; justify-content:center;
+          cursor:pointer; transition:all .3s ease;
+          position:relative; overflow:hidden;
+          /* attention ring animation */
+          animation:sc-attn 2.4s ease-in-out infinite;
+        }
+        @keyframes sc-attn {
+          0%,100%{ box-shadow:0 0 0 0 rgba(47,183,255,0), 0 0 0 6px rgba(47,183,255,.08); border-color:#222; }
+          50%    { box-shadow:0 0 0 10px rgba(47,183,255,.0), 0 0 0 6px rgba(47,183,255,.18); border-color:#2FB7FF66; }
+        }
+        .sc-power-big:hover {
+          border-color:#2FB7FF;
+          box-shadow:0 0 0 8px rgba(47,183,255,.14), 0 0 28px rgba(47,183,255,.3);
+          animation:none;
+        }
+        .sc-power-big.sc-on {
+          border-color:#2FB7FF;
+          box-shadow:0 0 0 6px rgba(47,183,255,.15), 0 0 32px rgba(47,183,255,.4);
+          background:#020d1a; animation:none;
+        }
+        .sc-power-big::after {
+          content:''; position:absolute; inset:0; border-radius:50%;
+          background:rgba(47,183,255,.25); transform:scale(0); opacity:1;
+          transition:transform .45s ease, opacity .45s ease;
+        }
+        .sc-power-big.sc-clicking::after { transform:scale(2.8); opacity:0; }
+        .sc-power-big-hint {
+          font-size:11px; color:#2FB7FF; font-family:'Courier New',monospace;
+          text-align:center; letter-spacing:.5px;
+          animation:sc-attn-txt 2.4s ease-in-out infinite;
+        }
+        @keyframes sc-attn-txt { 0%,100%{opacity:.45;} 50%{opacity:.9;} }
+
+        /* small power button (shown when online) */
+        .sc-power-btn {
+          width:34px; height:34px; border-radius:50%;
+          border:1.5px solid #222; background:#0a0a0a;
+          display:flex; align-items:center; justify-content:center;
+          cursor:pointer; transition:all .25s ease; flex-shrink:0;
+          position:relative; overflow:hidden;
+        }
+        .sc-power-btn:hover { border-color:#2FB7FF55; }
+        .sc-power-btn.sc-on { border-color:#2FB7FF; background:#020d1a; box-shadow:0 0 12px rgba(47,183,255,.3); }
+        .sc-power-btn.sc-on svg { color:#2FB7FF !important; }
+        .sc-power-btn::after {
+          content:''; position:absolute; inset:0; border-radius:50%;
+          background:rgba(47,183,255,.3); transform:scale(0); opacity:1;
+          transition:transform .4s ease, opacity .4s ease;
+        }
+        .sc-power-btn.sc-clicking::after { transform:scale(2.5); opacity:0; }
+
+        /* status row */
+        .sc-status-row { display:flex; align-items:center; gap:8px; margin-bottom:7px; }
+        .sc-status-dot {
+          width:7px; height:7px; border-radius:50%;
+          background:#222; transition:background .4s, box-shadow .4s;
+        }
+        .sc-status-dot.sc-live {
+          background:#2FB7FF; box-shadow:0 0 0 3px rgba(47,183,255,.2);
+          animation:sc-pulse 2s ease-in-out infinite;
+        }
+        .sc-status-dot.sc-starting { background:#f59e0b; animation:sc-pulse .8s ease-in-out infinite; }
+        @keyframes sc-pulse { 0%,100%{opacity:1;} 50%{opacity:.4;} }
+        .sc-status-text { font-size:11px; color:#334455; font-family:'Courier New',monospace; }
+        .sc-status-text.sc-live-text { color:#2FB7FF; }
+        .sc-status-text.sc-starting-text { color:#f59e0b; }
+
+        /* URL strip — inline copy icon on right */
+        .sc-url-strip {
+          background:#050505; border:1px solid #1a1a1a; border-radius:8px;
+          padding:5px 5px 5px 10px; font-family:'Courier New',monospace; font-size:11px;
+          color:#445566; margin-bottom:7px;
+          display:flex; align-items:center; gap:6px;
+          transition:border-color .3s, color .3s;
+        }
+        .sc-url-strip.sc-live { border-color:#2FB7FF33; color:#9dd4ee; }
+        .sc-url-copy-btn {
+          flex-shrink:0; width:28px; height:28px; border-radius:6px;
+          border:1px solid #1a1a1a; background:#0a0a0a;
+          display:flex; align-items:center; justify-content:center;
+          cursor:pointer; color:#3a6a88; transition:all .2s; padding:0;
+        }
+        .sc-url-copy-btn:hover { border-color:#2FB7FF55; color:#2FB7FF; background:#030d18; }
+        .sc-url-text { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+        /* action buttons (Settings only now — Copy is inline) */
+        .sc-actions { display:flex; gap:7px; margin-bottom:8px; }
+        .sc-btn {
+          flex:1; padding:7px 9px; border-radius:8px; font-size:12px;
+          border:1px solid #1a1a1a; background:#050505; color:#445566;
+          cursor:pointer; transition:all .2s; display:flex; align-items:center; justify-content:center; gap:6px;
+        }
+        .sc-btn:hover { border-color:#2FB7FF44; color:#9dd4ee; background:#090909; }
+        .sc-btn-primary { background:#030d18; border-color:#2FB7FF44; color:#2FB7FF; }
+        .sc-btn-primary:hover { background:#05152a; border-color:#2FB7FF; }
+
+        /* QR panel */
+        .sc-qr-panel {
+          background:#050505; border:1px solid #1a1a1a; border-radius:10px;
+          padding:8px 10px; display:flex; flex-direction:column; align-items:center; gap:5px;
+          overflow:hidden; min-height:0;
+        }
+        .sc-qr-label { font-size:9px; color:#224; font-family:'Courier New',monospace; letter-spacing:.5px; }
+        .sc-qr-frame {
+          background:#fff; border-radius:6px; padding:6px;
+          display:flex; align-items:center; justify-content:center;
+          box-shadow:0 0 0 1px #2FB7FF18;
+        }
+
+        /* LED strip */
+        .sc-leds { display:flex; gap:5px; justify-content:center; padding:4px 0 0; }
+        .sc-led { width:5px; height:5px; border-radius:50%; background:#111; transition:background .4s, box-shadow .4s; }
+        .sc-led.sc-led-on { background:#2FB7FF; box-shadow:0 0 5px #2FB7FF88; animation:sc-led-blink 2s ease-in-out infinite; }
+        .sc-led:nth-child(2).sc-led-on { animation-delay:.3s; }
+        .sc-led:nth-child(3).sc-led-on { animation-delay:.6s; }
+        .sc-led:nth-child(4).sc-led-on { background:#00ffd0; box-shadow:0 0 5px #00ffd088; animation-delay:.15s; }
+        @keyframes sc-led-blink { 0%,100%{opacity:1;} 50%{opacity:.3;} }
+
+        /* setup CTA */
+        .sc-setup-cta {
+          background:#050505; border:1px dashed #1a1a1a; border-radius:10px;
+          padding:14px; text-align:center; flex:1;
+          display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px;
+        }
+        .sc-setup-title { font-size:13px; font-weight:600; color:#88aacc; }
+        .sc-setup-sub   { font-size:11px; color:#334455; line-height:1.5; max-width:190px; }
+
+        /* ── LAN CARD (right) ── */
+        .lan-card {
+          position:relative; border-radius:16px;
+          display:flex; flex-direction:column;
+          background:#000; border:1px solid #1a1a1a;
+        }
+        .lan-ripple-bg {
+          position:absolute; top:20px; left:50%; transform:translateX(-50%);
+          width:200px; height:200px; pointer-events:none; z-index:0;
+        }
+        .lan-ripple {
+          position:absolute; border-radius:50%;
+          border:1px solid rgba(0,255,208,.12);
+          top:50%; left:50%; transform:translate(-50%,-50%);
+          animation:lan-expand 3.5s ease-out infinite;
+        }
+        .lan-ripple:nth-child(2){ animation-delay:1.1s; }
+        .lan-ripple:nth-child(3){ animation-delay:2.2s; }
+        @keyframes lan-expand { 0%{width:0;height:0;opacity:.7;} 100%{width:200px;height:200px;opacity:0;} }
+
+        .lan-body { position:relative; z-index:2; padding:18px; display:flex; flex-direction:column; flex:1; height:100%; box-sizing:border-box; }
+
+        .lan-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+        .lan-icon-box {
+          width:36px; height:36px; border-radius:9px;
+          background:#0a0a0a; border:1px solid #222;
+          display:flex; align-items:center; justify-content:center;
+        }
+
+        /* network nodes diagram */
+        .lan-nodes { display:flex; align-items:center; justify-content:center; gap:0; margin:8px 0 12px; height:56px; }
+        .lan-node { display:flex; flex-direction:column; align-items:center; gap:4px; font-size:9px; color:#224; font-family:'Courier New',monospace; }
+        .lan-node-icon {
+          width:32px; height:32px; border-radius:8px;
+          background:#050505; border:1px solid #1a1a1a;
+          display:flex; align-items:center; justify-content:center;
+          animation:lan-node-pulse 3s ease-in-out infinite;
+        }
+        .lan-node:nth-child(3) .lan-node-icon { animation-delay:.8s; }
+        .lan-node:nth-child(5) .lan-node-icon { animation-delay:1.6s; }
+        @keyframes lan-node-pulse {
+          0%,100%{ border-color:#1a1a1a; }
+          50%    { border-color:#00ffd033; box-shadow:0 0 8px rgba(0,255,208,.1); }
+        }
+        .lan-connector { flex:1; height:1px; min-width:16px; max-width:28px; background:linear-gradient(90deg,#1a1a1a,#00ffd033,#1a1a1a); position:relative; overflow:visible; }
+        .lan-connector::after {
+          content:''; position:absolute; width:5px; height:5px; border-radius:50%;
+          background:#00ffd0; top:-2px; animation:lan-travel 2s linear infinite; box-shadow:0 0 4px #00ffd0;
+        }
+        .lan-connector:nth-of-type(4)::after { animation-delay:1s; animation-direction:reverse; }
+        @keyframes lan-travel { from{left:-5px;opacity:0;} 20%{opacity:1;} 80%{opacity:1;} to{left:100%;opacity:0;} }
+
+        /* lan-speed-badge removed */
+
+        .lan-url-strip {
+          background:#050505; border:1px solid #1a1a1a; border-radius:8px;
+          padding:5px 5px 5px 10px; font-family:'Courier New',monospace; font-size:11px;
+          color:#6b9ab8; margin-bottom:9px;
+          display:flex; align-items:center; gap:6px;
+        }
+        .lan-url-strip .sc-url-text { color:#6b9ab8; }
+
+        .lan-qr-panel {
+          background:#050505; border:1px solid #1a1a1a; border-radius:12px;
+          padding:8px 10px; display:flex; flex-direction:column; align-items:center; gap:5px;
+          flex:1; overflow:hidden; min-height:0;
+        }
+        .lan-qr-label { font-size:9px; color:#224; font-family:'Courier New',monospace; letter-spacing:.5px; }
+        .lan-qr-frame {
+          background:#fff; border-radius:6px; padding:6px;
+          box-shadow:0 0 0 1px #00ffd018;
+          flex:1; min-height:0; display:flex; align-items:center; justify-content:center;
+        }
+        .lan-qr-frame canvas { max-width:100%; max-height:100%; display:block; border-radius:3px; }
+
+        /* (active-shares-strip is now global — see styles above home section) */
+
+        /* ── BOTTOM INFO GRID ── */
+        .home-info-grid {
+          display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px;
+        }
+        @media(max-width:520px){ .home-info-grid{ grid-template-columns:1fr; } }
+        .home-info-tile {
+          background:#050505; border:1px solid #1a1a1a; border-radius:12px;
+          padding:14px;
+        }
+        .home-info-tile .label { font-size:10px; color:#334455; font-weight:600; letter-spacing:.4px; margin-bottom:8px; }
+        </style>
+
+        <div class="hg2">
+
+          <!-- ═══ LEFT: SERVER / PUBLIC CLOUD CARD ═══ -->
+          <div class="server-card">
+            <div class="server-rack-bg"></div>
+            <div class="sc-body">
+
+              <!-- ── OFFLINE STATE: big centred power button only ── -->
+              <div class="sc-power-big-wrap" id="sc-offline-state">
+               
+                <div class="sc-power-big" id="sc-power-big" onclick="scTogglePower()" title="Start Public Cloud Server">
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#2FB7FF" stroke-width="2" stroke-linecap="round">
+                    <path d="M18.36 6.64A9 9 0 1 1 5.64 6.64"/>
+                    <line x1="12" y1="2" x2="12" y2="12"/>
+                  </svg>
+                </div>
+                <div class="sc-power-big-hint">CLICK TO START</div>
+                <div style="font-size:10px;color:white;font-family:'Courier New',monospace;text-align:center;line-height:1.5;max-width:140px">Public cloud server<br>for Remote sharing</div>
               </div>
-              <div class="qr-wrap" id="remote-cloud-qr-wrap">
-                <canvas id="remote-cloud-url-qr" width="220" height="220"></canvas>
+
+              <!-- ── ONLINE / STARTING STATE ── -->
+              <div id="sc-online-state" style="display:none;flex-direction:column;flex:1;height:100%;position:relative">
+
+                <!-- loading overlay (shown while starting) -->
+                <div id="sc-loading-overlay" style="position:absolute;inset:0;border-radius:14px;background:rgba(0,0,0,.82);z-index:10;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px">
+                  <style>
+                  @keyframes sc-spin{ to{transform:rotate(360deg);} }
+                  .sc-spinner {
+                    width:40px;height:40px;border-radius:50%;
+                    border:3px solid #0e1e2e;
+                    border-top-color:#2FB7FF;
+                    animation:sc-spin 0.9s linear infinite;
+                  }
+                  </style>
+                  <div class="sc-spinner"></div>
+                  <div style="font-size:11px;color:#2FB7FF88;font-family:'Courier New',monospace;letter-spacing:.5px">CONNECTING…</div>
+                </div>
+
+                <!-- header -->
+                <div class="sc-header">
+                  <div class="sc-title-wrap">
+                    <div class="sc-icon-box">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2FB7FF" stroke-width="1.5"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+                    </div>
+                    <div>
+                      <div class="sc-title">Public Cloud Server</div>
+                      <div class="sc-sub">Remote access · Internet</div>
+                    </div>
+                  </div>
+                  <button class="sc-power-btn" id="sc-power-btn" title="Stop Remote Access" onclick="scTogglePower()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3a6a88" stroke-width="2" stroke-linecap="round">
+                      <path d="M18.36 6.64A9 9 0 1 1 5.64 6.64"/><line x1="12" y1="2" x2="12" y2="12"/>
+                    </svg>
+                  </button>
+                </div>
+
+                <!-- status row -->
+                <div class="sc-status-row" id="sc-status-row">
+                  <div class="sc-status-dot" id="sc-status-dot"></div>
+                  <span class="sc-status-text" id="sc-status-text">Connecting…</span>
+                </div>
+
+                <!-- URL strip with inline copy -->
+                <div class="sc-url-strip" id="sc-url-strip">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;opacity:.5"><circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3c-4 3-4 14 0 18"/><path d="M12 3c4 3 4 14 0 18"/></svg>
+                  <span class="sc-url-text" id="sc-url-text">—</span>
+                  <button class="sc-url-copy-btn" id="remote-cloud-copy" onclick="scCopyUrl()" title="Copy link" style="display:none">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+                  </button>
+                </div>
+
+                <!-- Settings button only -->
+                <div class="sc-actions" id="sc-action-row" style="display:none">
+                  <button class="sc-btn" id="home-remote-access-settings" onclick="switchSection&&switchSection('settings')" style="flex:none;padding:6px 12px">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                    Settings
+                  </button>
+                </div>
+
+                <!-- QR panel — compact, flex:1 fills remaining space -->
+                <div class="sc-qr-panel" id="sc-qr-panel" style="flex:1;min-height:0">
+                  <div class="sc-qr-label">SCAN TO CONNECT</div>
+                  <div class="sc-qr-frame" id="sc-qr-frame" style="flex:1;min-height:0;display:flex;align-items:center;justify-content:center">
+                    <canvas id="remote-cloud-url-qr" width="200" height="200" style="border-radius:3px;display:block;max-width:100%;max-height:100%"></canvas>
+                  </div>
+                  <div class="sc-leds" id="sc-leds">
+                    <div class="sc-led" id="sc-led-0"></div>
+                    <div class="sc-led" id="sc-led-1"></div>
+                    <div class="sc-led" id="sc-led-2"></div>
+                    <div class="sc-led sc-led-4" id="sc-led-3"></div>
+                    <div class="sc-led" id="sc-led-4"></div>
+                  </div>
+                </div>
+
+              </div><!-- /sc-online-state -->
+
+            </div><!-- /sc-body -->
+          </div><!-- /server-card -->
+
+          <!-- hidden inputs kept for JS compatibility -->
+          <input type="checkbox" id="home-remote-access-toggle" style="display:none" />
+          <input class="input mono" id="remote-cloud-url-input" readonly style="display:none" />
+          <div class="value value-muted" id="public-status" style="display:none">Inactive</div>
+          <div id="remote-cloud-active-wrap" style="display:none"></div>
+
+          <!-- ═══ RIGHT: LAN CARD ═══ -->
+          <div class="lan-card">
+            <!-- ripple rings -->
+            <div class="lan-ripple-bg">
+              <div class="lan-ripple"></div>
+              <div class="lan-ripple"></div>
+              <div class="lan-ripple"></div>
+            </div>
+
+            <div class="lan-body">
+              <div class="lan-header">
+                <div class="sc-title-wrap">
+                  <div class="lan-icon-box">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#00ffd0" stroke-width="1.5"><rect x="2" y="14" width="6" height="6" rx="1"/><rect x="16" y="14" width="6" height="6" rx="1"/><rect x="9" y="4" width="6" height="6" rx="1"/><line x1="5" y1="14" x2="5" y2="10"/><line x1="5" y1="10" x2="12" y2="10"/><line x1="19" y1="14" x2="19" y2="10"/><line x1="19" y1="10" x2="12" y2="10"/></svg>
+                  </div>
+                  <div>
+                    <div class="sc-title">Local Network Share</div>
+                    <div class="sc-sub" style="color:#2a6a5a">LAN · Always active</div>
+                  </div>
+                </div>
+                <!-- always-on indicator -->
+                <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#00ffd0;font-family:'Courier New',monospace">
+                  <div style="width:7px;height:7px;border-radius:50%;background:#00ffd0;box-shadow:0 0 8px #00ffd0;animation:sc-pulse 2s ease-in-out infinite"></div>
+                  LIVE
+                </div>
+              </div>
+
+              <!-- mini network diagram -->
+              <div class="lan-nodes">
+                
+                <div class="lan-node">
+                  <div class="lan-node-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b8ba4" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+                  </div>
+                  <span>PC</span>
+                </div>
+                <div class="lan-connector"></div>
+                <div class="lan-node">
+                  <div class="lan-node-icon" style="border-color:#2FB7FF55;box-shadow:0 0 10px rgba(47,183,255,.15)">
+                    <img src="/favicon.png" style="width:18px;height:18px" />
+                  </div>
+                  <span>HOST</span>
+                </div>
+                <div class="lan-connector"></div>
+                <div class="lan-node">
+                  <div class="lan-node-icon">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b8ba4" stroke-width="1.5"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                  </div>
+                  <span>PHONE</span>
+                </div>
+              </div>
+
+              <!-- URL with inline copy -->
+              <div class="lan-url-strip">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#2FB7FF" stroke-width="2" style="flex-shrink:0;opacity:.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                <span class="sc-url-text" id="cloud-url-display">—</span>
+                <input id="cloud-url-input" readonly style="display:none" />
+                <button class="sc-url-copy-btn" id="copy-cloud-url" title="Copy LAN link" style="border-color:#00ffd022;color:#2a6a5a">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+                </button>
+              </div>
+
+              <!-- QR — bigger, fills remaining space -->
+              <div class="lan-qr-panel">
+                <div class="lan-qr-label">SCAN ON SAME NETWORK</div>
+                <div class="lan-qr-frame">
+                  <canvas id="cloud-url-qr" width="200" height="200" style="border-radius:4px;display:block"></canvas>
+                </div>
+              </div>
+
+            </div><!-- /lan-body -->
+          </div><!-- /lan-card -->
+
+        </div><!-- /hg2 -->
+
+        <script>
+        /* ── Power button logic (wires into existing home-remote-access-toggle) ── */
+        (function(){
+          var powerBtn = document.getElementById('sc-power-btn');
+          var dot      = document.getElementById('sc-status-dot');
+          var txt      = document.getElementById('sc-status-text');
+          var urlStrip = document.getElementById('sc-url-strip');
+          var urlText  = document.getElementById('sc-url-text');
+          var actionRow= document.getElementById('sc-action-row');
+          var qrCanvas = document.getElementById('remote-cloud-url-qr');
+          var leds     = [0,1,2,3,4].map(function(i){ return document.getElementById('sc-led-'+i); });
+          var toggle   = document.getElementById('home-remote-access-toggle');
+
+          function setLedsOn(on) {
+            leds.forEach(function(l){ if(!l) return;
+              if(on){ l.classList.add('sc-led-on'); } else { l.classList.remove('sc-led-on'); }
+            });
+          }
+
+          var offlineDiv = document.getElementById('sc-offline-state');
+          var onlineDiv  = document.getElementById('sc-online-state');
+          var bigBtn     = document.getElementById('sc-power-big');
+
+          function showOffline() {
+            if (offlineDiv) offlineDiv.style.display = 'flex';
+            if (onlineDiv)  onlineDiv.style.display  = 'none';
+            if (urlText) urlText.textContent = '—';
+            if (qrCanvas) { var ctx=qrCanvas.getContext('2d'); if(ctx){ ctx.clearRect(0,0,qrCanvas.width,qrCanvas.height); } }
+          }
+          function showOnline() {
+            if (offlineDiv) offlineDiv.style.display = 'none';
+            if (onlineDiv)  onlineDiv.style.display  = 'flex';
+          }
+
+          var loadingOverlay = document.getElementById('sc-loading-overlay');
+          /* ensure setup CTA never shows in online state */
+          var setupCta = document.getElementById('remote-cloud-setup-cta');
+
+          function setUiState(state) {
+            /* state: 'off' | 'starting' | 'on' */
+            /* always hide setup CTA — app.js controls it in offline state only */
+            if (setupCta && onlineDiv && onlineDiv.contains(setupCta)) setupCta.style.display = 'none';
+
+            if (state === 'off') {
+              showOffline();
+              if (bigBtn) bigBtn.classList.remove('sc-on');
+              setLedsOn(false);
+              return;
+            }
+            showOnline();
+            if (!dot || !txt) return;
+            dot.className = 'sc-status-dot';
+            txt.className = 'sc-status-text';
+            if (urlStrip) urlStrip.className = 'sc-url-strip';
+
+            var copyBtn = document.getElementById('remote-cloud-copy');
+            if (state === 'on') {
+              /* fully online: hide loading overlay */
+              if (loadingOverlay) loadingOverlay.style.display = 'none';
+              if (powerBtn) powerBtn.classList.add('sc-on');
+              dot.classList.add('sc-live'); txt.classList.add('sc-live-text');
+              txt.textContent = 'Online · Public access active';
+              if (urlStrip) urlStrip.classList.add('sc-live');
+              if (actionRow) actionRow.style.display = 'flex';
+              if (copyBtn) copyBtn.style.display = 'flex';
+              setLedsOn(true);
+            } else if (state === 'starting') {
+              /* show loading overlay until fully active */
+              if (loadingOverlay) loadingOverlay.style.display = 'flex';
+              if (powerBtn) powerBtn.classList.remove('sc-on');
+              dot.classList.add('sc-starting'); txt.classList.add('sc-starting-text');
+              txt.textContent = 'Connecting…';
+              if (actionRow) actionRow.style.display = 'none';
+              if (copyBtn) copyBtn.style.display = 'none';
+              setLedsOn(false);
+            }
+          }
+
+          window.scTogglePower = function() {
+            /* ripple on whichever button is visible */
+            if (powerBtn) { powerBtn.classList.add('sc-clicking'); setTimeout(function(){ powerBtn.classList.remove('sc-clicking'); }, 450); }
+            if (bigBtn)   { bigBtn.classList.add('sc-clicking');   setTimeout(function(){ bigBtn.classList.remove('sc-clicking'); }, 450); }
+            /* delegate to existing checkbox toggle */
+            if (toggle) {
+              toggle.checked = !toggle.checked;
+              toggle.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          };
+
+          window.scCopyUrl = function() {
+            var u = urlText ? urlText.textContent : '—';
+            if (!u || u === '—') return;
+            var btn = document.getElementById('remote-cloud-copy');
+            var doFeedback = function(){
+              if(btn){ var old=btn.innerHTML; btn.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#00ffd0" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>'; setTimeout(function(){btn.innerHTML=old;},1500); }
+            };
+            if (navigator.clipboard) { navigator.clipboard.writeText(u).then(doFeedback); }
+            else { doFeedback(); }
+          };
+
+          /* Observe the hidden toggle checkbox to sync UI */
+          if (toggle) {
+            var obs = new MutationObserver(function() {
+              var isChecked = toggle.checked;
+              var pubStatus = document.getElementById('public-status');
+              var statusTxt = pubStatus ? pubStatus.textContent.toLowerCase() : '';
+              if (isChecked && (statusTxt.includes('active') || statusTxt.includes('online'))) {
+                setUiState('on');
+              } else if (isChecked) {
+                setUiState('starting');
+              } else {
+                setUiState('off');
+              }
+            });
+            obs.observe(toggle, { attributes: true });
+            toggle.addEventListener('change', function() {
+              if(toggle.checked) setUiState('starting'); else setUiState('off');
+            });
+          }
+
+          /* Also watch public-status text changes */
+          var pubStatusEl = document.getElementById('public-status');
+          if (pubStatusEl) {
+            var pubObs = new MutationObserver(function() {
+              var s = pubStatusEl.textContent.toLowerCase();
+              if (!toggle || !toggle.checked) return;
+              if (s.includes('active') || s.includes('online')) {
+                setUiState('on');
+                /* sync URL display */
+                var urlInput = document.getElementById('remote-cloud-url-input');
+                if (urlInput && urlInput.value) urlText.textContent = urlInput.value;
+              } else if (s.includes('starting') || s.includes('connecting')) {
+                setUiState('starting');
+              }
+            });
+            pubObs.observe(pubStatusEl, { childList:true, characterData:true, subtree:true });
+          }
+
+          /* Watch URL input for changes */
+          var urlInp = document.getElementById('remote-cloud-url-input');
+          if (urlInp) {
+            var urlObs = new MutationObserver(function(){
+              if(urlInp.value) urlText.textContent = urlInp.value;
+            });
+            urlObs.observe(urlInp, { attributes:true });
+            Object.defineProperty(urlInp, 'value', {
+              get: function(){ return this._val || ''; },
+              set: function(v){ this._val = v; urlText.textContent = v || '—'; }
+            });
+          }
+
+          /* initial state */
+          setUiState('off');
+
+          /* ── Sync LAN URL input → display span ── */
+          var lanInp = document.getElementById('cloud-url-input');
+          var lanDisp = document.getElementById('cloud-url-display');
+          if (lanInp && lanDisp) {
+            var lanObs = new MutationObserver(function(){
+              if(lanInp.value) lanDisp.textContent = lanInp.value;
+            });
+            lanObs.observe(lanInp, { attributes:true });
+            var origLanDesc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');
+            Object.defineProperty(lanInp,'value',{
+              get: function(){ return origLanDesc.get.call(this); },
+              set: function(v){
+                origLanDesc.set.call(this,v);
+                if(lanDisp) lanDisp.textContent = v || '—';
+              }
+            });
+          }
+
+          /* ── copy-cloud-url btn ── */
+          var copyLanBtn = document.getElementById('copy-cloud-url');
+          if(copyLanBtn){
+            copyLanBtn.onclick = function(){
+              var v = lanInp ? lanInp.value : '';
+              if(!v) return;
+              var checkSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#00ffd0" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
+              var doFb = function(){ var old=copyLanBtn.innerHTML; copyLanBtn.innerHTML=checkSvg; setTimeout(function(){copyLanBtn.innerHTML=old;},1500); };
+              if(navigator.clipboard) navigator.clipboard.writeText(v).then(doFb).catch(doFb);
+              else doFb();
+            };
+          }
+
+          /* ── Active Shares Strip ── */
+          var _asiExpanded = false;
+          var _asiDismissed = false;
+
+          function _asiMakeChip(s) {
+            var name = s.name || s.path || 'file';
+            name = name.split('/').pop().split('\\').pop();
+            var dn   = name.length > 22 ? name.slice(0,21) + '…' : name;
+            var scope = (s.scope === 'public') ? 'public' : 'local';
+            var url  = (scope === 'public' ? (s.publicUrl || s.urlPublic || s.url) : (s.urlIp || s.url)) || '';
+            var safeUrl = url.replace(/'/g,"\\'");
+            var safeName = dn.replace(/"/g,'&quot;');
+            return '<div class="asi-chip ' + scope + '">'
+              + '<span class="asi-chip-dot"></span>'
+              + '<span class="asi-chip-name" title="' + safeName + '">' + dn + '</span>'
+              + '<span class="asi-scope-badge ' + scope + '">' + (scope==='public'?'PUB':'LAN') + '</span>'
+              + (url ? '<button class="asi-chip-btn" onclick="asiCopyLink(this,\'' + safeUrl + '\')" title="Copy link">'
+                + '<svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>'
+                + '</button>' : '')
+              + (url ? '<button class="asi-chip-btn" onclick="asiShowQr(this,\'' + safeUrl + '\')" title="Show QR">'
+                + '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="5" y="5" width="3" height="3" fill="currentColor"/><rect x="16" y="5" width="3" height="3" fill="currentColor"/><rect x="5" y="16" width="3" height="3" fill="currentColor"/></svg>'
+                + '</button>' : '')
+              + '</div>';
+          }
+
+          window._updateActiveSharesStrip = function(shares) {
+            var strip   = document.getElementById('active-shares-strip');
+            var colEl   = document.getElementById('asi-chips-collapsed');
+            var expEl   = document.getElementById('asi-chips-expanded');
+            var countEl = document.getElementById('asi-count');
+            var arrow   = document.getElementById('asi-toggle-arrow');
+            var topbarBtn   = document.getElementById('topbar-active-shares');
+            var topbarLabel = document.getElementById('topbar-active-shares-label');
+            if (!strip) return;
+            /* newest first */
+            var active = (shares || [])
+              .filter(function(s){ return s && s.status === 'active'; })
+              .slice().sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); });
+            if (active.length === 0) {
+              strip.style.display = 'none';
+              if (topbarBtn) topbarBtn.style.display = 'none';
+              _asiDismissed = false; /* reset dismiss so next batch shows */
+              return;
+            }
+            if (_asiDismissed) {
+              /* keep topbar indicator visible even when strip is dismissed */
+              if (topbarBtn) { topbarBtn.style.display = 'flex'; }
+              if (topbarLabel) topbarLabel.textContent = active.length + ' active';
+              return;
+            }
+            strip.style.display = 'flex';
+            if (countEl) countEl.textContent = active.length;
+            var chipsHtml = active.map(_asiMakeChip).join('');
+            if (colEl) colEl.innerHTML = chipsHtml;
+            if (expEl) { expEl.innerHTML = chipsHtml; if(_asiExpanded) expEl.classList.add('open'); else expEl.classList.remove('open'); }
+            if (arrow) { arrow.textContent = _asiExpanded ? '▲' : '▼'; arrow.classList.toggle('open', _asiExpanded); }
+            if (topbarBtn) { topbarBtn.style.display = 'flex'; }
+            if (topbarLabel) topbarLabel.textContent = active.length + ' active';
+          };
+
+          window.asiToggle = function() {
+            _asiExpanded = !_asiExpanded;
+            var colEl = document.getElementById('asi-chips-collapsed');
+            var expEl = document.getElementById('asi-chips-expanded');
+            var arrow = document.getElementById('asi-toggle-arrow');
+            if (colEl) colEl.style.display = _asiExpanded ? 'none' : 'flex';
+            if (expEl) expEl.classList.toggle('open', _asiExpanded);
+            if (arrow) { arrow.textContent = _asiExpanded ? '▲' : '▼'; arrow.classList.toggle('open', _asiExpanded); }
+          };
+
+          window.asiDismiss = function() {
+            _asiDismissed = true;
+            var strip = document.getElementById('active-shares-strip');
+            if (strip) strip.style.display = 'none';
+          };
+
+          window.asiCopyLink = function(btn, url) {
+            if (!url) return;
+            var doIt = function() {
+              var old = btn.innerHTML; btn.textContent = '✓';
+              setTimeout(function(){ btn.innerHTML = old; }, 1500);
+            };
+            if (navigator.clipboard) { navigator.clipboard.writeText(url).then(doIt).catch(doIt); }
+            else { doIt(); }
+          };
+
+          window.asiShowQr = function(btn, url) {
+            var popup  = document.getElementById('asi-qr-popup');
+            var canvas = document.getElementById('asi-qr-canvas');
+            var label  = document.getElementById('asi-qr-url');
+            if (!popup || !canvas) return;
+            var rect = btn.getBoundingClientRect();
+            var popW = 210;
+            var left = rect.left - popW/2 + rect.width/2;
+            left = Math.max(8, Math.min(left, window.innerWidth - popW - 8));
+            var top  = rect.bottom + 8;
+            if (top + 260 > window.innerHeight) top = rect.top - 260;
+            popup.style.top  = top  + 'px';
+            popup.style.left = left + 'px';
+            popup.style.display = 'flex';
+            if (label) label.textContent = url;
+            if (window.QRious) {
+              try {
+                canvas.width = 170; canvas.height = 170;
+                new window.QRious({ element:canvas, value:url, size:170, level:'M', background:'white', foreground:'#000' });
+              } catch(_){}
+            }
+          };
+
+          document.addEventListener('click', function(e){
+            var popup = document.getElementById('asi-qr-popup');
+            if (popup && popup.style.display !== 'none' && !popup.contains(e.target) && !e.target.closest('.asi-chip-btn')) {
+              popup.style.display = 'none';
+            }
+          });
+        })();
+        </script>
+        <!-- ── BOTTOM INFO GRID ── -->
+        <div class="home-info-grid">
+
+          <!-- Network + Storage row -->
+          <div class="home-info-tile">
+            <div class="label">NETWORK</div>
+            <div class="value mono" id="network-discovery-hostname" style="font-size:12px;color:#9dd4ee;margin-bottom:2px">--</div>
+            <div class="value value-muted" id="network-discovery-ip" style="font-size:11px;font-family:'Courier New',monospace">--</div>
+            <span class="badge" id="network-discovery-badge" style="margin-top:6px;display:inline-block">--</span>
+          </div>
+
+          <div class="home-info-tile">
+            <div class="label">STORAGE</div>
+            <div class="value" id="storage-label" style="font-size:12px;color:#c8dff0;margin-bottom:2px">Local storage</div>
+            <div class="value value-muted" style="font-size:11px;font-family:'Courier New',monospace" id="owner-mount">--</div>
+            <button class="sc-btn" id="open-storage" style="margin-top:10px;font-size:11px;padding:5px 9px">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+              Open Storage
+            </button>
+          </div>
+
+          <!-- Notifications + Pending row -->
+          <div class="home-info-tile" style="grid-column: span 2;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <div class="label" style="margin-bottom:0">NOTIFICATIONS <span class="badge" id="notifications-unread-badge" style="display:none">0</span></div>
+              <button class="sc-btn" id="notifications-clear-all" style="font-size:10px;padding:3px 8px;flex:none">Clear</button>
+            </div>
+            <div class="notifications-list" id="notifications-list" style="max-height:100px;overflow-y:auto"></div>
+          </div>
+
+          <div class="home-info-tile" style="grid-column: span 2;">
+            <div class="label">PENDING <span class="badge" id="pending-access-count">0</span></div>
+            <div class="pending-list" id="pending-access-list" style="max-height:100px;overflow-y:auto"></div>
+          </div>
+
+          <!-- Share visits (full width) -->
+          <div class="home-info-tile" style="grid-column:1/-1;display:flex;align-items:center;gap:24px">
+            <div class="label" style="margin-bottom:0;white-space:nowrap">SHARE VISITS</div>
+            <div style="display:flex;gap:20px;flex-wrap:wrap">
+              <div>
+                <div style="font-size:10px;color:#334455;margin-bottom:2px">Total</div>
+                <div class="value mono" id="share-visit-total" style="font-size:15px;color:#9dd4ee">0</div>
+              </div>
+              <div>
+                <div style="font-size:10px;color:#334455;margin-bottom:2px">Today</div>
+                <div class="value mono" id="share-visit-today" style="font-size:15px;color:#6b9ab8">0</div>
               </div>
             </div>
-            <div id="remote-cloud-setup-cta" class="remote-access-placeholder" style="display:none;margin-top:10px;">
-              <div class="remote-access-placeholder-title">Set up Remote Access</div>
-              <div class="remote-access-placeholder-sub">Create your personal cloud URL to enable public sharing and access files from anywhere.</div>
-              <button type="button" class="button primary" id="remote-cloud-setup-btn" style="margin-top:10px;">Set Up Remote Access</button>
-            </div>
-            <div class="value value-muted" id="public-status" style="margin-top:8px;">Inactive</div>
           </div>
-          <div class="home-section">
-            <div class="label">Local Cloud URL</div>
-            <input class="input mono" id="cloud-url-input" readonly style="margin-top:8px" />
-            <div class="row" style="margin-top:10px">
-              <button class="button secondary" id="copy-cloud-url"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg></span>Copy</button>
-            </div>
-            <div class="qr-wrap">
-              <canvas id="cloud-url-qr" width="220" height="220"></canvas>
-            </div>
-          </div>
-        </div>
-        <div class="home-section-divider">
-        <div class="label">Network Discovery</div>
-          <div class="value mono" id="network-discovery-hostname" style="font-size:13px">--</div>
-          <div class="value value-muted" id="network-discovery-ip" style="font-size:12px;margin-top:2px">--</div>
-          <span class="badge" id="network-discovery-badge" style="margin-top:6px">--</span>
-        </div>
-        <div class="home-section-divider">
-          <div class="label">Storage</div>
-          <div class="value" id="storage-label">Local storage</div>
-          <div class="value value-muted" style="font-size:12px" id="owner-mount">--</div>
-          <button class="button secondary" id="open-storage" style="margin-top:12px"><span class="btn-icon" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg></span>Open Storage</button>
-        </div>
-        <div class="home-section-divider">
-          <div class="row space-between">
-            <div class="label">Notifications <span class="badge" id="notifications-unread-badge" style="display:none">0</span></div>
-            <button class="button ghost button-compact" id="notifications-clear-all">Clear all</button>
-          </div>
-          <div class="notifications-list" id="notifications-list"></div>
-        </div>
-        <div class="home-section-divider">
-          <div class="label">Pending Access Requests <span class="badge" id="pending-access-count">0</span></div>
-          <div class="pending-list" id="pending-access-list"></div>
-        </div>
-        <div class="home-section-divider">
-          <div class="label">Share Page Visits</div>
-          <div class="value" id="share-visit-total">Total: 0</div>
-          <div class="value value-muted" id="share-visit-today">Today: 0</div>
-        </div>
+
+        </div><!-- /home-info-grid -->
       </section>
 
       <section class="card section" data-section="files">
@@ -1248,9 +2868,12 @@
             <option value="21600000">6 hours</option>
             <option value="86400000" selected>24 hours</option>
             <option value="604800000">7 days</option>
+            <option value="2592000000">30 days</option>
+            <option value="7776000000">90 days</option>
             <option value="custom">Custom (minutes)</option>
           </select>
           <input class="input" id="share-ttl-custom" type="number" min="1" placeholder="Enter minutes" />
+          <div id="share-size-warning" style="display:none;color:#f59e0b;font-size:12px;margin-top:6px;line-height:1.4"></div>
         </div>
         <div class="modal-actions">
           <button class="button secondary" id="cancel-share">Cancel</button>

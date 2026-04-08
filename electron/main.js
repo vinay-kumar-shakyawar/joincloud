@@ -277,6 +277,17 @@ function releaseWakeLock() {
   }
 }
 
+function updateTrayTooltip(count, speedMbps, recipients) {
+  if (!tray || tray.isDestroyed()) return;
+  if (count === 0) {
+    tray.setToolTip("JoinCloud");
+    return;
+  }
+  const r = recipients || count;
+  const speedStr = speedMbps && speedMbps > 0 ? " | \u2191 " + speedMbps.toFixed(1) + " Mbps" : "";
+  tray.setToolTip("JoinCloud \u2014 Sending to " + r + " recipient" + (r !== 1 ? "s" : "") + speedStr);
+}
+
 function startBackend() {
   if (backendProcess) return;
 
@@ -352,6 +363,7 @@ function startBackend() {
   backendProcess.on("message", (msg) => {
     if (!msg || msg.type !== "transfer-count-delta") return;
     _activeTransferCount = Math.max(0, _activeTransferCount + (msg.delta || 0));
+    updateTrayTooltip(_activeTransferCount, msg.speedMbps || 0, msg.recipientCount || _activeTransferCount);
     if (_activeTransferCount > 0) {
       acquireWakeLock();
     } else {
@@ -699,6 +711,7 @@ async function createWindow() {
       }
     });
 
+    Menu.setApplicationMenu(null);
     mainWindow = new BrowserWindow({
       width: 1200,
       height: 800,
