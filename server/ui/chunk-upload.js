@@ -95,6 +95,7 @@
     if (!uploadId) {
       throw new Error("No upload id from server");
     }
+    this.uploadId = uploadId;
 
     var chunkSize = Number(init.chunkSize) || SERVER_CHUNK_SIZE;
     var serverTotalChunks = Number(init.totalChunks) || totalChunks;

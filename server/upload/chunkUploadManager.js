@@ -356,6 +356,25 @@ function registerChunkUploadRoutes(app, config, options = {}) {
     }
     res.json({ transfers });
   });
+
+  app.delete("/api/v1/transfer/:transferId", (req, res) => {
+    const access = getAccess(req);
+    if (!access || access.can_upload === false) {
+      res.status(403).json({ error: "forbidden" });
+      return;
+    }
+    const transferId = req.params.transferId;
+    const session = sessions.get(transferId);
+    if (!session) {
+      res.status(404).json({ error: "not_found" });
+      return;
+    }
+    sessions.delete(transferId);
+    if (session.tempPath) {
+      fs.unlink(session.tempPath).catch(() => {});
+    }
+    res.json({ ok: true });
+  });
 }
 
 module.exports = { registerChunkUploadRoutes };

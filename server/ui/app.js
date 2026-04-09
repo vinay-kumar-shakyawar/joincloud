@@ -659,6 +659,8 @@ function hostTransferSyncIncoming(transfers) {
     return x.status === "complete";
   });
   transfers.forEach(function (t) {
+    // Suppress the "Receiving" card when the host itself is the uploader for this transfer.
+    if (hostTransferController && hostTransferController.uploadId === t.transferId) return;
     var id = "incoming-" + t.transferId;
     var pct = Number(t.percentComplete) || 0;
     var idx = hostTransferItems.findIndex(function (x) {
@@ -671,6 +673,7 @@ function hostTransferSyncIncoming(transfers) {
       percent: Math.min(100, pct),
       status: pct >= 100 ? "complete" : "active",
       metaLine: formatBytesShortHost(t.totalBytes || 0),
+      transferId: t.transferId,
       chunkLabel:
         t.chunksReceived != null && t.totalChunks != null
           ? t.chunksReceived + " / " + t.totalChunks + " chunks"
@@ -710,7 +713,7 @@ function hostTransferRender() {
     var pct = Math.min(100, Math.max(0, item.percent || 0));
     var offset = c - (pct / 100) * c;
     var dirLabel =
-      item.direction === "uploading" ? "Uploading" : item.direction === "receiving" ? "Receiving" : "Sending";
+      item.direction === "uploading" ? "Adding file" : item.direction === "receiving" ? "Receiving" : "Sending";
     var stats = (item.speedLabel || "") + (item.etaLabel ? " · ETA " + item.etaLabel : "");
     if (item.chunkLabel) {
       stats = stats ? stats + " · " + item.chunkLabel : item.chunkLabel;
@@ -744,38 +747,54 @@ function hostTransferRender() {
       card.querySelector(".host-transfer-meta").textContent = item.error;
     }
     var actions = card.querySelector(".host-transfer-actions");
-    if (
-      item.direction === "uploading" &&
-      item.id === hostTransferCurrentUploadId &&
-      hostTransferController &&
-      (item.status === "active" || item.status === "paused")
-    ) {
-      var itemId = item.id;
-      var pauseBtn = document.createElement("button");
-      pauseBtn.type = "button";
-      pauseBtn.className = "button secondary button-compact";
-      pauseBtn.textContent = item.status === "paused" ? "Resume" : "Pause";
-      pauseBtn.onclick = function () {
-        var cur = hostTransferItems.find(function (x) {
-          return x.id === itemId;
-        });
-        if (!hostTransferController || !cur) return;
-        if (cur.status === "paused") {
-          hostTransferController.resume();
-          hostTransferUpdate(itemId, { status: "active" });
-        } else {
-          hostTransferController.pause();
-          hostTransferUpdate(itemId, { status: "paused" });
-        }
-      };
+    var isActive = item.status === "active" || item.status === "paused";
+    if (isActive) {
+      // Pause/Resume — only for host's own outbound upload
+      if (
+        item.direction === "uploading" &&
+        item.id === hostTransferCurrentUploadId &&
+        hostTransferController
+      ) {
+        var itemId = item.id;
+        var pauseBtn = document.createElement("button");
+        pauseBtn.type = "button";
+        pauseBtn.className = "button secondary button-compact";
+        pauseBtn.textContent = item.status === "paused" ? "Resume" : "Pause";
+        pauseBtn.onclick = function () {
+          var cur = hostTransferItems.find(function (x) { return x.id === itemId; });
+          if (!hostTransferController || !cur) return;
+          if (cur.status === "paused") {
+            hostTransferController.resume();
+            hostTransferUpdate(itemId, { status: "active" });
+          } else {
+            hostTransferController.pause();
+            hostTransferUpdate(itemId, { status: "paused" });
+          }
+        };
+        actions.appendChild(pauseBtn);
+      }
+
+      // Cancel — all active cards
       var cancelBtn = document.createElement("button");
       cancelBtn.type = "button";
       cancelBtn.className = "button ghost button-compact";
       cancelBtn.textContent = "Cancel";
+      var cancelItem = item;
       cancelBtn.onclick = function () {
-        if (hostTransferController) hostTransferController.cancel();
+        if (cancelItem.direction === "uploading" && hostTransferController) {
+          // Cancel host's outbound upload (stops sending chunks)
+          hostTransferController.cancel();
+        } else if (cancelItem.direction === "receiving" && cancelItem.transferId) {
+          // Cancel an incoming upload from a remote client
+          var tid = cancelItem.transferId;
+          hostTransferRemove("incoming-" + tid);
+          apiFetch("/api/v1/transfer/" + encodeURIComponent(tid), { method: "DELETE", credentials: "include" }).catch(function () {});
+        }
+        // "sending" (share downloads) — no server-side abort yet; just remove the card
+        if (cancelItem.direction === "sending") {
+          hostTransferRemove(cancelItem.id);
+        }
       };
-      actions.appendChild(pauseBtn);
       actions.appendChild(cancelBtn);
     }
     root.appendChild(card);
