@@ -26,6 +26,7 @@ extraResources:
       - "**/*"
 
 mac:
+  icon: build/icon.icns
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlementsInherit: build/entitlements.mac.plist
