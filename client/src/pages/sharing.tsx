@@ -228,7 +228,7 @@ export default function Sharing() {
                         <div className="flex items-center gap-2 p-2 rounded bg-muted text-sm text-muted-foreground">
                           <Loader2 className="h-4 w-4 animate-spin" />
                           <KitBadge variant="warning">Link pending</KitBadge>
-                          <span>Public link will appear when ready</span>
+                          <span>Remote link will appear when ready</span>
                         </div>
                       )}
 

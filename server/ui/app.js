@@ -1307,7 +1307,7 @@ function renderFiles() {
       const makeShareBadge = (kind, share) => {
         const wrap = document.createElement("span");
         wrap.className = "badge badge-pill " + (kind === "local" ? "badge-shared-local" : "badge-shared-public");
-        wrap.title = kind === "local" ? "View local share link" : "View public share link";
+        wrap.title = kind === "local" ? "View local share link" : "View remote link";
         wrap.style.cursor = "pointer";
         const label = document.createElement("span");
         label.className = "badge-label";
@@ -1818,7 +1818,7 @@ async function submitGroupShareModal() {
   if (!res.ok) {
     if (els.groupShareResult) {
       if (data && data.error === "public_access_inactive") {
-        els.groupShareResult.textContent = data.message || "Enable Remote Access to create public group shares.";
+        els.groupShareResult.textContent = data.message || "Enable Remote Access to create remote group links.";
         setGroupPublicEnableUi({ visible: true, loading: false, message: "" });
       } else {
         els.groupShareResult.textContent = data.error || "Share group failed";
@@ -1839,7 +1839,7 @@ async function submitGroupShareModal() {
         <button type="button" class="button secondary" id="group-share-open-btn" style="margin-top:6px;margin-left:6px;">Open</button>
       </div>
       ${showPublic ? `<div>
-        <div class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Public:</div>
+        <div class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Remote Link:</div>
         <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(publicUrl)}</span>
         <button type="button" class="button secondary" id="group-share-copy-public-btn" style="margin-top:6px;">Copy</button>
         <button type="button" class="button secondary" id="group-share-open-public-btn" style="margin-top:6px;margin-left:6px;">Open</button>
@@ -4259,7 +4259,7 @@ async function openShareModal(pathValue, fileSizeBytes) {
     <button type="button" class="button secondary" id="share-open-existing-local-btn" style="margin-top:4px;margin-left:6px;">Open</button>
   </div>` : ""}
   ${existingPublic ? `<div>
-    <span class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Public:</span>
+    <span class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Remote Link:</span>
     <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(publicLabel)}</span>
     ${publicUrl ? `<button type="button" class="button secondary" id="share-copy-existing-public-btn" style="margin-top:4px;">Copy</button>
     <button type="button" class="button secondary" id="share-open-existing-public-btn" style="margin-top:4px;margin-left:6px;">Open</button>` : `<div class="value value-muted" style="font-size:11px; margin-top:6px;">Public URL will appear once provisioning completes.</div>`}
@@ -4567,14 +4567,14 @@ async function createShare() {
   const isProvisioningPublic = scope === "public" && !publicUrl && data.publicStatus === "provisioning";
   if (isProvisioningPublic) {
     resultHtml += `<div style="margin-top:10px;">
-  <span class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Public:</span>
+  <span class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Remote Link:</span>
   <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">Provisioning…</span>
-  <div class="value value-muted" style="font-size:11px; margin-top:6px;">Public link is provisioning…</div>
-  <div class="value value-muted" id="public-provisioning-status" style="font-size:11px; margin-top:4px;">Waiting for public URL…</div>
+  <div class="value value-muted" style="font-size:11px; margin-top:6px;">Remote link is provisioning…</div>
+  <div class="value value-muted" id="public-provisioning-status" style="font-size:11px; margin-top:4px;">Waiting for remote link…</div>
 </div>`;
   } else if (scope === "public" && publicUrl) {
     resultHtml += `<div style="margin-top:10px;">
-  <span class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Public:</span>
+  <span class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Remote Link:</span>
   <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(publicUrl)}</span>
   <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
     <button type="button" class="button secondary" id="share-copy-public-btn">Copy</button>
@@ -4615,9 +4615,9 @@ async function createShare() {
               const publicUrlNow = s.publicUrl;
               stateShare.lastShareUrl = publicUrlNow;
 
-              els.shareResult.innerHTML = `<div>Public link is ready.</div>
+              els.shareResult.innerHTML = `<div>Remote link is ready.</div>
 <div style="margin-top:10px;">
-  <span class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Public:</span>
+  <span class="value" style="font-size:12px; font-weight:600; color:var(--accent, #2FB7FF);">Remote Link:</span>
   <span class="share-link-box share-url-secondary" style="margin-top:4px;display:block;">${escapeHtml(publicUrlNow)}</span>
   <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
     <button type="button" class="button secondary" id="share-copy-public-btn">Copy</button>

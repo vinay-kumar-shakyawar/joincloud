@@ -1,212 +1,169 @@
-# Privacy Policy
+# JoinCloud Privacy Policy
 
-**Effective Date:** 17 February 2026
+Effective Date: April 8, 2026
+
+Application Version: v0.3.6 (Beta)
+
+Website: https://www.joincloud.cloud
+
+Shakyawar Mediatech LLP ("we", "our", or "us") operates the JoinCloud platform at https://www.joincloud.cloud. This Privacy Policy explains how we collect, use, and protect information when you use our service. By using JoinCloud, you agree to this policy.
 
 ## 1. Who We Are
 
-JoinCloud is a LAN-first file sharing and file management application for macOS and Windows.
+JoinCloud is a file sharing platform operated by Shakyawar Mediatech LLP. Marketing activities are supported by our partner Arevei.com. JoinCloud enables users to share files directly from their own Host Device across three modes: File Sharing via LAN, File Sharing via Remote Link, and Full Cloud Access via Cloud Link.
 
-The app is developed and operated by:
+## 2. Platform Modes and Data Context
 
-Shakyawar Mediatech LLP  
-Under the jurisdiction of Uttar Pradesh, India  
-Email: support@joincloud.in
+Understanding how we handle data requires understanding how each feature works:
 
-This Privacy Policy explains how JoinCloud handles information when you use the application and related website.
+File Sharing via LAN
 
-JoinCloud is designed to run locally on your device. We do not operate a public cloud storage service.
+File Sharing via LAN operates entirely on the local network without any internet connection, third-party infrastructure, or JoinCloud servers. Files transfer directly between the Host and Recipient devices. Transfer speed and reliability depend on: connection type (Mobile Hotspot; Wi-Fi 2.4 GHz; Wi-Fi 5 GHz; Wi-Fi 6 at 6 GHz; Wi-Fi 6E; Ethernet 100 Mbps; Gigabit Ethernet 1 Gbps; 2.5 Gbps Ethernet); storage type on both devices (HDD, SSD/SATA, NVMe/PCIe); disk read speed on the Host and write speed on the Recipient; available RAM and free storage space; and firewall configuration on both devices. JoinCloud storage is mounted via a storage mount server, which isolates the JoinCloud storage layer from the rest of the Host file system. Only the designated JoinCloud storage area is accessible, not the full system. Files reside on the Host device at all times and are never transferred to JoinCloud or any third-party server.
 
-## 2. Scope of This Policy
+File Sharing via Remote Link
 
-This Privacy Policy applies to:
+Remote Link file sharing routes transfers through secure third-party tunnel infrastructure, one of the most widely trusted internet infrastructure services globally. All data in transit is encrypted. File content is never stored by JoinCloud and cannot be accessed during transit. Transfer speed and availability depend on: third-party tunnel infrastructure availability; Host and Recipient connection type (Mobile Hotspot; Wi-Fi 2.4 GHz; Wi-Fi 5 GHz; Wi-Fi 6 at 6 GHz; Wi-Fi 6E); storage type on both devices (HDD, SSD/SATA, NVMe/PCIe); disk read speed on Host and write speed on Recipient; available RAM and free storage space; and firewall configuration. When a Remote Link is accessed by more than one user simultaneously, the concurrency layer activates automatically. This routes requests through JoinCloud tech infrastructure file caching via a third-party server to distribute load away from the Host device and ensure reliable availability to multiple recipients at the same time. The third-party caching server is used solely for this reliability purpose and is not used to store, analyse, or retain user data in any other way. Cached files are deleted from the third-party server at session end or when the link expires. The Remote Link and any associated concurrency are active only while the Host device is online and the JoinCloud application is running.
 
-• The JoinCloud desktop application (macOS and Windows)  
-• The local web interface ("Cloud URL") accessible on your local network  
-• The official JoinCloud website (if applicable)
+Full Cloud Access via Cloud Link
 
-It does not apply to third-party software, operating systems, or networks that you use alongside JoinCloud.
+Full Cloud Access via Cloud Links provides the combined capability of LAN and Remote Link file sharing, enabling both local and internet-based access to files the Host has explicitly uploaded to JoinCloud cloud storage. Cloud Links enforce strict access controls: folder browsing is not permitted and only files explicitly uploaded by the Host are accessible. Cloud Links cannot be accessed by JoinCloud, third parties, or any other user until explicitly shared by the Host. The JoinCloud storage area is mounted via a storage mount server, separating it from the rest of the Host file system. Files live on the Host device and can be accessed from the Home section of the application. Files can only be deleted by the Host with explicit consent within the JoinCloud application. JoinCloud does not control the Host device and has no ability to delete, modify, or access files outside of actions explicitly initiated by the user. File loss attributable to JoinCloud is not possible under normal operation. Cloud Link availability depends on Host device availability. The same transfer performance factors apply as for LAN (local access) and Remote Links (internet access).
 
-## 3. What Data We Collect
+Devices
 
-JoinCloud is designed with privacy as a core principle.
+Lists devices available on the same local network only. No internet connection is required and no device data is transmitted to JoinCloud servers.
 
-### We Do Not:
+Activity
 
-• Collect your personal files  
-• Upload your files to our servers  
-• Access your files remotely  
-• Sell user data  
-• Provide advertising  
-• Collect payment information
+Tracks in-app usage events to give the user a history of their sharing activity. Requires internet connectivity to sync data to the Platform.
 
-### We May Store Locally on Your Device:
+Performance
 
-• App configuration settings  
-• Device pairing approvals (approved devices on your LAN)  
-• Share link metadata (such as creation time or expiration)  
-• Local telemetry counters (see Section 5)  
-• Local log files (see Section 6)
+Provides a real-time performance score based on Host Device hardware (storage type, disk read/write speed, available memory, storage space) and network connectivity. Requires internet connectivity to report scores to the Platform.
 
-All of the above data remains on your device.
+Support and Settings
 
-We do not have access to your files or your local data.
+Support provides real-time in-app access to our support team. Settings contain important device and configuration details for managing the JoinCloud installation.
 
-## 4. Local Network Access and Admin Approvals
+## 3. Storage Architecture
 
-JoinCloud works within your local area network (LAN).
+JoinCloud storage is mounted using a storage mount server. This architecture separates the JoinCloud storage cloud server from the rest of the Host file system, ensuring that only the designated JoinCloud storage area is accessible through the application. The full system file system is not exposed.
 
-When you launch the app:
+## 4. File Safety
 
-• It generates a local Cloud URL  
-• Devices connected to the same network can request access  
-• Access requires explicit admin approval (pairing)
+Files shared or stored via JoinCloud reside solely on the Host device. JoinCloud does not control any Host device and provides only real-time application uptime, not device control. File deletion within JoinCloud requires explicit user consent and action within the application. File loss attributable to JoinCloud is not possible under normal operation. Storage can always be accessed from the Home section of the JoinCloud application.
 
-This means:
+## 5. Security
 
-• No device can access your files without your approval  
-• You can revoke device access at any time  
-• JoinCloud does not automatically expose your files to the internet
+JoinCloud currently operates at version v0.3.6 (Beta). In this version, all file transfers are secured through secure third-party tunnel infrastructure encryption during transit. for a future release to provide full end-to-end shielding. Even in the current version, file content cannot be accessed by any party other than the Host and the users the Host has shared the link with. Full authentication, password protection, and related access controls are planned for implementation following product-market fit.
 
-You are responsible for securing your local network.
+## 6. Information We Collect
 
-## 5. Telemetry (Local Only Usage Counters)
+### 6.1 Information you provide directly
 
-JoinCloud may record lightweight usage counters locally on your device, such as:
+Account registration details (name, email address)
 
-• Number of uploads  
-• Number of downloads  
-• Number of shares created  
-• Basic feature usage counts
+Support queries submitted via in-app support, email, or the website contact form
 
-These counters:
+### 6.2 Information collected automatically
 
-• Do not contain personal data  
-• Do not contain file names or file content  
-• Are stored locally  
-• Are not transmitted to us
+Device information: operating system, app version, storage type (HDD, SSD, NVMe), device type, screen resolution
 
-A telemetry disable option is available in Settings. You can turn it off at any time.
+Usage data: features used, transfer modes initiated, session duration, Activity log events, in-app navigation
 
-## 6. Log Files
+Performance data: network connection type, speed estimates, device performance score
 
-JoinCloud may create local log files to help diagnose issues and maintain performance.
+Error logs and crash diagnostics
 
-Logs may include:
+### 6.3 Information we do NOT collect
 
-• Device connection events  
-• Pairing approvals or rejections  
-• Errors and crash details  
-• File transfer status (not file content)
+IP addresses or geographic location
 
-Log files:
+Contents of any files shared via LAN, Remote Link, or Cloud Link
 
-• Are stored locally on your device  
-• Are not automatically sent to us  
-• May contain technical information such as IP addresses within your local network
+Folder structures or filenames of files not explicitly uploaded to Cloud Links
 
-You may delete log files at any time by removing the app data from your device.
+Sensitive personal data (financial, health, government ID)
 
-## 7. Sharing Links
+## 7. Concurrency and JoinCloud tech infrastructure third-party caching server
 
-JoinCloud allows you to create share links within your local network.
+When a Remote Link is accessed by more than one user at the same time, the concurrency layer activates automatically. Files are temporarily cached on a third-party server by JoinCloud tech infrastructure solely to ensure reliable availability to multiple recipients and to reduce load on the Host device. The third-party server is not used for data storage, analysis, or any other purpose. Cached files are deleted at session end or link expiry. JoinCloud does not access or read any cached file contents.
 
-Sharing links:
+## 8. How We Use Your Information
 
-• Work only within your LAN environment  
-• Can be revoked at any time  
-• May support expiration (if enabled)  
-• Require admin control and visibility
+Provide, operate, and improve the JoinCloud platform and its features
 
-You remain fully in control of all shared content. JoinCloud does not store or manage these links outside your device.
+Power the Activity, Performance, and Support features within the application
 
-## 8. Data Storage Location
+Respond to support requests
 
-All JoinCloud data is stored locally on your device.
+Monitor for abuse, fraud, or Terms of Service violations
 
-This includes:
+Generate anonymised, aggregated analytics to understand usage trends
 
-• Files you manage  
-• Configuration settings  
-• Pairing records  
-• Telemetry counters  
-• Log files
+Send service-related notices (security alerts, policy updates, app updates)
 
-We do not operate remote storage servers for user files.
+Comply with applicable legal obligations
 
-## 9. Data Retention
+## 9. Cookies
 
-Because all data is stored locally:
+We use cookies on our website and application. Full details are in our Cookie Policy at https://www.joincloud.cloud/cookies. In summary: strictly necessary cookies (sessions), functional cookies (preferences), and analytics cookies (anonymised usage). You can manage preferences via browser settings or the in-app Cookie Preferences panel.
 
-• Data remains on your device until you delete it  
-• Uninstalling JoinCloud may remove associated local app data depending on your operating system  
-• You can manually delete app data, logs, and shared files at any time
+## 10. Data Sharing and Disclosure
 
-We do not retain copies of your data.
+We do not sell, rent, or trade personal data. We may share data with:
 
-## 10. Security
+our third-party infrastructure and tunnel service provider: for Tunnel routing (Remote Links) and temporary concurrency staging (Cloud Links and Remote Links with concurrent access), subject to the service provider data processing agreement and privacy policy
 
-JoinCloud is designed with the following principles:
+Arevei.com (marketing partner): only aggregated, non-personally identifiable data unless separately consented
 
-• LAN-only architecture with no public cloud dependency  
-• Admin approval required for device pairing  
-• Manual share revocation  
-• User-controlled start and stop sharing
+Service providers under strict confidentiality obligations
 
-However:
+Law enforcement when required by applicable law
 
-• Security also depends on your local network configuration  
-• If your LAN is exposed to the internet, your access controls may be affected  
-• You are responsible for maintaining network security
+Successors in a merger or acquisition (you will be notified)
 
-We implement reasonable technical safeguards consistent with applicable laws.
+## 11. Data Retention
 
-## 11. Children's Privacy
+Account data is retained for the duration of your account. Files cached on third-party infrastructure are deleted at session end. Usage and performance data is retained in anonymised form. You may request deletion at any time by contacting info@joincloud.in.
 
-JoinCloud is not directed toward children.
+## 12. Your Rights
 
-We do not knowingly collect personal information from children. Since we do not collect personal data, there is no intentional collection of children's information.
+You may have the right to access, correct, delete, or port your data, and to withdraw consent. Contact info@joincloud.in to exercise your rights. EU and UK users: see our GDPR and Data Processing Addendum at https://www.joincloud.cloud/gdpr.
 
-## 12. International Users
+## 13. Children's Privacy
 
-JoinCloud is operated by Shakyawar Mediatech LLP under the jurisdiction of Uttar Pradesh, India.
+JoinCloud is not directed at children under 13. We do not knowingly collect data from children. Contact us immediately if you believe a child's data has been submitted.
 
-By using the application, you understand that the software operates locally on your device and does not transfer personal data to our servers.
+## 14. Unauthorized Data Transfers and Third-Party Misuse
 
-We comply with applicable data protection laws relevant to our operations.
+JoinCloud is a file sharing infrastructure platform. We are fully committed to user privacy and data safety. JoinCloud does not store, access, or control any files on the Host device and has no ability to monitor the content of files transferred through the Platform.
 
-## 13. Your Choices and Controls
+JoinCloud is not responsible for unauthorized, illegal, or improper data transfers carried out by any user, organization, or third party using the application. The Host is solely responsible for the content they choose to share and the parties they choose to share it with.
 
-You are always in control of your data.
+If any concern, flag, complaint, or legal notice is raised by any user, organization, government authority, regulatory body, or legal authority regarding content shared through the Platform, JoinCloud will act as a mediator between the concerned party and the relevant user. Our role in any such matter is limited to:
 
-You can:
+Providing whatever information we are able to access within our own system infrastructure
 
-• Stop file sharing at any time  
-• Revoke device access  
-• Revoke individual share links  
-• Revoke all share links  
-• Disable telemetry in Settings  
-• Delete local logs  
-• Uninstall the app and remove all local data
+Facilitating communication between the concerned authority and the user
 
-Because we do not have access to your files or data, we cannot access, modify, or delete your content.
+Cooperating with lawful requests from legal or government authorities to the extent required by applicable law
 
-## 14. Changes to This Policy
+Any information held by our third-party infrastructure providers is subject to their own data governance policies and legal obligations. JoinCloud cannot compel or guarantee disclosure of data held solely by third-party infrastructure providers.
 
-We may update this Privacy Policy from time to time.
+JoinCloud will provide full support from our end in any such matter. However, as files reside solely on the Host device and are not stored on JoinCloud servers, our ability to produce file content or transfer records is inherently limited by this architecture.
 
-If we make changes:
+## 15. Changes to This Policy
 
-• We will update the Effective Date  
-• Updated versions may be posted on our website and or inside the app
+We will notify you of material changes via in-app notification or email. Continued use after changes constitutes acceptance.
 
-Continued use of JoinCloud after updates means you accept the revised policy.
+## 16. Contact Us
 
-## 15. Contact Us
+Company: Shakyawar Mediatech LLP
 
-If you have questions about this Privacy Policy or JoinCloud:
+Email: info@joincloud.in
 
-Shakyawar Mediatech LLP  
-Email: support@joincloud.in
+Phone: +91 9625440855
 
-Summary:  
-JoinCloud is built to run locally. We do not collect your files. We do not sell your data. We do not have access to your content. You remain in full control of your data at all times.
+Address: Arevei, S.No 2, 72A, New Patel Nagar, Near Sai Palace, Orai, 285001, Uttar Pradesh, India
+
+Website: https://www.joincloud.cloud

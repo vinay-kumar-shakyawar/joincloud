@@ -108,7 +108,7 @@
     <div class="jcbl-arc jcbl-arc-1"></div>
     <div class="jcbl-arc jcbl-arc-2"></div>
     <div class="jcbl-arc jcbl-arc-3"></div>
-    <img src="/favicon.png" class="jcbl-logo" alt="" />
+    <img src="/onboarding-logo.png" class="jcbl-logo" alt="" />
   </div>
   <img src="/logo.png" class="jcbl-wordmark" alt="JoinCloud" onerror="this.style.display='none'" />
   <div class="jcbl-dots">
@@ -206,7 +206,8 @@ setTimeout(function(){
 @keyframes ob-spin { to { transform: rotate(360deg); } }
 
 .ob-logo-img {
-  width: 60px; height: 60px; z-index: 2;
+  width: 76px; height: 76px; z-index: 2;
+  object-fit: contain;
   animation: ob-breathe 3s ease-in-out infinite;
   filter: drop-shadow(0 0 14px #2FB7FF88);
 }
@@ -471,7 +472,7 @@ setTimeout(function(){
     <div class="ob-ring ob-ring-1"></div>
     <div class="ob-ring ob-ring-2"></div>
     <div class="ob-ring ob-ring-3"></div>
-    <img class="ob-logo-img" src="/favicon.png" alt="JoinCloud" />
+    <img class="ob-logo-img" src="/onboarding-logo.png" alt="JoinCloud" />
   </div>
   <img class="ob-wordmark" src="/logo.png" alt="JOINCLOUD" />
   <div class="ob-tagline">Your device. Your cloud. Share anything, anywhere.</div>
@@ -1901,7 +1902,7 @@ setTimeout(function(){
         <div class="row" style="margin-top:8px;gap:6px;">
           <div class="view-toggle" role="tablist" aria-label="Share URL scope">
             <button class="button secondary button-compact share-tab active" data-share-tab="local" type="button">Local</button>
-            <button class="button secondary button-compact share-tab" data-share-tab="public" type="button">Public</button>
+            <button class="button secondary button-compact share-tab" data-share-tab="public" type="button">Remote Link</button>
           </div>
         </div>
         <div class="share-list" id="share-list"></div>
@@ -2381,7 +2382,7 @@ setTimeout(function(){
                 <canvas id="remote-access-qr" width="180" height="180"></canvas>
               </div>
             </div>
-            <div class="row" style="margin-top:16px;">
+            <div class="row" style="margin-top:16px; display:none;">
               <div style="flex:1">
                 <div class="label">Set PIN for remote access</div>
                 <input class="input" id="remote-access-pin" type="password" placeholder="Optional PIN" maxlength="32" autocomplete="off" style="max-width:200px;margin-top:4px;" />
@@ -2507,7 +2508,7 @@ setTimeout(function(){
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
               Privacy Policy
             </button>
-            <a class="button secondary" href="https://joincloud.in/terms" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
+            <a class="button secondary" href="https://www.joincloud.cloud/terms?utm_source=application&utm_medium=TOS&utm_campaign=user" target="_blank" rel="noopener noreferrer" style="text-decoration:none;">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
               Terms of Service
             </a>
@@ -2848,9 +2849,9 @@ setTimeout(function(){
           <label class="label">Share Scope</label>
           <div class="radio-group">
             <label><input type="radio" name="share-scope" value="local" checked /> Local</label>
-            <label><input type="radio" name="share-scope" value="public" id="share-scope-public" /> Public</label>
+            <label><input type="radio" name="share-scope" value="public" id="share-scope-public" /> Remote Link</label>
           </div>
-          <div id="share-scope-public-hint" class="value value-muted" style="display:none; margin-top:6px; font-size:12px;">Enable Remote Access in Settings to create public shares.</div>
+          <div id="share-scope-public-hint" class="value value-muted" style="display:none; margin-top:6px; font-size:12px;">Enable Remote Access in Settings to create remote links.</div>
           <div id="share-public-enable-row" style="display:none; margin-top:8px; align-items:center; gap:10px; flex-wrap:wrap;">
             <button type="button" class="button secondary button-compact" id="share-enable-remote-access">Enable Remote Access</button>
             <div class="value value-muted" id="share-public-enable-status" style="font-size:12px"></div>
@@ -3029,9 +3030,9 @@ setTimeout(function(){
           <label style="margin-top:10px;display:block;">Scope</label>
           <div class="radio-group">
             <label><input type="radio" name="group-share-scope" value="local" checked /> Local</label>
-            <label><input type="radio" name="group-share-scope" value="public" id="group-share-scope-public" /> Public</label>
+            <label><input type="radio" name="group-share-scope" value="public" id="group-share-scope-public" /> Remote Link</label>
           </div>
-          <div id="group-share-scope-public-hint" class="value value-muted" style="display:none; margin-top:6px; font-size:12px;">Enable Remote Access to create public group shares.</div>
+          <div id="group-share-scope-public-hint" class="value value-muted" style="display:none; margin-top:6px; font-size:12px;">Enable Remote Access to create remote group links.</div>
           <div id="group-share-public-enable-row" style="display:none; margin-top:8px; align-items:center; gap:10px; flex-wrap:wrap;">
             <button type="button" class="button secondary button-compact" id="group-share-enable-remote-access">Enable Remote Access</button>
             <div class="value value-muted" id="group-share-public-enable-status" style="font-size:12px"></div>

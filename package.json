@@ -1,6 +1,6 @@
 {
   "name": "joincloud",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "private": true,
   "main": "electron/main.js",
   "scripts": {
