@@ -1295,7 +1295,8 @@ async function bootstrap() {
         req.path.startsWith("/share/") ||
         req.path.startsWith("/share-group/") ||
         (req.method === "GET" && req.path.startsWith("/api/v1/share-groups/")) ||
-        req.path === "/api/public-access/status"
+        req.path === "/api/public-access/status" ||
+        req.path === "/remote-login"
       ) {
         return next();
       }
@@ -4016,6 +4017,11 @@ async function bootstrap() {
     res.json(status);
   });
 
+  app.get("/api/user/remote-pin", ensureAdmin, (req, res) => {
+    const pin = userConfig?.remoteAccessPin || null;
+    res.json({ pin_set: !!pin, pin: pin || null });
+  });
+
   app.post("/api/user/remote-pin", ensureAdmin, async (req, res) => {
     try {
       const pin = req.body?.pin != null ? String(req.body.pin).trim() : null;
@@ -5191,6 +5197,8 @@ async function bootstrap() {
   });
 
   const shutdown = async () => {
+    // Revoke all active file sharing links so they're dead after the app closes
+    try { await shareService.revokeAll(); } catch (_) {}
     expiryManager.stop();
     tunnelManager.stop();
     networkManager?.stop?.();

@@ -330,6 +330,8 @@ const els = {
   remoteAccessQr: document.getElementById("remote-access-qr"),
   remoteAccessPin: document.getElementById("remote-access-pin"),
   remoteAccessPinSave: document.getElementById("remote-access-pin-save"),
+  scHomePinInput: document.getElementById("sc-home-pin-input"),
+  scHomePinSave: document.getElementById("sc-home-pin-save"),
 };
 
 const stateMeta = {
@@ -1307,18 +1309,18 @@ function renderFiles() {
       const makeShareBadge = (kind, share) => {
         const wrap = document.createElement("span");
         wrap.className = "badge badge-pill " + (kind === "local" ? "badge-shared-local" : "badge-shared-public");
-        wrap.title = kind === "local" ? "View local share link" : "View public share link";
+        wrap.title = kind === "local" ? "View local share link" : "View remote share link";
         wrap.style.cursor = "pointer";
         const label = document.createElement("span");
         label.className = "badge-label";
-        label.textContent = kind === "local" ? "Local" : "Public";
+        label.textContent = kind === "local" ? "Local" : "Remote";
         wrap.appendChild(label);
 
         const stop = document.createElement("button");
         stop.type = "button";
         stop.className = "badge-stop";
         stop.textContent = "×";
-        stop.title = kind === "local" ? "Stop local share" : "Stop public share";
+        stop.title = kind === "local" ? "Stop local share" : "Stop remote share";
         stop.setAttribute("aria-label", stop.title);
         stop.onclick = async (e) => {
           e.preventDefault();
@@ -3471,6 +3473,8 @@ async function loadTechnicalConfig() {
 }
 
 async function loadPublicAccessStatus() {
+  // Remote users must never see or control the Remote Access settings section
+  if (isRemoteRole()) return;
   if (!els.remoteAccessNotConfigured || !els.remoteAccessConfiguredWrap) return;
   try {
     const res = await apiFetch("/api/public-access/status");
@@ -3538,6 +3542,10 @@ async function loadPublicAccessStatus() {
     }
     if (els.remoteCloudUrlInput) {
       els.remoteCloudUrlInput.value = isActive ? data.publicUrl : "";
+    }
+    // Directly drive the home card state (MutationObserver won't fire on JS property changes)
+    if (typeof window.setScUiState === "function") {
+      window.setScUiState(isActive ? "on" : isEnabled ? "starting" : "off");
     }
     if (els.remoteCloudCopy) {
       els.remoteCloudCopy.disabled = !isActive;
@@ -5722,6 +5730,15 @@ function updateAdminUi() {
   if (els.homeStorageSection) {
     els.homeStorageSection.style.display = hideForRemote ? "none" : "";
   }
+  // Remote users cannot stop remote sharing — host only
+  const scPowerBtn = document.getElementById("sc-power-btn");
+  if (scPowerBtn) scPowerBtn.style.display = hostRole ? "" : "none";
+  // Hide entire Settings > Remote Access section from remote users
+  const remoteAccessSection = document.getElementById("remote-access-section");
+  if (remoteAccessSection) remoteAccessSection.style.display = hideForRemote ? "none" : "";
+  // Hide home card PIN row from remote users
+  const scHomePinRow = document.getElementById("sc-home-pin-row");
+  if (scHomePinRow) scHomePinRow.style.display = hideForRemote ? "none" : "";
 }
 
 function showUploadBanner(text, type = "loading") {
@@ -6778,6 +6795,41 @@ if (els.remoteAccessPinSave) {
     } catch (_) {}
   });
 }
+
+// Home card PIN — load current value and wire save
+(async function initHomePinCard() {
+  if (!els.scHomePinInput || !els.scHomePinSave) return;
+  try {
+    const res = await apiFetch("/api/user/remote-pin");
+    if (res.ok) {
+      const data = await res.json();
+      if (data.pin) els.scHomePinInput.value = data.pin;
+      // keep both settings and home card in sync
+      if (data.pin && els.remoteAccessPin) els.remoteAccessPin.value = data.pin;
+    }
+  } catch (_) {}
+
+  async function saveHomePin() {
+    const pin = els.scHomePinInput.value.trim();
+    try {
+      const res = await apiFetch("/api/user/remote-pin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: pin || null }),
+      });
+      if (res.ok) {
+        const origInner = els.scHomePinSave.innerHTML;
+        els.scHomePinSave.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#00ffd0" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>';
+        setTimeout(() => { els.scHomePinSave.innerHTML = origInner; }, 1800);
+        // sync settings input
+        if (els.remoteAccessPin) els.remoteAccessPin.value = pin;
+      }
+    } catch (_) {}
+  }
+
+  els.scHomePinSave.addEventListener("click", saveHomePin);
+  els.scHomePinInput.addEventListener("keydown", (e) => { if (e.key === "Enter") saveHomePin(); });
+})();
 
 async function doRemoteAccessProvision() {
   if (!els.remoteAccessSetupBtn) return;
