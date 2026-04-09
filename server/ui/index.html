@@ -310,7 +310,7 @@ setTimeout(function(){
 
 #ob-host   { left: 0;   top: 50%; transform: translateY(-50%); border-color: #2FB7FF55; animation-delay: 0.1s; }
 #ob-cloud  {
-  left: 50%; top: 50%; transform: translate(-50%, -50%);
+  left: 45%; top: 45%; transform: translate(-50%, -50%);
   width: 68px; height: 68px; border-radius: 50%;
   border: 1.5px solid #2FB7FF;
   background: #0a1e34;
@@ -323,7 +323,7 @@ setTimeout(function(){
   0%,100% { box-shadow: 0 0 18px #2FB7FF22; }
   50%      { box-shadow: 0 0 36px #2FB7FF55; }
 }
-#ob-rec1  { right: 0; top: 16px;   animation-delay: 0.4s; }
+#ob-rec1  { right: 0; top: 30px;   animation-delay: 0.4s; }
 #ob-rec2  { right: 0; bottom: 16px; animation-delay: 0.55s; }
 
 .ob-line {
@@ -334,8 +334,8 @@ setTimeout(function(){
 }
 @keyframes ob-linein { from { opacity: 0; transform: scaleX(0); } to { opacity: 1; transform: scaleX(1); } }
 #ob-line-l  { left: 108px;  width: 60px;  top: 50%; animation-delay: 0.6s; transform-origin: left; }
-#ob-line-rt { right: 108px; width: 52px;  top: 30%; transform: rotate(-16deg); transform-origin: right; animation-delay: 0.7s; }
-#ob-line-rb { right: 108px; width: 52px;  bottom: 26%; transform: rotate(16deg); transform-origin: right; animation-delay: 0.8s; }
+#ob-line-rt { right: 108px; width: 52px;  top: 40%; transform: rotate(-16deg); transform-origin: right; animation-delay: 0.7s; }
+#ob-line-rb { right: 60px; width: 52px;  bottom: 26%; transform: rotate(16deg); transform-origin: right; animation-delay: 0.8s; }
 
 /* data packets */
 .ob-pkt {
@@ -474,7 +474,7 @@ setTimeout(function(){
     <div class="ob-ring ob-ring-3"></div>
     <img class="ob-logo-img" src="/onboarding-logo.png" alt="JoinCloud" />
   </div>
-  <img class="ob-wordmark" src="/logo.png" alt="JOINCLOUD" />
+  <img class="ob-wordmark" src="/logo-wordmark.png" alt="JOINCLOUD" />
   <div class="ob-tagline">Your device. Your cloud. Share anything, anywhere.</div>
  
   <div class="ob-actions">
@@ -525,7 +525,7 @@ setTimeout(function(){
     </div>
     <div class="ob-line" id="ob-line-l"></div>
     <div class="ob-node" id="ob-cloud">
-      <img src="/favicon.png" style="width:30px;height:30px;filter:drop-shadow(0 0 8px #2FB7FF88)" />
+      <img src="/onboarding-logo.png" style="width:30px;height:30px;filter:drop-shadow(0 0 8px #2FB7FF88)" />
     </div>
     <div class="ob-line" id="ob-line-rt"></div>
     <div class="ob-line" id="ob-line-rb"></div>
