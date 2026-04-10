@@ -2187,7 +2187,12 @@ setTimeout(function(){
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#000405" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
               </div>
               <div style="flex:1;min-width:160px;">
-                <div id="settings-profile-email" style="font-size:14px;font-weight:600;color:var(--fg,#FFFFFF);word-break:break-all;">-</div>
+                <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+                  <div id="settings-profile-email" style="flex:1;min-width:0;font-size:14px;font-weight:600;color:var(--fg,#FFFFFF);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">-</div>
+                  <button class="button secondary button-icon-only" id="settings-profile-copy-email" title="Copy email" aria-label="Copy email" style="display:none;flex-shrink:0;padding:4px 6px;">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                  </button>
+                </div>
                 <div style="margin-top:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                   <span style="font-size:12px;color:var(--muted,#8B9CA3);">Plan:</span>
                   <span id="settings-profile-plan" style="font-size:12px;font-weight:600;color:var(--fg,#FFFFFF);">-</span>

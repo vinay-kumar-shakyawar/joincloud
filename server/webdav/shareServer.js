@@ -4,6 +4,20 @@ const fs = require("fs/promises");
 const mime = require("mime-types");
 const { resolveRights } = require("../sharing/permissionResolver");
 
+function getTelemetryTargetPath(share, resourcePath) {
+  if (!share || !share.targetPath) return null;
+
+  // File shares are mounted directly at the file path, so any requested child path
+  // should still attribute telemetry to the shared file itself.
+  if (share.targetType === "file") {
+    return share.targetPath;
+  }
+
+  const relativePath = String(resourcePath || "/").replace(/^\/+/, "");
+  if (!relativePath) return share.targetPath;
+  return path.join(share.targetPath, relativePath);
+}
+
 function createShareServer({ share, realm, telemetry, runtimeTelemetry, usageAggregation, logger }) {
   const userManager = new v2.SimpleUserManager();
   const privilegeManager = new v2.SimplePathPrivilegeManager();
@@ -46,12 +60,14 @@ function createShareServer({ share, realm, telemetry, runtimeTelemetry, usageAgg
       }
       if (telemetry) {
         let bytes = 0;
-        try {
-          const fullPath = path.join(share.targetPath, resourcePath);
-          const stats = await fs.stat(fullPath);
-          bytes = stats.size || 0;
-        } catch (error) {
-          bytes = 0;
+        if (method === "GET") {
+          try {
+            const fullPath = getTelemetryTargetPath(share, resourcePath);
+            const stats = fullPath ? await fs.stat(fullPath) : null;
+            bytes = stats && stats.isFile() ? (stats.size || 0) : 0;
+          } catch (_error) {
+            bytes = 0;
+          }
         }
         telemetry.trackEvent("file_downloaded", {
           share_id: share.shareId,

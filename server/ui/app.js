@@ -204,6 +204,7 @@ const els = {
   settingsProfileValue: document.getElementById("settings-profile-value"),
   settingsProfileCard: document.getElementById("settings-profile-card"),
   settingsProfileEmail: document.getElementById("settings-profile-email"),
+  settingsProfileCopyEmail: document.getElementById("settings-profile-copy-email"),
   settingsProfilePlan: document.getElementById("settings-profile-plan"),
   settingsProfileStatus: document.getElementById("settings-profile-status"),
   settingsServerStatus: document.getElementById("settings-server-status"),
@@ -2158,6 +2159,13 @@ async function copyToClipboard(text) {
   }
 }
 
+function truncateMiddle(value, left = 18, right = 14) {
+  const text = String(value || "");
+  if (!text) return "";
+  if (text.length <= left + right + 3) return text;
+  return `${text.slice(0, left)}...${text.slice(-right)}`;
+}
+
 function showCopyFallback(text, triggerEl) {
   const wrap = document.createElement("div");
   wrap.className = "copy-fallback";
@@ -2991,7 +2999,26 @@ function updateSubscriptionSection() {
     } else {
       emailDisplay = state.accountId ? "Account: " + state.accountId.slice(0, 16) + "…" : (hasLicense ? "Device account" : "Not signed in");
     }
-    if (els.settingsProfileEmail) els.settingsProfileEmail.textContent = emailDisplay;
+    if (els.settingsProfileEmail) {
+      els.settingsProfileEmail.textContent = truncateMiddle(emailDisplay, 18, 14);
+      els.settingsProfileEmail.title = emailDisplay;
+    }
+    if (els.settingsProfileCopyEmail) {
+      const canCopyEmail = !!emailDisplay && emailDisplay !== "-" && emailDisplay !== "Not signed in";
+      els.settingsProfileCopyEmail.style.display = canCopyEmail ? "inline-flex" : "none";
+      els.settingsProfileCopyEmail.onclick = canCopyEmail
+        ? () => {
+            copyToClipboard(emailDisplay, document.body).then((ok) => {
+              if (ok) {
+                els.settingsProfileCopyEmail.title = "Copied!";
+                setTimeout(() => {
+                  els.settingsProfileCopyEmail.title = "Copy email";
+                }, 1500);
+              }
+            });
+          }
+        : null;
+    }
 
     const planDisplay = (state.licenseTier || (state.licenseState === "UNREGISTERED" ? "free" : "trial")).replace(/^./, (c) => c.toUpperCase());
     if (els.settingsProfilePlan) els.settingsProfilePlan.textContent = planDisplay;
@@ -3437,9 +3464,9 @@ async function updateTelemetrySettings(enabled) {
 async function loadTechnicalConfig() {
   if (!els.technicalConfigContent || !isHostRole()) return;
   try {
-    const [cfgRes, debugRes] = await Promise.all([
+    const [cfgRes, usageRes] = await Promise.all([
       apiFetch("/api/v1/technical-config"),
-      apiFetch("/api/v1/license/local-usage-debug").catch(() => null),
+      fetch("/api/license/usage").catch(() => null),
     ]);
     if (!cfgRes.ok) {
       els.technicalConfigContent.textContent = "Available on host only.";
@@ -3467,19 +3494,17 @@ async function loadTechnicalConfig() {
       `App version: ${cfg.app_version || "-"}`,
       `License state: ${cfg.license_state || "-"}`,
     ];
-    if (debugRes && debugRes.ok) {
+    if (usageRes && usageRes.ok) {
       try {
-        const dbg = await debugRes.json();
+        const usage = await usageRes.json();
         lines.push(
           "",
-          "[Local usage diagnostics]",
-          `Shares used (local): ${dbg.local_shares_used}`,
-          `Shares limit (local): ${dbg.local_shares_limit ?? "-"}`,
-          `Shares remaining (local): ${dbg.local_shares_remaining ?? "-"}`,
-          `Usage signature valid: ${dbg.usage_signature_valid === null ? "unknown" : String(dbg.usage_signature_valid)}`,
-          `Entitlements present: ${dbg.entitlements_present ? "yes" : "no"}`,
-          `Admin capped shares this month: ${dbg.admin_capped_shares_this_month}`,
-          `Admin capped shares limit: ${dbg.admin_capped_shares_limit ?? "-"}`,
+          "[Plan usage this month]",
+          `Shares used: ${usage.shares_used ?? 0}`,
+          `Shares limit: ${usage.shares_limit ?? "-"}`,
+          `Shares remaining: ${usage.shares_remaining ?? "-"}`,
+          `Devices linked: ${usage.devices_used ?? 0}`,
+          `Devices limit: ${usage.devices_limit ?? "-"}`,
         );
       } catch (_) {}
     }
@@ -4554,17 +4579,21 @@ async function createShare() {
     }
     if (data.error === "share_limit_reached" || res.status === 403) {
       const limit = typeof data.limit === "number" ? data.limit : null;
-      const usedFromServer = typeof data.used === "number" ? data.used : null;
-      const inferredUsed = usedFromServer !== null && usedFromServer >= 0
-        ? usedFromServer
-        : (limit !== null && typeof data.remaining === "number"
-            ? Math.max(0, limit - data.remaining)
-            : (limit !== null ? limit : state.usageSharesThisMonth));
-      state.usageSharesThisMonth = inferredUsed;
+      let planUsed = state.usageSharesThisMonth;
+      try {
+        const usageRes = await fetch("/api/license/usage");
+        if (usageRes.ok) {
+          const usage = await usageRes.json();
+          if (typeof usage.shares_used === "number" && usage.shares_used >= 0) {
+            planUsed = usage.shares_used;
+          }
+        }
+      } catch (_) {}
+      state.usageSharesThisMonth = planUsed;
       try { renderUsageBars().catch(() => {}); } catch (_) {}
       let limitMsg = "Share limit is reached. Contact support to upgrade your share limit or device limit.";
-      if (limit !== null && inferredUsed >= 0) {
-        limitMsg = `Share limit reached. You used ${inferredUsed} of ${limit} allowed shares this month.`;
+      if (limit !== null && planUsed >= 0) {
+        limitMsg = `Share limit reached. You used ${planUsed} of ${limit} allowed shares this month.`;
       }
       els.shareResult.textContent = limitMsg;
       // Also show a persistent banner for visibility

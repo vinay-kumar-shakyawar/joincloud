@@ -1592,7 +1592,7 @@ async function bootstrap() {
         const cp = getControlPlaneConfig();
         const local = getCurrentShareUsageSummary();
         const cpShares = (cp && cp.usage && typeof cp.usage.sharesThisMonth === "number") ? cp.usage.sharesThisMonth : null;
-        const sharesUsed = cpShares != null ? cpShares : local.sharesUsed;
+        const rawSharesUsed = cpShares != null ? cpShares : local.sharesUsed;
         let sharesLimit = null;
         if (cp && cp.entitlements && (cp.entitlements.shareLimitMonthly === null || typeof cp.entitlements.shareLimitMonthly === "number")) {
           const n = cp.entitlements.shareLimitMonthly;
@@ -1600,6 +1600,7 @@ async function bootstrap() {
         }
         if (sharesLimit === null) sharesLimit = local.sharesLimit;
         const hasFiniteLimit = sharesLimit != null && Number.isFinite(sharesLimit) && sharesLimit > 0;
+        const sharesUsed = hasFiniteLimit ? Math.min(rawSharesUsed, sharesLimit) : rawSharesUsed;
         const sharesRemaining = hasFiniteLimit ? Math.max(0, sharesLimit - sharesUsed) : null;
         let devicesUsed = 0;
         let devicesLimit = null;
@@ -3441,8 +3442,10 @@ async function bootstrap() {
         if (Number.isFinite(localLimit) && localLimit > 0) limit = localLimit;
       }
       const localUsedCount = Number(readLocalUsage().monthly_shares?.[getYearMonthKey()] || 0);
-      // Use the higher of CP and local counts — CP can be stale if the sync hasn't completed yet.
-      const usedForEnforcement = cpUsed != null ? Math.max(cpUsed, localUsedCount) : localUsedCount;
+      // Prefer the plan usage from Control Plane when available so enforcement
+      // matches the usage shown in the UI. Fall back to local diagnostics only
+      // when Control Plane usage is unavailable.
+      const usedForEnforcement = cpUsed != null ? cpUsed : localUsedCount;
       if (limit != null && Number.isFinite(limit) && limit > 0 && usedForEnforcement >= limit) {
         res.status(403).json({
           error: "share_limit_reached",
