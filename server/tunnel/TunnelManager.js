@@ -274,8 +274,10 @@ class TunnelManager {
   }
 
   getStatus() {
+    const configured = !!(this.credentialsFile && this.tunnelName && fs.existsSync(this.credentialsFile));
     return {
       status: this.status,
+      configured,
       publicUrl: this.publicUrl,
       reason: this.lastReason,
       message:

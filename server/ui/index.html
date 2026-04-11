@@ -1103,6 +1103,31 @@ setTimeout(function(){
           box-shadow:0 0 0 6px rgba(47,183,255,.15), 0 0 32px rgba(47,183,255,.4);
           background:#020d1a; animation:none;
         }
+        .sc-power-big-setup {
+          color:#2FB7FF;
+          padding:0;
+          appearance:none;
+          -webkit-appearance:none;
+          background:#0a0a0a;
+        }
+        .sc-power-big-setup .setup-icon,
+        .sc-power-big-setup .setup-spinner {
+          display:block;
+          position:relative;
+          z-index:1;
+          pointer-events:none;
+        }
+        .sc-power-big-setup .setup-spinner {
+          width:28px;
+          height:28px;
+          border-radius:50%;
+          border:2px solid rgba(47,183,255,.22);
+          border-top-color:#2FB7FF;
+          animation:sc-spin .9s linear infinite;
+          display:none;
+        }
+        .sc-power-big-setup.is-loading .setup-icon { display:none; }
+        .sc-power-big-setup.is-loading .setup-spinner { display:block; }
         .sc-power-big::after {
           content:''; position:absolute; inset:0; border-radius:50%;
           background:rgba(47,183,255,.25); transform:scale(0); opacity:1;
@@ -1308,15 +1333,27 @@ setTimeout(function(){
 
               <!-- ── OFFLINE STATE: big centred power button only ── -->
               <div class="sc-power-big-wrap" id="sc-offline-state">
-               
-                <div class="sc-power-big" id="sc-power-big" onclick="scTogglePower()" title="Start Public Cloud Server">
-                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#2FB7FF" stroke-width="2" stroke-linecap="round">
-                    <path d="M18.36 6.64A9 9 0 1 1 5.64 6.64"/>
-                    <line x1="12" y1="2" x2="12" y2="12"/>
-                  </svg>
+                <div id="remote-cloud-setup-cta" style="display:none;flex-direction:column;align-items:center;gap:12px;text-align:center;">
+                  <button class="sc-power-big sc-power-big-setup" id="remote-cloud-setup-btn" type="button" title="Set Up Remote Access">
+                    <svg class="setup-icon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#2FB7FF" stroke-width="2" stroke-linecap="round">
+                      <path d="M18.36 6.64A9 9 0 1 1 5.64 6.64"/>
+                      <line x1="12" y1="2" x2="12" y2="12"/>
+                    </svg>
+                    <span class="setup-spinner" aria-hidden="true"></span>
+                  </button>
+                  <div class="sc-power-big-hint" style="display:block;">CLICK TO SET UP</div>
+                  <div style="font-size:10px;color:white;font-family:'Courier New',monospace;text-align:center;line-height:1.5;max-width:140px">Public cloud server<br>first-time setup</div>
                 </div>
-                <div class="sc-power-big-hint">CLICK TO START</div>
-                <div style="font-size:10px;color:white;font-family:'Courier New',monospace;text-align:center;line-height:1.5;max-width:140px">Public cloud server<br>for Remote sharing</div>
+                <!-- <div id="sc-power-offline-controls" style="display:none;">
+                  <div class="sc-power-big" id="sc-power-big" onclick="scTogglePower()" title="Start Public Cloud Server">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#2FB7FF" stroke-width="2" stroke-linecap="round">
+                      <path d="M18.36 6.64A9 9 0 1 1 5.64 6.64"/>
+                      <line x1="12" y1="2" x2="12" y2="12"/>
+                    </svg>
+                  </div>
+                  <div class="sc-power-big-hint" id="sc-power-big-hint">CLICK TO START</div>
+                  <div id="sc-offline-caption" style="font-size:10px;color:white;font-family:'Courier New',monospace;text-align:center;line-height:1.5;max-width:140px">Public cloud server<br>for Remote sharing</div>
+                </div> -->
               </div>
 
               <!-- ── ONLINE / STARTING STATE ── -->
@@ -1505,6 +1542,12 @@ setTimeout(function(){
           function showOffline() {
             if (offlineDiv) offlineDiv.style.display = 'flex';
             if (onlineDiv)  onlineDiv.style.display  = 'none';
+            var offlineControls = document.getElementById('sc-power-offline-controls');
+            if (setupCta && setupCta.style.display !== 'none') {
+              if (offlineControls) offlineControls.style.display = 'none';
+            } else {
+              if (offlineControls) offlineControls.style.display = '';
+            }
             if (urlText) urlText.textContent = '—';
             if (qrCanvas) { var ctx=qrCanvas.getContext('2d'); if(ctx){ ctx.clearRect(0,0,qrCanvas.width,qrCanvas.height); } }
           }
@@ -1561,6 +1604,10 @@ setTimeout(function(){
             /* ripple on whichever button is visible */
             if (powerBtn) { powerBtn.classList.add('sc-clicking'); setTimeout(function(){ powerBtn.classList.remove('sc-clicking'); }, 450); }
             if (bigBtn)   { bigBtn.classList.add('sc-clicking');   setTimeout(function(){ bigBtn.classList.remove('sc-clicking'); }, 450); }
+            if (window.scHandlePowerButton) {
+              window.scHandlePowerButton();
+              return;
+            }
             /* delegate to existing checkbox toggle */
             if (toggle) {
               toggle.checked = !toggle.checked;

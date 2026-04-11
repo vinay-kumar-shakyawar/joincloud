@@ -102,8 +102,95 @@ function createFileBackedVault(opts) {
   };
 }
 
+function createWindowsRegistryVault(opts = {}) {
+  const { registryPath = "HKCU\\Software\\JoinCloud", valueName = "InstallationSalt", encrypt, decrypt } = opts;
+  const { execSync } = require("child_process");
+
+  function encodeValue(salt) {
+    if (typeof salt !== "string" || !salt) return null;
+    if (typeof encrypt === "function" && typeof decrypt === "function") {
+      const encrypted = encrypt(salt);
+      return Buffer.isBuffer(encrypted)
+        ? encrypted.toString("base64")
+        : Buffer.from(String(encrypted), "utf8").toString("base64");
+    }
+    return salt;
+  }
+
+  function decodeValue(rawValue) {
+    if (typeof rawValue !== "string" || !rawValue.trim()) return null;
+    if (typeof encrypt === "function" && typeof decrypt === "function") {
+      try {
+        return decrypt(Buffer.from(rawValue.trim(), "base64"));
+      } catch (_) {
+        return null;
+      }
+    }
+    return rawValue.trim();
+  }
+
+  function setInstallationSalt(salt) {
+    const encoded = encodeValue(salt);
+    if (!encoded) return;
+    try {
+      execSync(`reg add "${registryPath}" /v "${valueName}" /t REG_SZ /d "${encoded}" /f`, {
+        stdio: ["ignore", "ignore", "ignore"],
+        windowsHide: true,
+      });
+    } catch (_) {}
+  }
+
+  function getInstallationSalt() {
+    try {
+      const out = execSync(`reg query "${registryPath}" /v "${valueName}"`, {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
+      });
+      const line = String(out || "").split(/\r?\n/).find((entry) => entry.includes(valueName) && entry.includes("REG_"));
+      if (!line) return null;
+      const match = line.match(new RegExp(`${valueName}\\s+REG_\\w+\\s+(.+)$`));
+      return match && match[1] ? decodeValue(match[1]) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  return {
+    setInstallationSalt,
+    getInstallationSalt,
+  };
+}
+
+function createCompositeVault(...vaults) {
+  const usableVaults = vaults.filter(Boolean);
+  return {
+    setInstallationSalt(salt) {
+      usableVaults.forEach((vault) => {
+        try { vault.setInstallationSalt(salt); } catch (_) {}
+      });
+    },
+    getInstallationSalt() {
+      for (let i = 0; i < usableVaults.length; i += 1) {
+        try {
+          const salt = usableVaults[i].getInstallationSalt();
+          if (salt) {
+            for (let j = 0; j < i; j += 1) {
+              try { usableVaults[j].setInstallationSalt(salt); } catch (_) {}
+            }
+            return salt;
+          }
+        } catch (_) {}
+      }
+      return null;
+    },
+  };
+}
+
 module.exports = {
   createIdentityVault,
   createFileBackedVault,
+  createWindowsRegistryVault,
+  createCompositeVault,
   KEY,
 };

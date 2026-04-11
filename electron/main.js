@@ -59,6 +59,82 @@ let registrationSchedulerRef = null;
 let tray = null;
 let suppressMinimizeToTrayUntil = 0;
 
+function initializeDeviceIdentity() {
+  if (deviceIdentity) return deviceIdentity;
+
+  const userDataPath = app.getPath("userData");
+  const systemDir = path.join(userDataPath, "JoinCloud", "system");
+  const identityPath = path.join(systemDir, "identity.json");
+  let appVersion = "0.0.0";
+  try {
+    const pkg = require(path.join(__dirname, "..", "package.json"));
+    if (pkg && pkg.version) appVersion = pkg.version;
+  } catch (_) {}
+
+  const deviceIdentityModule = require(path.join(__dirname, "..", "core", "device-identity"));
+  const registrationClient = require(path.join(__dirname, "..", "core", "registration-client"));
+  const identityVault = require(path.join(__dirname, "..", "core", "identity-vault"));
+  let vault = null;
+  if (typeof electron.safeStorage !== "undefined" && electron.safeStorage.isEncryptionAvailable()) {
+    const vaultPath = path.join(systemDir, "vault.dat");
+    const fileVault = identityVault.createFileBackedVault({
+      vaultPath,
+      encrypt: (str) => electron.safeStorage.encryptString(str),
+      decrypt: (buf) => electron.safeStorage.decryptString(Buffer.isBuffer(buf) ? buf : Buffer.from(buf)),
+    });
+    if (process.platform === "win32") {
+      const registryVault = identityVault.createWindowsRegistryVault({
+        registryPath: "HKCU\\Software\\JoinCloud",
+        valueName: "InstallationSalt",
+        encrypt: (str) => electron.safeStorage.encryptString(str),
+        decrypt: (buf) => electron.safeStorage.decryptString(Buffer.isBuffer(buf) ? buf : Buffer.from(buf)),
+      });
+      vault = identityVault.createCompositeVault(registryVault, fileVault);
+    } else {
+      vault = fileVault;
+    }
+  }
+
+  deviceIdentity = deviceIdentityModule.getOrCreateIdentity({ appVersion, identityPath, vault });
+  if (!fs.existsSync(systemDir)) fs.mkdirSync(systemDir, { recursive: true });
+  try {
+    fs.writeFileSync(path.join(systemDir, "host_uuid"), deviceIdentity.host_uuid, "utf8");
+  } catch (_) {}
+
+  let controlPlaneHost = process.env.JOINCLOUD_ADMIN_HOST;
+  if (!controlPlaneHost && process.env.JOINCLOUD_CONTROL_PLANE_URL) {
+    try {
+      const u = new URL(process.env.JOINCLOUD_CONTROL_PLANE_URL);
+      controlPlaneHost = u.port ? `${u.hostname}:${u.port}` : u.hostname;
+    } catch (_) {}
+  }
+  if (controlPlaneHost && !registrationSchedulerRef) {
+    const log = (msg, meta) => logLine(`[identity] ${msg} ${meta ? JSON.stringify(meta) : ""}`);
+    registrationSchedulerRef = registrationClient.createRegistrationScheduler({
+      identityPath,
+      getIdentity: () => deviceIdentity,
+      persistIdentity: deviceIdentityModule.persistIdentity,
+      controlPlaneHost,
+      log,
+    });
+    registrationSchedulerRef.start();
+    if (!heartbeatTimer) {
+      const heartbeatIntervalMs = 12 * 60 * 60 * 1000 * (0.9 + 0.2 * Math.random());
+      heartbeatTimer = setInterval(() => {
+        if (!deviceIdentity) return;
+        const uptimeSeconds = typeof process.uptime === "function" ? process.uptime() : 0;
+        registrationClient.sendHeartbeat(deviceIdentity, {
+          controlPlaneHost,
+          uptimeSeconds,
+          log: (msg, meta) => logLine(`[heartbeat] ${msg} ${meta ? JSON.stringify(meta) : ""}`),
+        }).catch(() => {});
+      }, heartbeatIntervalMs);
+    }
+  }
+
+  return deviceIdentity;
+}
+
 function reopenMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) return false;
   suppressMinimizeToTrayUntil = Date.now() + 700;
@@ -650,66 +726,11 @@ async function createWindow() {
       return;
     }
     startHealthMonitor();
-
-    setImmediate(() => {
-      try {
-        const userDataPath = app.getPath("userData");
-        const systemDir = path.join(userDataPath, "JoinCloud", "system");
-        const identityPath = path.join(systemDir, "identity.json");
-        let appVersion = "0.0.0";
-        try {
-          const pkg = require(path.join(__dirname, "..", "package.json"));
-          if (pkg && pkg.version) appVersion = pkg.version;
-        } catch (_) {}
-        const deviceIdentityModule = require(path.join(__dirname, "..", "core", "device-identity"));
-        const registrationClient = require(path.join(__dirname, "..", "core", "registration-client"));
-        const identityVault = require(path.join(__dirname, "..", "core", "identity-vault"));
-        let vault = null;
-        if (typeof electron.safeStorage !== "undefined" && electron.safeStorage.isEncryptionAvailable()) {
-          const vaultPath = path.join(systemDir, "vault.dat");
-          vault = identityVault.createFileBackedVault({
-            vaultPath,
-            encrypt: (str) => electron.safeStorage.encryptString(str),
-            decrypt: (buf) => electron.safeStorage.decryptString(Buffer.isBuffer(buf) ? buf : Buffer.from(buf)),
-          });
-        }
-        deviceIdentity = deviceIdentityModule.getOrCreateIdentity({ appVersion, identityPath, vault });
-        if (!fs.existsSync(systemDir)) fs.mkdirSync(systemDir, { recursive: true });
-        try {
-          fs.writeFileSync(path.join(systemDir, "host_uuid"), deviceIdentity.host_uuid, "utf8");
-        } catch (_) {}
-        let controlPlaneHost = process.env.JOINCLOUD_ADMIN_HOST;
-        if (!controlPlaneHost && process.env.JOINCLOUD_CONTROL_PLANE_URL) {
-          try {
-            const u = new URL(process.env.JOINCLOUD_CONTROL_PLANE_URL);
-            controlPlaneHost = u.port ? `${u.hostname}:${u.port}` : u.hostname;
-          } catch (_) {}
-        }
-        if (controlPlaneHost) {
-          const log = (msg, meta) => logLine(`[identity] ${msg} ${meta ? JSON.stringify(meta) : ""}`);
-          registrationSchedulerRef = registrationClient.createRegistrationScheduler({
-            identityPath,
-            getIdentity: () => deviceIdentity,
-            persistIdentity: deviceIdentityModule.persistIdentity,
-            controlPlaneHost,
-            log,
-          });
-          registrationSchedulerRef.start();
-          const heartbeatIntervalMs = 12 * 60 * 60 * 1000 * (0.9 + 0.2 * Math.random());
-          heartbeatTimer = setInterval(() => {
-            if (!deviceIdentity) return;
-            const uptimeSeconds = typeof process.uptime === "function" ? process.uptime() : 0;
-            registrationClient.sendHeartbeat(deviceIdentity, {
-              controlPlaneHost,
-              uptimeSeconds,
-              log: (msg, meta) => logLine(`[heartbeat] ${msg} ${meta ? JSON.stringify(meta) : ""}`),
-            }).catch(() => {});
-          }, heartbeatIntervalMs);
-        }
-      } catch (err) {
-        logLine(`Device identity init failed: ${formatError(err)}`);
-      }
-    });
+    try {
+      initializeDeviceIdentity();
+    } catch (err) {
+      logLine(`Device identity init failed: ${formatError(err)}`);
+    }
 
     Menu.setApplicationMenu(null);
     mainWindow = new BrowserWindow({

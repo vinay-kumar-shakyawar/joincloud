@@ -3519,20 +3519,39 @@ async function loadPublicAccessStatus() {
   try {
     const res = await apiFetch("/api/public-access/status");
     const data = await res.json();
-    const notConfigured = data.status === "failed" && data.reason === "not_configured";
+    const isConfigured = data && data.configured === true;
+    const notConfigured = !isConfigured;
+    const homeSetupCta = document.getElementById("remote-cloud-setup-cta");
+    const homePowerOfflineControls = document.getElementById("sc-power-offline-controls");
+    const homePowerHint = document.getElementById("sc-power-big-hint");
+    const homeOfflineCaption = document.getElementById("sc-offline-caption");
     if (notConfigured) {
       els.remoteAccessNotConfigured.style.display = "block";
       els.remoteAccessConfiguredWrap.style.display = "none";
       if (els.remoteAccessSetupWrap) els.remoteAccessSetupWrap.style.display = "block";
-      if (els.remoteAccessSetupSpinner) els.remoteAccessSetupSpinner.style.display = "none";
+      if (els.remoteAccessSetupSpinner) els.remoteAccessSetupSpinner.style.display = remoteAccessProvisioning ? "block" : "none";
       if (els.remoteAccessSetupError) els.remoteAccessSetupError.style.display = "none";
+      if (homeSetupCta) homeSetupCta.style.display = "flex";
+      if (homePowerOfflineControls) homePowerOfflineControls.style.display = "none";
+      if (homePowerHint) homePowerHint.textContent = "CLICK TO START";
+      if (homeOfflineCaption) homeOfflineCaption.innerHTML = "Public cloud server<br>for Remote sharing";
+      if (els.homeRemoteAccessToggle) {
+        els.homeRemoteAccessToggle.checked = false;
+        els.homeRemoteAccessToggle.disabled = true;
+      }
+      if (els.remoteCloudActiveWrap) els.remoteCloudActiveWrap.style.display = "none";
+      if (els.remoteCloudQrWrap) els.remoteCloudQrWrap.style.display = "none";
       return;
     }
+    if (homeSetupCta) homeSetupCta.style.display = remoteAccessProvisioning ? "flex" : "none";
+    if (homePowerOfflineControls) homePowerOfflineControls.style.display = remoteAccessProvisioning ? "none" : "";
+    if (homePowerHint) homePowerHint.textContent = "CLICK TO START";
+    if (homeOfflineCaption) homeOfflineCaption.innerHTML = "Public cloud server<br>for Remote sharing";
     els.remoteAccessNotConfigured.style.display = "none";
     els.remoteAccessConfiguredWrap.style.display = "block";
     if (els.remoteAccessToggle) {
       els.remoteAccessToggle.checked = data.status === "active" || data.status === "starting";
-      els.remoteAccessToggle.disabled = false;
+      els.remoteAccessToggle.disabled = remoteAccessProvisioning;
     }
     if (els.remoteAccessStarting) els.remoteAccessStarting.style.display = data.status === "starting" ? "flex" : "none";
     if (els.remoteAccessActive) {
@@ -3578,7 +3597,7 @@ async function loadPublicAccessStatus() {
     const isEnabled = data.status === "active" || data.status === "starting";
     if (els.homeRemoteAccessToggle) {
       els.homeRemoteAccessToggle.checked = isEnabled;
-      els.homeRemoteAccessToggle.disabled = false;
+      els.homeRemoteAccessToggle.disabled = remoteAccessProvisioning;
     }
     if (els.remoteCloudUrlInput) {
       els.remoteCloudUrlInput.value = isActive ? data.publicUrl : "";
@@ -3590,8 +3609,7 @@ async function loadPublicAccessStatus() {
       els.remoteCloudActiveWrap.style.display = isActive ? "block" : "none";
     }
     if (els.remoteCloudSetupCta) {
-      // only show setup CTA when not active AND not starting (never configured)
-      els.remoteCloudSetupCta.style.display = (!isActive && !isEnabled) ? "block" : "none";
+      els.remoteCloudSetupCta.style.display = remoteAccessProvisioning || (!isActive && !isEnabled) ? "flex" : "none";
     }
     if (els.remoteCloudUrlQr) {
       if (window.QRious && isActive) {
@@ -3631,6 +3649,9 @@ async function loadPublicAccessStatus() {
       }
     }
   } catch (_) {
+    const homePowerOfflineControls = document.getElementById("sc-power-offline-controls");
+    const homePowerHint = document.getElementById("sc-power-big-hint");
+    const homeOfflineCaption = document.getElementById("sc-offline-caption");
     els.remoteAccessNotConfigured.style.display = "block";
     els.remoteAccessConfiguredWrap.style.display = "none";
     if (els.homeRemoteAccessToggle) {
@@ -3638,7 +3659,10 @@ async function loadPublicAccessStatus() {
       els.homeRemoteAccessToggle.disabled = true;
     }
     if (els.remoteCloudCopy) els.remoteCloudCopy.disabled = true;
-    if (els.remoteCloudSetupCta) els.remoteCloudSetupCta.style.display = "block";
+    if (els.remoteCloudSetupCta) els.remoteCloudSetupCta.style.display = "flex";
+    if (homePowerOfflineControls) homePowerOfflineControls.style.display = "none";
+    if (homePowerHint) homePowerHint.textContent = "CLICK TO START";
+    if (homeOfflineCaption) homeOfflineCaption.innerHTML = "Public cloud server<br>for Remote sharing";
     if (els.remoteCloudActiveWrap) els.remoteCloudActiveWrap.style.display = "none";
     if (els.remoteCloudQrWrap) els.remoteCloudQrWrap.style.display = "none";
     if (els.publicStatus) {
@@ -3669,6 +3693,72 @@ async function pollUntilActive() {
   }
   await loadPublicAccessStatus();
   if (typeof showUploadBanner === "function") showUploadBanner("Tunnel failed to start", "error");
+}
+
+let remoteAccessProvisioning = false;
+
+function setRemoteAccessProvisionUi(isBusy) {
+  remoteAccessProvisioning = isBusy;
+  if (els.remoteAccessSetupBtn) els.remoteAccessSetupBtn.disabled = isBusy;
+  if (els.remoteAccessSetupRetry) els.remoteAccessSetupRetry.disabled = isBusy;
+  if (els.remoteCloudSetupBtn) els.remoteCloudSetupBtn.disabled = isBusy;
+  if (els.homeRemoteAccessToggle) els.homeRemoteAccessToggle.disabled = isBusy;
+  if (els.remoteAccessToggle) els.remoteAccessToggle.disabled = isBusy;
+  if (els.remoteAccessSetupSpinner) els.remoteAccessSetupSpinner.style.display = isBusy ? "block" : "none";
+  if (els.remoteAccessSetupError) els.remoteAccessSetupError.style.display = "none";
+  const homePowerOfflineControls = document.getElementById("sc-power-offline-controls");
+  if (els.remoteCloudSetupCta) els.remoteCloudSetupCta.style.display = isBusy ? "flex" : els.remoteCloudSetupCta.style.display;
+  if (homePowerOfflineControls) homePowerOfflineControls.style.display = isBusy ? "none" : homePowerOfflineControls.style.display;
+  if (els.remoteCloudSetupBtn) {
+    els.remoteCloudSetupBtn.classList.toggle("is-loading", isBusy);
+    els.remoteCloudSetupBtn.setAttribute("aria-busy", isBusy ? "true" : "false");
+  }
+  const homePowerHint = document.getElementById("sc-power-big-hint");
+  if (homePowerHint && !els.remoteAccessConfiguredWrap?.style.display) {
+    homePowerHint.textContent = isBusy ? "SETTING UP..." : homePowerHint.textContent;
+  }
+}
+
+async function provisionAndStartRemoteAccess() {
+  setRemoteAccessProvisionUi(true);
+  try {
+    const provisionRes = await apiFetch("/api/public-access/provision", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    const provisionData = await provisionRes.json().catch(() => ({}));
+    const provisioned =
+      provisionRes.ok &&
+      (provisionData.success === true ||
+        !!provisionData.publicUrl ||
+        provisionData.alreadyExisted === true ||
+        !!provisionData.tunnelId);
+
+    if (!provisioned) {
+      throw new Error(provisionData.error || provisionData.message || "Setup failed");
+    }
+
+    await loadPublicAccessStatus();
+
+    const startRes = await apiFetch("/api/public-access/start", { method: "POST" });
+    const startData = await startRes.json().catch(() => ({}));
+    if (!startRes.ok) {
+      throw new Error(startData.error || startData.message || "Failed to start remote access");
+    }
+
+    await loadPublicAccessStatus();
+    await pollUntilActive();
+    await loadPublicAccessStatus();
+  } catch (e) {
+    if (els.remoteAccessSetupErrorText) {
+      els.remoteAccessSetupErrorText.textContent = e && e.message ? e.message : "Network error";
+    }
+    if (els.remoteAccessSetupError) els.remoteAccessSetupError.style.display = "block";
+    await loadPublicAccessStatus();
+  } finally {
+    setRemoteAccessProvisionUi(false);
+  }
 }
 
 async function loadNetworkSettings() {
@@ -5864,16 +5954,9 @@ if (els.remoteCloudCopy) {
   });
 }
 if (els.remoteCloudSetupBtn) {
-  els.remoteCloudSetupBtn.addEventListener("click", () => {
+  els.remoteCloudSetupBtn.addEventListener("click", async () => {
     // Bring user to Settings → Remote Access and start setup.
-    setActiveSection("settings");
-    const section = document.getElementById("remote-access-section");
-    if (section && typeof section.scrollIntoView === "function") {
-      section.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-    if (els.remoteAccessNotConfigured) els.remoteAccessNotConfigured.style.display = "block";
-    if (els.remoteAccessConfiguredWrap) els.remoteAccessConfiguredWrap.style.display = "none";
-    if (els.remoteAccessSetupBtn) els.remoteAccessSetupBtn.click();
+    await provisionAndStartRemoteAccess();
   });
 }
 
@@ -5929,9 +6012,8 @@ async function setHomeRemoteAccessEnabled(enabled) {
     if (enabled) {
       const statusRes = await apiFetch("/api/public-access/status");
       const statusData = await statusRes.json();
-      if (statusData.status === "failed" && statusData.reason === "not_configured") {
-        els.homeRemoteAccessToggle.checked = false;
-        await loadPublicAccessStatus();
+      if (statusData && statusData.configured !== true) {
+        await provisionAndStartRemoteAccess();
         return;
       }
       await apiFetch("/api/public-access/start", { method: "POST" });
@@ -5952,6 +6034,21 @@ if (els.homeRemoteAccessToggle) {
     await setHomeRemoteAccessEnabled(!!els.homeRemoteAccessToggle.checked);
   });
 }
+
+window.scHandlePowerButton = async function scHandlePowerButton() {
+  try {
+    const statusRes = await apiFetch("/api/public-access/status");
+    const statusData = await statusRes.json();
+    if (!statusData || statusData.configured !== true) {
+      await provisionAndStartRemoteAccess();
+      return;
+    }
+    const shouldEnable = !(statusData.status === "active" || statusData.status === "starting");
+    await setHomeRemoteAccessEnabled(shouldEnable);
+  } catch (_) {
+    await loadPublicAccessStatus();
+  }
+};
 
 function navigateToSettings() {
   setActiveSection("settings");
@@ -6829,28 +6926,7 @@ if (els.remoteAccessPinSave) {
 
 async function doRemoteAccessProvision() {
   if (!els.remoteAccessSetupBtn) return;
-  els.remoteAccessSetupBtn.disabled = true;
-  if (els.remoteAccessSetupSpinner) els.remoteAccessSetupSpinner.style.display = "block";
-  if (els.remoteAccessSetupError) els.remoteAccessSetupError.style.display = "none";
-  try {
-    const res = await apiFetch("/api/public-access/provision", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && data.success) {
-      await loadPublicAccessStatus();
-    } else {
-      if (els.remoteAccessSetupErrorText) els.remoteAccessSetupErrorText.textContent = data.error || "Setup failed";
-      if (els.remoteAccessSetupError) els.remoteAccessSetupError.style.display = "block";
-    }
-  } catch (e) {
-    if (els.remoteAccessSetupErrorText) els.remoteAccessSetupErrorText.textContent = e && e.message ? e.message : "Network error";
-    if (els.remoteAccessSetupError) els.remoteAccessSetupError.style.display = "block";
-  }
-  if (els.remoteAccessSetupSpinner) els.remoteAccessSetupSpinner.style.display = "none";
-  els.remoteAccessSetupBtn.disabled = false;
+  await provisionAndStartRemoteAccess();
 }
 
 if (els.remoteAccessSetupBtn) {
