@@ -1317,7 +1317,7 @@
             type: item.type,
             previewUrl: "",
           })}</div>` +
-          `<div class="share-file-card-body"><div>Folder: <span class="mono">${escapeHtml(item.name)}</span></div>` +
+          `<div class="share-file-card-body"><div class="share-file-card-row">Folder: <span class="mono">${escapeHtml(item.name)}</span></div>` +
           `<div class="muted">—</div></div>`;
         row.appendChild(left);
         const openBtn = document.createElement("button");
@@ -1349,7 +1349,7 @@
               ? buildShareUrl(`/share/${encodeURIComponent(shareId)}/preview?path=${encodeURIComponent(item.relativePath)}`)
               : "",
           })}</div>` +
-          `<div class="share-file-card-body"><div>File: <span class="mono">${escapeHtml(item.name)}</span></div>` +
+          `<div class="share-file-card-body"><div class="share-file-card-row">File: <span class="mono">${escapeHtml(item.name)}</span></div>` +
           `<div class="muted">${formatBytes(item.size)}</div></div>`;
         row.appendChild(left);
 
