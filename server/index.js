@@ -2153,6 +2153,16 @@ async function bootstrap() {
     return state.count <= SHARE_RATE_LIMIT_MAX;
   }
 
+  // PDF.js static assets — served through the share path so the Cloudflare Worker
+  // can proxy them correctly for public shares (go.joincloud.cloud/s/SHORTID/pdf.min.js).
+  // Files live in server/ui/ and are also available directly at /pdf.min.js on LAN.
+  app.get("/share/:shareId/pdf.min.js", (_req, res) => {
+    res.sendFile(path.join(uiRoot, "pdf.min.js"));
+  });
+  app.get("/share/:shareId/pdf.worker.min.js", (_req, res) => {
+    res.sendFile(path.join(uiRoot, "pdf.worker.min.js"));
+  });
+
   app.get("/share/:shareId", (req, res) => {
     if (validateTunnelToken(req, res, req.params.shareId)) return;
     if (!sharingEnabled) {

@@ -340,7 +340,7 @@ function acquireWakeLock() {
   if (!powerSaveBlocker) return;
   if (_wakeLockId === null || !powerSaveBlocker.isStarted(_wakeLockId)) {
     _wakeLockId = powerSaveBlocker.start("prevent-app-suspension");
-    log.info("[wake-lock] acquired, id:", _wakeLockId);
+    logLine("[wake-lock] acquired, id: " + _wakeLockId);
   }
 }
 
@@ -348,7 +348,7 @@ function releaseWakeLock() {
   if (!powerSaveBlocker) return;
   if (_wakeLockId !== null && powerSaveBlocker.isStarted(_wakeLockId)) {
     powerSaveBlocker.stop(_wakeLockId);
-    log.info("[wake-lock] released");
+    logLine("[wake-lock] released");
     _wakeLockId = null;
   }
 }

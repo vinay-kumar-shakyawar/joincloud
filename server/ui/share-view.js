@@ -606,6 +606,21 @@
     }, 2500);
   }
 
+  // Files >= this threshold use direct browser download instead of JS blob assembly.
+  // JS blob approach loads the entire file into RAM — unsafe for large files.
+  const LARGE_FILE_THRESHOLD = 50 * 1024 * 1024; // 50 MB
+
+  function startDirectDownload(url, fileName) {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName || "download";
+    a.rel = "noopener noreferrer";
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => a.remove(), 500);
+  }
+
   function renderFileDownloadButton(pathValue, sizeHint, nameHint) {
     const btn = document.createElement("button");
     btn.className = "button";
@@ -614,12 +629,214 @@
       event.preventDefault();
       const url = buildShareUrl(`/share/${encodeURIComponent(shareId)}/download`, { path: pathValue, download: "true" });
       const fileName = nameHint || String(pathValue || "download").split("/").pop() || "download";
-      startResumableDownload(url, fileName, sizeHint);
+      if (sizeHint && sizeHint >= LARGE_FILE_THRESHOLD) {
+        startDirectDownload(url, fileName);
+      } else {
+        startResumableDownload(url, fileName, sizeHint);
+      }
     };
     return btn;
   }
 
-  function renderPreview(url, name) {
+
+  // PDF.js library files:
+  //   LAN   : served from local Express at /pdf.min.js (no internet needed)
+  //   Public : loaded directly from cdnjs — viewer already has internet to reach go.joincloud.cloud
+  var _PDFJS_CDN = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174";
+  function getPdfJsLibUrl()    { return SHARE_BASE ? _PDFJS_CDN + "/pdf.min.js"        : "/pdf.min.js"; }
+  function getPdfJsWorkerUrl() { return SHARE_BASE ? _PDFJS_CDN + "/pdf.worker.min.js" : "/pdf.worker.min.js"; }
+
+  function loadPdfJsLib(onReady, onError) {
+    if (window.pdfjsLib) { onReady(window.pdfjsLib); return; }
+    var s = document.createElement("script");
+    s.src = getPdfJsLibUrl();
+    s.onload = function () {
+      var lib = window.pdfjsLib || (typeof pdfjsLib !== "undefined" ? pdfjsLib : null);
+      if (!lib) { onError("pdfjsLib not exposed after load"); return; }
+      window.pdfjsLib = lib;
+      if (!lib.GlobalWorkerOptions.workerSrc) lib.GlobalWorkerOptions.workerSrc = getPdfJsWorkerUrl();
+      onReady(lib);
+    };
+    s.onerror = function () { onError("Failed to load PDF viewer (pdf.min.js not found)"); };
+    document.head.appendChild(s);
+  }
+
+  function renderPdfWithPdfJs(container, url) {
+    // ── Shell ────────────────────────────────────────────────────────────────
+    var S  = "style";
+    var wrap = document.createElement("div");
+    wrap.setAttribute(S, "width:100%;height:100%;min-height:480px;display:flex;flex-direction:column;background:#0a0f13;border-radius:10px;overflow:hidden;border:1px solid rgba(47,183,255,0.12);");
+
+    // Toolbar
+    var toolbar = document.createElement("div");
+    toolbar.setAttribute(S, "display:flex;align-items:center;gap:8px;padding:8px 14px;background:rgba(0,0,0,0.5);border-bottom:1px solid rgba(47,183,255,0.1);flex-shrink:0;font-size:13px;font-family:inherit;");
+
+    function mkBtn(label, title) {
+      var b = document.createElement("button");
+      b.textContent = label;
+      b.title = title || label;
+      b.setAttribute(S, "background:rgba(47,183,255,0.08);border:1px solid rgba(47,183,255,0.2);color:#e4f2fb;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;font-family:inherit;transition:background 0.15s;");
+      b.onmouseover = function () { b.style.background = "rgba(47,183,255,0.18)"; };
+      b.onmouseout  = function () { b.style.background = "rgba(47,183,255,0.08)"; };
+      return b;
+    }
+
+    var prevBtn  = mkBtn("← Prev", "Previous page");
+    var nextBtn  = mkBtn("Next →", "Next page");
+    var pageInfo = document.createElement("span");
+    pageInfo.setAttribute(S, "color:#93b8cc;min-width:90px;text-align:center;font-size:13px;");
+    pageInfo.textContent = "Loading…";
+    var zoomOut  = mkBtn("−", "Zoom out");
+    var zoomIn   = mkBtn("+", "Zoom in");
+    var zoomLbl  = document.createElement("span");
+    zoomLbl.setAttribute(S, "color:#93b8cc;font-size:12px;min-width:38px;text-align:center;");
+    var spacer = document.createElement("span");
+    spacer.setAttribute(S, "flex:1;");
+
+    toolbar.appendChild(prevBtn);
+    toolbar.appendChild(pageInfo);
+    toolbar.appendChild(nextBtn);
+    toolbar.appendChild(spacer);
+    toolbar.appendChild(zoomOut);
+    toolbar.appendChild(zoomLbl);
+    toolbar.appendChild(zoomIn);
+
+    // Stage (canvas area)
+    var stage = document.createElement("div");
+    stage.setAttribute(S, "flex:1;overflow:auto;display:flex;align-items:flex-start;justify-content:center;padding:20px;min-height:0;");
+
+    var canvas = document.createElement("canvas");
+    canvas.setAttribute(S, "max-width:100%;box-shadow:0 4px 24px rgba(0,0,0,0.6);border-radius:4px;display:block;");
+    stage.appendChild(canvas);
+
+    // Spinner overlay
+    var spinner = document.createElement("div");
+    spinner.setAttribute(S, "position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(10,15,19,0.7);border-radius:10px;z-index:10;");
+    spinner.innerHTML = '<div style="width:32px;height:32px;border:3px solid rgba(47,183,255,0.2);border-top-color:#2fb7ff;border-radius:50%;animation:hls-spin 0.75s linear infinite;"></div>';
+
+    // Error display
+    var errEl = document.createElement("div");
+    errEl.setAttribute(S, "display:none;padding:20px;color:#ef4444;font-size:13px;text-align:center;");
+
+    wrap.appendChild(toolbar);
+    wrap.appendChild(stage);
+    wrap.appendChild(errEl);
+
+    // Position relative for spinner
+    var outer = document.createElement("div");
+    outer.setAttribute(S, "position:relative;width:100%;height:100%;min-height:480px;");
+    outer.appendChild(wrap);
+    container.appendChild(outer);
+
+    // ── State ────────────────────────────────────────────────────────────────
+    var ctx          = canvas.getContext("2d");
+    var pdfDoc       = null;
+    var currentPage  = 1;
+    var totalPages   = 0;
+    var currentScale = 0;   // 0 = not yet set → auto fit-to-width on first render
+    var renderTask   = null;
+    var rendering    = false;
+
+    function showSpinner() { outer.appendChild(spinner); }
+    function hideSpinner() { if (spinner.parentNode) spinner.parentNode.removeChild(spinner); }
+    function showError(msg) {
+      hideSpinner();
+      errEl.style.display = "block";
+      errEl.textContent = "PDF error: " + String(msg || "unknown");
+    }
+
+    function updateToolbar() {
+      pageInfo.textContent = "Page " + currentPage + " of " + totalPages;
+      prevBtn.disabled = currentPage <= 1;
+      nextBtn.disabled = currentPage >= totalPages;
+      prevBtn.style.opacity = currentPage <= 1 ? "0.4" : "1";
+      nextBtn.style.opacity = currentPage >= totalPages ? "0.4" : "1";
+      zoomLbl.textContent = Math.round(currentScale * 100) + "%";
+    }
+
+    function goToPage(n) {
+      if (!pdfDoc || n < 1 || n > totalPages || rendering) return;
+      currentPage = n;
+      rendering = true;
+      showSpinner();
+
+      // Cancel any previous render
+      if (renderTask) {
+        try { renderTask.cancel(); } catch (_) {}
+        renderTask = null;
+      }
+
+      pdfDoc.getPage(n).then(function (page) {
+        // Auto fit-to-width on first render
+        if (currentScale === 0) {
+          var naturalW = page.getViewport({ scale: 1 }).width;
+          var stageW   = stage.clientWidth - 40; // subtract padding
+          currentScale = Math.min(Math.max(stageW / naturalW, 0.5), 3.0);
+        }
+        var viewport = page.getViewport({ scale: currentScale });
+        canvas.width  = viewport.width;
+        canvas.height = viewport.height;
+        renderTask = page.render({ canvasContext: ctx, viewport: viewport });
+        return renderTask.promise;
+      }).then(function () {
+        renderTask = null;
+        rendering  = false;
+        hideSpinner();
+        updateToolbar();
+        stage.scrollTop = 0; // scroll to top of page on navigation
+      }).catch(function (err) {
+        renderTask = null;
+        rendering  = false;
+        if (err && err.name === "RenderingCancelledException") return; // intentional cancel
+        hideSpinner();
+        showError(err && err.message ? err.message : err);
+      });
+    }
+
+    function changeZoom(delta) {
+      var next = Math.min(Math.max((currentScale || 1) + delta, 0.5), 3.0);
+      if (Math.abs(next - currentScale) < 0.01) return;
+      currentScale = next;
+      rendering = false; // allow re-render
+      goToPage(currentPage);
+    }
+
+    // ── Button handlers ──────────────────────────────────────────────────────
+    prevBtn.onclick  = function () { if (currentPage > 1) goToPage(currentPage - 1); };
+    nextBtn.onclick  = function () { if (currentPage < totalPages) goToPage(currentPage + 1); };
+    zoomOut.onclick  = function () { changeZoom(-0.25); };
+    zoomIn.onclick   = function () { changeZoom(+0.25); };
+
+    // Keyboard navigation (arrow keys) scoped to container
+    outer.setAttribute("tabindex", "0");
+    outer.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowRight" || e.key === "ArrowDown")  { e.preventDefault(); if (currentPage < totalPages) goToPage(currentPage + 1); }
+      if (e.key === "ArrowLeft"  || e.key === "ArrowUp")    { e.preventDefault(); if (currentPage > 1)          goToPage(currentPage - 1); }
+    });
+
+    // ── Load PDF.js and open document ────────────────────────────────────────
+    showSpinner();
+    pageInfo.textContent = "Loading viewer…";
+
+    loadPdfJsLib(function (pdfjs) {
+      pdfjs.getDocument({
+        url: url,
+        rangeChunkSize: 131072,  // 128 KB — halves round trips vs 64 KB
+        disableAutoFetch: true,  // never pre-download the whole file
+        disableStream: true,     // pure XHR range requests only; no streaming fallback
+      }).promise.then(function (pdf) {
+        pdfDoc      = pdf;
+        totalPages  = pdf.numPages;
+        goToPage(1); // renders page 1 and calls updateToolbar
+      }).catch(function (err) {
+        showError(err && err.message ? err.message : String(err));
+      });
+    }, function (err) {
+      showError("Could not load PDF viewer library: " + err);
+    });
+  }
+
+  function renderPreview(url, name, sizeBytes) {
     if (!url) {
       previewEl.innerHTML = "";
       return;
@@ -630,9 +847,8 @@
       return;
     }
     if (/\.pdf$/i.test(lower)) {
-      previewEl.innerHTML = `<object class="preview-frame" data="${url}" type="application/pdf">
-      <iframe class="preview-frame" src="${url}" title="${name}"></iframe>
-    </object>`;
+      previewEl.innerHTML = "";
+      renderPdfWithPdfJs(previewEl, url);
       return;
     }
     if (/\.(mp4|webm|mov|m4v)$/i.test(lower)) {
@@ -729,7 +945,11 @@
       }
 
       // Single-select download in selection mode (or normal mode): download current file.
-      startResumableDownload(current.downloadUrl, current.name, current.size);
+      if (current.size && current.size >= LARGE_FILE_THRESHOLD) {
+        startDirectDownload(current.downloadUrl, current.name);
+      } else {
+        startResumableDownload(current.downloadUrl, current.name, current.size);
+      }
     };
     document.getElementById("share-preview-toggle-selection").onclick = () => {
       previewDrawerState.selectionMode = !previewDrawerState.selectionMode;
@@ -826,7 +1046,8 @@
     if (kind === "image") {
       stage.innerHTML = `<img class="preview-image preview-fit-media" src="${current.previewUrl}" alt="${escapeHtml(current.name)}" />`;
     } else if (kind === "pdf") {
-      stage.innerHTML = `<object class="preview-frame preview-fullwidth-doc" data="${current.previewUrl}" type="application/pdf"><iframe class="preview-frame preview-fullwidth-doc" src="${current.previewUrl}" title="${escapeHtml(current.name)}"></iframe></object>`;
+      stage.innerHTML = "";
+      renderPdfWithPdfJs(stage, current.previewUrl);
     } else if (/\.csv$/i.test(String(current.name || ""))) {
       const safeTitle = escapeHtml(current.name || "CSV");
       stage.innerHTML = `<div class="preview-fullwidth-doc" style="width:100%;height:100%;overflow:auto;padding:12px;">
@@ -1452,11 +1673,13 @@
         direct.textContent = "Download File";
         direct.onclick = (event) => {
           event.preventDefault();
-          startResumableDownload(
-            buildShareUrl(`/share/${encodeURIComponent(shareId)}/download`, { download: "true" }),
-            meta.name || "download",
-            Number.isFinite(meta.size) ? meta.size : undefined
-          );
+          const dlUrl = buildShareUrl(`/share/${encodeURIComponent(shareId)}/download`, { download: "true" });
+          const dlSize = Number.isFinite(meta.size) ? meta.size : undefined;
+          if (dlSize && dlSize >= LARGE_FILE_THRESHOLD) {
+            startDirectDownload(dlUrl, meta.name || "download");
+          } else {
+            startResumableDownload(dlUrl, meta.name || "download", dlSize);
+          }
         };
         actionsEl.appendChild(direct);
         const copyWrap = document.createElement("div");
@@ -1469,22 +1692,29 @@
         copyWrap.appendChild(copyBtn);
         actionsEl.appendChild(copyWrap);
         if (meta.previewUrl) {
-          const previewBtn = document.createElement("button");
-          previewBtn.className = "button secondary";
-          previewBtn.textContent = "Preview";
-          previewBtn.onclick = () =>
-            openSharePreviewDrawer(
-              [
-                {
-                  name: meta.name || "File",
-                  size: meta.size,
-                  previewUrl: buildShareUrl(`/share/${encodeURIComponent(shareId)}/preview`),
-                  downloadUrl: buildShareUrl(`/share/${encodeURIComponent(shareId)}/download`, { download: "true" }),
-                },
-              ],
-              0
-            );
-          actionsEl.appendChild(previewBtn);
+          const previewUrl = buildShareUrl(`/share/${encodeURIComponent(shareId)}/preview`);
+          // Show inline preview for images; open drawer for everything else (PDF, video).
+          const lower = String(meta.name || "").toLowerCase();
+          if (/\.(png|jpe?g|gif|webp|svg)$/i.test(lower)) {
+            renderPreview(previewUrl, meta.name, meta.size);
+          } else {
+            const previewBtn = document.createElement("button");
+            previewBtn.className = "button secondary";
+            previewBtn.textContent = "Preview";
+            previewBtn.onclick = () =>
+              openSharePreviewDrawer(
+                [
+                  {
+                    name: meta.name || "File",
+                    size: meta.size,
+                    previewUrl,
+                    downloadUrl: buildShareUrl(`/share/${encodeURIComponent(shareId)}/download`, { download: "true" }),
+                  },
+                ],
+                0
+              );
+            actionsEl.appendChild(previewBtn);
+          }
         }
         listEl.innerHTML = '<div class="muted">Sharing is caring ❤️</div>';
         renderGrowthCta(meta.marketingUrl);
