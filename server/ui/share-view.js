@@ -692,10 +692,18 @@
     zoomLbl.setAttribute(S, "color:#93b8cc;font-size:12px;min-width:38px;text-align:center;");
     var spacer = document.createElement("span");
     spacer.setAttribute(S, "flex:1;");
+    var pageInput = document.createElement("input");
+    pageInput.type = "number";
+    pageInput.min = "1";
+    pageInput.title = "Go to page";
+    pageInput.setAttribute(S, "width:54px;background:rgba(47,183,255,0.06);border:1px solid rgba(47,183,255,0.2);color:#e4f2fb;border-radius:6px;padding:3px 6px;font-size:12px;font-family:inherit;text-align:center;-moz-appearance:textfield;");
+    var goBtn = mkBtn("Go", "Jump to page");
 
     toolbar.appendChild(prevBtn);
     toolbar.appendChild(pageInfo);
     toolbar.appendChild(nextBtn);
+    toolbar.appendChild(pageInput);
+    toolbar.appendChild(goBtn);
     toolbar.appendChild(spacer);
     toolbar.appendChild(zoomOut);
     toolbar.appendChild(zoomLbl);
@@ -747,6 +755,8 @@
 
     function updateToolbar() {
       pageInfo.textContent = "Page " + currentPage + " of " + totalPages;
+      pageInput.value = currentPage;
+      pageInput.max = String(totalPages);
       prevBtn.disabled = currentPage <= 1;
       nextBtn.disabled = currentPage >= totalPages;
       prevBtn.style.opacity = currentPage <= 1 ? "0.4" : "1";
@@ -773,9 +783,12 @@
           var stageW   = stage.clientWidth - 40; // subtract padding
           currentScale = Math.min(Math.max(stageW / naturalW, 0.5), 3.0);
         }
-        var viewport = page.getViewport({ scale: currentScale });
+        var dpr = window.devicePixelRatio || 1;
+        var viewport = page.getViewport({ scale: currentScale * dpr });
         canvas.width  = viewport.width;
         canvas.height = viewport.height;
+        canvas.style.width  = (viewport.width  / dpr) + "px";
+        canvas.style.height = (viewport.height / dpr) + "px";
         renderTask = page.render({ canvasContext: ctx, viewport: viewport });
         return renderTask.promise;
       }).then(function () {
@@ -813,6 +826,48 @@
       if (e.key === "ArrowRight" || e.key === "ArrowDown")  { e.preventDefault(); if (currentPage < totalPages) goToPage(currentPage + 1); }
       if (e.key === "ArrowLeft"  || e.key === "ArrowUp")    { e.preventDefault(); if (currentPage > 1)          goToPage(currentPage - 1); }
     });
+
+    // Jump to page input
+    function jumpToInputPage() {
+      var n = parseInt(pageInput.value, 10);
+      if (!isNaN(n) && n >= 1 && n <= totalPages) goToPage(n);
+      else pageInput.value = currentPage;
+    }
+    goBtn.addEventListener("click", jumpToInputPage);
+    pageInput.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); jumpToInputPage(); }
+    });
+
+    // Responsive toolbar: compact layout for narrow screens
+    var _compact = false;
+    function applyToolbarMode(compact) {
+      if (compact === _compact) return;
+      _compact = compact;
+      if (compact) {
+        prevBtn.textContent = "‹";
+        nextBtn.textContent = "›";
+        pageInfo.style.display = "none";
+        toolbar.style.gap = "4px";
+        toolbar.style.padding = "6px 8px";
+        pageInput.style.width = "40px";
+        pageInput.style.padding = "3px 4px";
+      } else {
+        prevBtn.textContent = "← Prev";
+        nextBtn.textContent = "Next →";
+        pageInfo.style.display = "";
+        toolbar.style.gap = "8px";
+        toolbar.style.padding = "8px 14px";
+        pageInput.style.width = "54px";
+        pageInput.style.padding = "3px 6px";
+      }
+    }
+    if (window.ResizeObserver) {
+      new ResizeObserver(function (entries) {
+        applyToolbarMode(entries[0].contentRect.width < 500);
+      }).observe(wrap);
+    } else {
+      applyToolbarMode(wrap.clientWidth < 500);
+    }
 
     // ── Load PDF.js and open document ────────────────────────────────────────
     showSpinner();
